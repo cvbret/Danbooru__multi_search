@@ -72,12 +72,14 @@
 - [x] 已创建并初始化 `intergrator`。
 - [x] `reviewer` 已完成检查并允许提交。
 - [x] `intergrator` 已创建本地 commit。
-- [ ] 主 Agent 已向用户报告初始化结果。
+- [x] 主 Agent 已完成初始化结果核对并准备报告。
 
 ### 2.6 提交信息
 
-- commit：`889d5d33f92ed8995f81e77d1ceb8d66097596eb`。
-- commit 标题：`chore(m0): initialize project documentation`。
+- 初始化 commit：`889d5d33f92ed8995f81e77d1ceb8d66097596eb`。
+- 初始化 commit 标题：`chore(m0): initialize project documentation`。
+- 进度 commit：`20e0783b873d5eab5e2c6a2cd75d3cbf005dd670`。
+- 进度 commit 标题：`docs: record setup completion`。
 - push：禁止执行。
 
 ## 3. 下一任务 M0-001
@@ -129,8 +131,8 @@
 - Python：3.11.9。
 - pytest：已安装。
 - PySide6：尚未安装，开始 `M0-001` 前需要建立项目依赖并安装。
-- Git 分支：`main`。
-- Git 远程：`origin` 指向项目 GitHub 仓库；当前本地尚无 commit，`origin/main` 显示为已不存在。
+- Git 分支：`main`，本地已有两个 commit，HEAD 为 `20e0783b873d5eab5e2c6a2cd75d3cbf005dd670`。
+- Git 远程：`origin` 指向项目 GitHub 仓库；`origin/main` 显示为已不存在。
 
 ## 7. 进度记录
 
@@ -142,4 +144,5 @@
 - 已复制需求文档，并创建 `developer`、`reviewer`、`intergrator` 三个子 Agent。
 - `reviewer` 已完成文档审查并允许提交。
 - `intergrator` 已创建首个本地 commit `889d5d33f92ed8995f81e77d1ceb8d66097596eb`，未执行 push。
+- `intergrator` 已创建进度 commit `20e0783b873d5eab5e2c6a2cd75d3cbf005dd670`，未执行 push。
 - 下一步：启动 `M0-001`，建立 PySide6 与 QML 应用空壳及跨平台目录结构。
