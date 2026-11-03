@@ -4,7 +4,7 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第 0 阶段 技术基线与平台结构
 - 当前里程碑：`M0 技术基线完成`
-- 当前主要任务：`M0-005 Eagle 单图导入技术验证`
+- 当前主要任务：`M0-006 Windows 与 Linux 构建检查`
 - 当前状态：待开始
 - 最后更新：2026-11-03
 
@@ -355,7 +355,7 @@ Windows 壁纸技术验证。
 - commit 标题：`feat(m0): add windows wallpaper service`。
 - push：禁止执行。
 
-## 7. 当前任务 M0-005
+## 7. 代码完成、实机待验证任务 M0-005
 
 ### 7.1 任务名称
 
@@ -363,24 +363,113 @@ Eagle 单图导入技术验证。
 
 ### 7.2 状态
 
+代码完成，实机待验证。
+
+### 7.3 负责人
+
+- 编码：`developer`。
+- 测试与审查：`reviewer`。
+- 暂存与本地提交：`intergrator`。
+
+### 7.4 任务范围
+
+- 按 Eagle Web API V2 实现 Windows 本机 `EagleBridge`，默认基址为 `http://localhost:41595/api/v2/`，拒绝非本机地址。
+- 通过 `GET /app/info` 检查 Eagle 运行状态、版本和构建号，最低支持 Eagle 4.0 Build 21。
+- 通过 `GET /library/info` 读取当前素材库名称和路径，并根据规范化路径生成稳定的本地素材库标识。
+- 通过 `GET /folder/get` 读取文件夹，并在指定文件夹时确认文件夹编号存在。
+- 通过 `POST /item/add` 的本地文件路径方式导入一张文件，支持名称、来源网址、标签、注释和目标文件夹。
+- 导入前检查普通文件、非空文件、Eagle 版本、当前素材库和目标文件夹；只有 Eagle 返回成功状态和素材编号时才返回成功。
+- 建立可注入的 HTTP 传输层、请求超时、响应大小限制、JSend 解析和稳定错误代码。
+- Windows 平台装配真实 Eagle 客户端；Linux 和其他平台继续返回明确的不支持状态。
+- 增加只读 `--eagle-probe` 和明确会写入素材库的 `--eagle-import-smoke` 入口；自动验证只运行只读探测，不调用真实导入。
+- 使用本机模拟 HTTP 服务验证完整请求与失败路径，不直接读取或修改 Eagle 素材库内部文件。
+- 当前任务不实现下载、自动采集、重复检查、导入记录持久化、批量导入、文件夹创建或 Eagle 界面。
+
+### 7.5 验收条件
+
+- 正常连接能够解析 Eagle 版本、构建号、平台和当前素材库信息。
+- Eagle 未运行、超时、版本不足、没有素材库、无效 JSON、JSend 错误和异常 HTTP 状态均返回明确错误。
+- 单图导入严格发送 `path` 及允许的元数据字段，文件夹编号无效时不得调用导入接口。
+- 文件不存在、目录或空文件不得建立导入请求。
+- 导入响应缺少素材编号时不得报告成功。
+- 自动测试只访问本机模拟服务，不写入真实 Eagle；真实检查只调用读取接口。
+- Linux 和其他平台不会尝试连接 Eagle 或导入文件。
+- 现有 108 项测试以及 M0-001 至 M0-004 功能继续通过。
+
+### 7.6 开发交接
+
+- `developer` 已完成 Eagle Web API V2 传输层、版本检查、素材库与文件夹读取、单文件导入和平台装配。
+- 已增加只读 `--eagle-probe` 和明确写入的 `--eagle-import-smoke`。
+- Eagle 专项 108 项测试、完整 207 项 pytest、`compileall`、`headless-check` 和 QML 离屏检查通过。
+- Windows 真实只读探测确认 Eagle 当前未运行，返回 `eagle_connection_error` 和退出码 2；没有执行真实导入，当前等待 `reviewer` 独立复测。
+
+### 7.7 首轮审查结果
+
+- `reviewer` 结论为不通过。
+- Eagle 基址没有固定在 `/api/v2/`，会接受其他前缀、点段和编码点段。
+- 深层文件夹使用递归遍历，异常深度会产生未捕获的 `RecursionError`。
+- 深层 JSON 的 `RecursionError` 没有转换为稳定响应错误。
+- HTTP 响应提前截断时可能泄漏 `IncompleteRead`，需要转换为稳定传输错误。
+- 常规 Eagle 专项 108 项、完整 207 项 pytest、`compileall`、`headless-check` 和 QML 离屏检查通过；没有访问真实 Eagle。
+
+### 7.8 修正交接
+
+- `developer` 已将 Eagle 基址限制为 `/api/v2` 和 `/api/v2/`，并统一保存为 `/api/v2/`。
+- 文件夹树改为显式栈遍历，深层 JSON 和截断 HTTP 响应均转换为稳定错误。
+- Eagle 专项 129 项、完整 228 项 pytest、`compileall`、`headless-check` 和 QML 离屏检查通过。
+- 修正验证没有访问真实 Eagle，当前等待 `reviewer` 第二轮复测。
+
+### 7.9 第二轮审查结果
+
+- `reviewer` 复测 API 基址、1200 层文件夹、2000 层 JSON 和截断 HTTP 响应，首轮问题已经修正。
+- 首轮问题专项 42 项、Eagle 专项 129 项、完整 228 项 pytest 通过。
+- `compileall`、全新目录 `headless-check` 和 QML 离屏检查通过，结论为允许提交。
+- Eagle 当前未运行，真实单图导入没有执行；M0-005 提交后仍需实机导入验证。
+
+### 7.10 验证结果
+
+- Eagle 专项 pytest：129 项通过。
+- 完整 pytest：228 项通过。
+- 首轮问题专项 pytest：42 项通过。
+- `compileall`：通过。
+- 全新数据目录 `headless-check`：通过。
+- QML 离屏检查：通过。
+- 唯一一次 Windows 真实只读 probe 因 Eagle 未运行而返回 `eagle_connection_error`、`WinError 10061` 和退出码 2。
+- 没有执行真实 import、文件夹创建或素材库目录读写。
+- `reviewer` 已完成第二轮复测并允许提交代码；真实单图导入仍待验证。
+
+### 7.11 提交信息
+
+- commit：`5c342445a1ee957a8951f8c744df717c08944dad`。
+- commit 标题：`feat(m0): add eagle single-file bridge`。
+- push：禁止执行。
+
+## 8. 当前任务 M0-006
+
+### 8.1 任务名称
+
+Windows 与 Linux 构建检查。
+
+### 8.2 状态
+
 待开始。
 
-## 8. 任务队列
+## 9. 任务队列
 
 - `SETUP-001`：项目协作与文档初始化，已完成。
 - `M0-001`：应用空壳与跨平台目录结构，已完成。
 - `M0-002`：Danbooru 最小请求与单图显示验证，已完成。
 - `M0-003`：任务队列、取消、限流和应用关闭清理，已完成。
 - `M0-004`：Windows 壁纸技术验证，已完成。
-- `M0-005`：Eagle 单图导入技术验证，待开始。
+- `M0-005`：Eagle 单图导入技术验证，代码完成，实机待验证。
 - `M0-006`：Windows 与 Linux 构建检查，待开始。
 - `M0-007`：M0 里程碑回归检查与提交，待开始。
 
-## 9. 当前阻碍
+## 10. 当前阻碍
 
-- 暂无。
+- Eagle 未运行，真实单图导入需要 Eagle 打开素材库并由用户选择测试文件/目标文件夹。
 
-## 10. 当前开发环境
+## 11. 当前开发环境
 
 - Python：3.11.9。
 - pytest：已安装。
@@ -388,7 +477,7 @@ Eagle 单图导入技术验证。
 - Git 分支：`main`；项目初始化已建立本地提交，当前提交以 `git log` 为准。
 - Git 远程：`origin` 指向项目 GitHub 仓库；`origin/main` 显示为已不存在。
 
-## 11. 进度记录
+## 12. 进度记录
 
 ### 2026-11-03
 
@@ -428,3 +517,12 @@ Eagle 单图导入技术验证。
 - M0-004 已完成：完整自检 108 项通过；`reviewer` 第二轮壁纸专项 51 项和回归测试 107 项通过，`compileall`、全新数据目录 `headless-check` 和 QML 离屏检查通过。
 - Windows 真实只读 probe 在首轮成功读取显示方式 `fit`；没有执行真实壁纸 SET 或真实注册表写入。
 - 当前主要任务已切换为 `M0-005 Eagle 单图导入技术验证`，状态为待开始。
+- 已明确 M0-005 的本机连接、版本检查、素材库与文件夹读取、单图导入和只读验证范围，状态改为进行中。
+- `developer` 已完成 M0-005 编码和自检，完整 207 项测试通过，当前等待 `reviewer` 独立复测。
+- `reviewer` 首轮审查发现 API 路径、深层结构和截断响应四个问题，M0-005 进入修正。
+- `developer` 已完成四个首轮问题修正，M0-005 等待第二轮独立复测。
+- `reviewer` 第二轮复测通过；M0-005 代码进入本地提交，真实 Eagle 导入仍待验证。
+- `intergrator` 已创建 M0-005 本地 commit `5c342445a1ee957a8951f8c744df717c08944dad`，未执行 push。
+- M0-005 代码完成：Eagle 专项 129 项、完整 228 项和首轮问题专项 42 项 pytest 通过，`compileall`、全新数据目录 `headless-check` 和 QML 离屏检查通过。
+- 唯一一次真实只读 probe 因 Eagle 未运行而返回 `eagle_connection_error`、`WinError 10061` 和退出码 2；没有执行真实 import、文件夹创建或素材库目录读写。
+- M0-005 保持实机待验证；当前主要任务已切换为 `M0-006 Windows 与 Linux 构建检查`，状态为待开始。
