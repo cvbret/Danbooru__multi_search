@@ -13,6 +13,7 @@ from PySide6.QtGui import QGuiApplication
 
 from danbooru_multi_search import __version__
 from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.danbooru import DEFAULT_TIMEOUT_MS, run_danbooru_smoke
 from danbooru_multi_search.ui.launcher import launch_gui
 
 
@@ -22,10 +23,27 @@ APPLICATION_NAME = "DanbooruMultiSearch"
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="danbooru-multi-search")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--headless-check",
         action="store_true",
         help="Initialize settings and database, print a JSON result, then exit.",
+    )
+    mode.add_argument(
+        "--danbooru-smoke",
+        action="store_true",
+        help="Request one Danbooru post through QtNetwork and print JSON.",
+    )
+    parser.add_argument(
+        "--danbooru-tags",
+        default="rating:g",
+        help="Tags used by --danbooru-smoke (default: rating:g).",
+    )
+    parser.add_argument(
+        "--danbooru-timeout-ms",
+        type=int,
+        default=DEFAULT_TIMEOUT_MS,
+        help=f"Network timeout for --danbooru-smoke (default: {DEFAULT_TIMEOUT_MS}).",
     )
     parser.add_argument(
         "--data-root",
@@ -48,7 +66,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     _configure_application_identity()
 
-    application_type = QCoreApplication if args.headless_check else QGuiApplication
+    headless_mode = args.headless_check or args.danbooru_smoke
+    application_type = QCoreApplication if headless_mode else QGuiApplication
     application = application_type([APPLICATION_NAME])
 
     try:
@@ -68,7 +87,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
 
-    return launch_gui(application)
+    if args.danbooru_smoke:
+        try:
+            result = run_danbooru_smoke(
+                runtime.settings.danbooru_api_url,
+                args.danbooru_tags,
+                timeout_ms=args.danbooru_timeout_ms,
+            )
+        except Exception as exc:
+            payload = {
+                "status": "error",
+                "error_kind": "internal",
+                "message": f"Danbooru smoke check failed: {exc}",
+                "tags": args.danbooru_tags.strip(),
+            }
+            print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+            return 1
+        print(json.dumps(result.payload, ensure_ascii=True, sort_keys=True))
+        return result.exit_code
+
+    return launch_gui(
+        application,
+        danbooru_base_url=runtime.settings.danbooru_api_url,
+    )
 
 
 if __name__ == "__main__":
