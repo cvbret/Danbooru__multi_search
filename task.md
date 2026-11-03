@@ -5,7 +5,7 @@
 - 当前阶段：第 0 阶段 技术基线与平台结构
 - 当前里程碑：`M0 技术基线完成`
 - 当前主要任务：`M0-006 Windows 与 Linux 构建检查`
-- 当前状态：待开始
+- 当前状态：代码完成，Linux 实机待验证
 - 最后更新：2026-11-03
 
 ## 1. 阶段进度
@@ -452,7 +452,34 @@ Windows 与 Linux 构建检查。
 
 ### 8.2 状态
 
-待开始。
+代码完成，Linux 实机待验证。
+
+### 8.3 负责人
+
+- 编码：`developer`。
+- 测试与审查：`reviewer`。
+- 暂存与本地提交：`intergrator`。
+
+### 8.4 任务范围
+
+- 建立 GitHub Actions 自动检查，使用 Windows 与 Ubuntu 托管环境和 Python 3.11。
+- 两个平台执行依赖安装、`compileall`、完整 pytest、全新数据目录 `headless-check` 和 QML 离屏检查。
+- 构建 Wheel 与源码包，检查 Wheel 包含 QML 文件，并在非源码导入路径下安装 Wheel 后再次执行无界面检查。
+- 上传构建产物，工作流只授予读取仓库内容所需权限。
+- 建立可以在开发电脑和 Linux 容器重复执行的构建验证脚本，避免 Windows 与 Linux 检查步骤分叉。
+- 在当前 Windows 环境执行一次完整构建检查。
+- 使用本机 Docker 的 Python 3.11 Linux 容器执行一次完整 Linux 构建检查，容器不得修改项目工作树。
+- 自动检查不得访问真实 Danbooru、执行真实壁纸设置或写入真实 Eagle 素材库。
+- 当前任务不生成 Windows 安装程序、AppImage、`.deb`、代码签名或正式发布包。
+
+### 8.5 验收条件
+
+- Windows 与 Linux 使用同一组核心检查，并分别产生可安装 Wheel。
+- 安装后的 Wheel 可以执行 `--headless-check`，且包含 `ui/qml/Main.qml`。
+- Linux 环境可以导入全部通用模块，QML 离屏检查通过，Windows 专用模块不会阻止启动。
+- 工作流在 push、pull request 和手动触发时运行，未配置仓库写权限。
+- 本地 Windows 检查与 Docker Linux 检查均通过；如果无法运行远程工作流，需要明确记录尚未推送的限制。
+- 现有 228 项测试以及 M0-001 至 M0-005 代码功能继续通过。
 
 ## 9. 任务队列
 
@@ -462,12 +489,13 @@ Windows 与 Linux 构建检查。
 - `M0-003`：任务队列、取消、限流和应用关闭清理，已完成。
 - `M0-004`：Windows 壁纸技术验证，已完成。
 - `M0-005`：Eagle 单图导入技术验证，代码完成，实机待验证。
-- `M0-006`：Windows 与 Linux 构建检查，待开始。
+- `M0-006`：Windows 与 Linux 构建检查，代码完成，Linux 实机待验证。
 - `M0-007`：M0 里程碑回归检查与提交，待开始。
 
 ## 10. 当前阻碍
 
 - Eagle 未运行，真实单图导入需要 Eagle 打开素材库并由用户选择测试文件/目标文件夹。
+- Docker Desktop 4.76.0 启动时无法移除旧的 `dockerInference` 运行时套接字，后端随即终止；Docker Linux 构建检查尚未执行。
 
 ## 11. 当前开发环境
 
@@ -526,3 +554,9 @@ Windows 与 Linux 构建检查。
 - M0-005 代码完成：Eagle 专项 129 项、完整 228 项和首轮问题专项 42 项 pytest 通过，`compileall`、全新数据目录 `headless-check` 和 QML 离屏检查通过。
 - 唯一一次真实只读 probe 因 Eagle 未运行而返回 `eagle_connection_error`、`WinError 10061` 和退出码 2；没有执行真实 import、文件夹创建或素材库目录读写。
 - M0-005 保持实机待验证；当前主要任务已切换为 `M0-006 Windows 与 Linux 构建检查`，状态为待开始。
+- 已明确 M0-006 的双平台自动检查、构建产物验证和本机 Docker Linux 实测范围，状态改为进行中。
+- `developer` 已完成 M0-006 构建脚本和 GitHub Actions 工作流；Windows 首轮完整验证为 228 项 pytest 通过，Wheel、源码包、隔离安装及 QML 检查通过。
+- `reviewer` 首轮审查发现隔离环境安装的 Wheel 与最终上传的 Wheel 不一致，`developer` 已改为安装最终上传的 Wheel，并保留从源码包重建 Wheel 的检查。
+- `reviewer` 复测 228 项 pytest、QML 离屏检查、无界面启动、发行包构建及隔离安装均通过，允许提交。
+- `intergrator` 已创建 M0-006 实现 commit `52d3afe0a3e9b327bc6a05b8a57edbd18dcb2789`，未执行 push。
+- Docker Desktop 因旧的 `dockerInference` 运行时套接字启动失败，没有创建 Linux 容器；M0-006 保持 Linux 实机待验证。
