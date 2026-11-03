@@ -131,7 +131,7 @@
 - Python：3.11.9。
 - pytest：已安装。
 - PySide6：尚未安装，开始 `M0-001` 前需要建立项目依赖并安装。
-- Git 分支：`main`，本地已有两个 commit，HEAD 为 `20e0783b873d5eab5e2c6a2cd75d3cbf005dd670`。
+- Git 分支：`main`；项目初始化已建立本地提交，当前提交以 `git log` 为准。
 - Git 远程：`origin` 指向项目 GitHub 仓库；`origin/main` 显示为已不存在。
 
 ## 7. 进度记录
