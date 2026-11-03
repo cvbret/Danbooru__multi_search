@@ -138,3 +138,28 @@ def test_gui_event_loop_starts_and_closes_cleanly():
     )
 
     assert exit_code == 0
+
+
+def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
+    application = QGuiApplication.instance() or QGuiApplication([])
+    engine, gallery_controller = create_qml_engine(
+        application,
+        danbooru_base_url="https://example.invalid",
+    )
+    tag_controller = engine.rootContext().contextProperty(
+        "tagSuggestionController"
+    )
+    shared_queue = gallery_controller._task_queue
+
+    assert tag_controller._task_queue is shared_queue
+    assert gallery_controller._owns_queue is False
+    assert tag_controller._owns_queue is False
+
+    tag_controller.shutdown()
+    assert shared_queue.is_shutdown is False
+
+    application.aboutToQuit.emit()
+    application.aboutToQuit.emit()
+
+    assert shared_queue.is_shutdown is True
+    assert shared_queue.has_work is False

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 ApplicationWindow {
@@ -11,6 +12,35 @@ ApplicationWindow {
     minimumHeight: 600
     title: qsTr("Danbooru Multi Search")
     color: "#15171c"
+    property bool autocompleteReady: false
+
+    function submitGallerySearch() {
+        tagSuggestionController.closeSuggestions()
+        searchController.search(
+            tagsInput.text,
+            ratingFilter.currentValue,
+            pageSizeInput.value
+        )
+        tagsInput.forceActiveFocus()
+    }
+
+    function applySuggestion(index, searchWhenValid) {
+        const replacement = tagSuggestionController.applySuggestion(
+            tagsInput.text,
+            tagsInput.cursorPosition,
+            index
+        )
+        if (!replacement.changed)
+            return false
+        tagsInput.suppressAutocomplete = true
+        tagsInput.text = replacement.text
+        tagsInput.cursorPosition = replacement.cursor
+        tagsInput.suppressAutocomplete = false
+        tagsInput.forceActiveFocus()
+        if (searchWhenValid && replacement.shouldSearch)
+            submitGallerySearch()
+        return true
+    }
 
     function ratingColor(code) {
         if (code === "g") return "#3f8f5a"
@@ -18,6 +48,133 @@ ApplicationWindow {
         if (code === "q") return "#bb7628"
         if (code === "e") return "#b64056"
         return "#626872"
+    }
+
+    FileDialog {
+        id: tagCsvDialog
+        objectName: "tagCsvDialog"
+        title: qsTr("选择本地标签 CSV")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("CSV 文件 (*.csv)"), qsTr("所有文件 (*)")]
+        onAccepted: tagSuggestionController.importCsv(selectedFile)
+    }
+
+    Popup {
+        id: suggestionPopup
+        objectName: "suggestionPopup"
+        parent: Overlay.overlay
+        focus: false
+        modal: false
+        padding: 1
+        closePolicy: Popup.CloseOnPressOutside
+        height: Math.min(286, suggestionList.contentHeight + 2)
+
+        function updatePosition() {
+            const point = tagsInput.mapToItem(Overlay.overlay, 0, tagsInput.height + 2)
+            x = point.x
+            y = point.y
+            width = tagsInput.width
+        }
+
+        onAboutToShow: {
+            updatePosition()
+            suggestionList.currentIndex = suggestionList.count > 0 ? 0 : -1
+        }
+        onClosed: {
+            if (tagSuggestionController.isOpen)
+                tagSuggestionController.closeSuggestions()
+        }
+
+        background: Rectangle {
+            color: "#20242c"
+            border.color: "#4b5362"
+            radius: 6
+        }
+
+        contentItem: ListView {
+            id: suggestionList
+            objectName: "suggestionList"
+            clip: true
+            model: tagSuggestionController.suggestionsModel
+            currentIndex: count > 0 ? 0 : -1
+            implicitHeight: contentHeight
+
+            onCountChanged: currentIndex = count > 0 ? 0 : -1
+
+            highlight: Rectangle {
+                color: "#344866"
+                radius: 4
+            }
+
+            delegate: ItemDelegate {
+                id: suggestionRow
+                objectName: "suggestionRow_" + index
+                required property int index
+                required property string tagName
+                required property string chineseNameText
+                required property string categoryText
+                required property string postCountText
+                width: suggestionList.width
+                height: 54
+                highlighted: ListView.isCurrentItem
+                hoverEnabled: true
+
+                onHoveredChanged: {
+                    if (hovered)
+                        suggestionList.currentIndex = index
+                }
+                onClicked: root.applySuggestion(index, false)
+
+                contentItem: RowLayout {
+                    spacing: 10
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 1
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: suggestionRow.tagName
+                            color: "#f4f4f5"
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: suggestionRow.chineseNameText
+                            color: "#a1a1aa"
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    Label {
+                        text: suggestionRow.categoryText
+                        color: "#93c5fd"
+                    }
+
+                    Label {
+                        text: suggestionRow.postCountText
+                        color: "#d4d4d8"
+                    }
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: tagSuggestionController
+
+        function onOpenChanged() {
+            if (tagSuggestionController.isOpen
+                    && tagSuggestionController.suggestionsModel.count > 0) {
+                suggestionPopup.updatePosition()
+                suggestionPopup.open()
+                tagsInput.forceActiveFocus()
+            } else {
+                suggestionPopup.close()
+            }
+        }
     }
 
     ColumnLayout {
@@ -66,11 +223,58 @@ ApplicationWindow {
                 placeholderText: qsTr("输入一个或两个英文标签，例如 landscape 1girl")
                 text: "landscape"
                 selectByMouse: true
-                onAccepted: searchController.search(
-                    text,
-                    ratingFilter.currentValue,
-                    pageSizeInput.value
-                )
+                property bool suppressAutocomplete: false
+
+                function updateSuggestions() {
+                    if (root.autocompleteReady && !suppressAutocomplete) {
+                        tagSuggestionController.updateInput(text, cursorPosition)
+                    }
+                }
+
+                onTextChanged: updateSuggestions()
+                onCursorPositionChanged: updateSuggestions()
+                Component.onCompleted: root.autocompleteReady = true
+
+                Keys.onPressed: function(event) {
+                    if (inputMethodComposing)
+                        return
+                    const popupHasItems = suggestionPopup.opened
+                                          && suggestionList.count > 0
+                    if (event.key === Qt.Key_Escape
+                            && (suggestionPopup.opened
+                                || tagSuggestionController.debouncePending
+                                || tagSuggestionController.remoteBusy)) {
+                        tagSuggestionController.closeSuggestions()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Down && popupHasItems) {
+                        suggestionList.currentIndex =
+                            (suggestionList.currentIndex + 1) % suggestionList.count
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Up && popupHasItems) {
+                        suggestionList.currentIndex =
+                            (suggestionList.currentIndex - 1 + suggestionList.count)
+                            % suggestionList.count
+                        event.accepted = true
+                    } else if ((event.key === Qt.Key_Return
+                                || event.key === Qt.Key_Enter)) {
+                        if (popupHasItems) {
+                            root.applySuggestion(suggestionList.currentIndex, true)
+                        } else {
+                            root.submitGallerySearch()
+                        }
+                        event.accepted = true
+                    }
+                }
+            }
+
+            Button {
+                id: importTagsButton
+                objectName: "importTagsButton"
+                text: tagSuggestionController.importBusy
+                      ? qsTr("正在导入……")
+                      : qsTr("导入标签库")
+                enabled: !tagSuggestionController.importBusy
+                onClicked: tagCsvDialog.open()
             }
 
             ComboBox {
@@ -106,11 +310,7 @@ ApplicationWindow {
             Button {
                 objectName: "searchButton"
                 text: searchController.busy ? qsTr("重新搜索") : qsTr("搜索")
-                onClicked: searchController.search(
-                    tagsInput.text,
-                    ratingFilter.currentValue,
-                    pageSizeInput.value
-                )
+                onClicked: root.submitGallerySearch()
             }
 
             Button {
@@ -118,6 +318,27 @@ ApplicationWindow {
                 text: qsTr("取消")
                 visible: searchController.busy
                 onClicked: searchController.cancelCurrentRequest()
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            Label {
+                objectName: "tagImportStatus"
+                Layout.fillWidth: true
+                text: tagSuggestionController.importStatusText
+                color: tagSuggestionController.importBusy ? "#93c5fd" : "#a1a1aa"
+                elide: Text.ElideRight
+            }
+
+            Label {
+                objectName: "tagSuggestionNotice"
+                visible: text.length > 0
+                text: tagSuggestionController.noticeText
+                color: "#fbbf24"
+                elide: Text.ElideRight
             }
         }
 
