@@ -2,15 +2,15 @@
 
 - 项目：Danbooru 桌面浏览器
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
-- 当前阶段：第 0 阶段 技术基线与平台结构
-- 当前里程碑：`M0 技术基线完成`
-- 当前主要任务：`M0-006 Windows 与 Linux 构建检查`
-- 当前状态：代码完成，Linux 实机待验证
+- 当前阶段：第 0 阶段 技术基线与平台结构（已完成）
+- 当前里程碑：`M0 技术基线完成`（已完成）
+- 当前主要任务：`M0-007 M0 里程碑回归检查与提交`（已完成）
+- 当前状态：已完成
 - 最后更新：2026-11-03
 
 ## 1. 阶段进度
 
-- 第 0 阶段 技术基线与平台结构：进行中。
+- 第 0 阶段 技术基线与平台结构：已完成。
 - 第 1 阶段 Windows 基础浏览器：待开始。
 - 第 2 阶段 复杂查询与人气排序：待开始。
 - 第 3 阶段 本地收藏与下载管理：待开始。
@@ -355,7 +355,7 @@ Windows 壁纸技术验证。
 - commit 标题：`feat(m0): add windows wallpaper service`。
 - push：禁止执行。
 
-## 7. 代码完成、实机待验证任务 M0-005
+## 7. 已完成任务 M0-005
 
 ### 7.1 任务名称
 
@@ -363,7 +363,7 @@ Eagle 单图导入技术验证。
 
 ### 7.2 状态
 
-代码完成，实机待验证。
+已完成。
 
 ### 7.3 负责人
 
@@ -444,7 +444,16 @@ Eagle 单图导入技术验证。
 - commit 标题：`feat(m0): add eagle single-file bridge`。
 - push：禁止执行。
 
-## 8. 当前任务 M0-006
+### 7.12 实机验证补充
+
+- Eagle 4.0.0 的真实响应使用纯数字 `buildVersion=20260401`；客户端已兼容该格式，并继续拒绝空值、负数、小数、十六进制和非构建号文本。
+- Eagle 构建号兼容修正 commit：`7f32c7b2288e942ea00285ebc7e09470ebfefb90`，标题为 `fix(m0): accept current eagle build versions`。
+- 只读探测成功读取 Eagle 4.0.0、当前素材库和 Windows 平台信息。
+- 已将 Danbooru 作品 `12507729` 的测试图片导入当前 Eagle 素材库，返回素材编号 `MW0QZ8PBE6PXI`。
+- 已通过 Eagle 读取接口确认素材未删除，文件格式为 JPEG，大小为 241,452 字节，尺寸为 900 × 2498；名称、作品网址、注释和 `danbooru`、`m0-test`、`rating:g` 三个标签均正确。
+- 本次验证没有创建 Eagle 文件夹；素材保存在当前素材库根层级。
+
+## 8. 已完成任务 M0-006
 
 ### 8.1 任务名称
 
@@ -452,7 +461,7 @@ Windows 与 Linux 构建检查。
 
 ### 8.2 状态
 
-代码完成，Linux 实机待验证。
+已完成。
 
 ### 8.3 负责人
 
@@ -488,14 +497,14 @@ Windows 与 Linux 构建检查。
 - `M0-002`：Danbooru 最小请求与单图显示验证，已完成。
 - `M0-003`：任务队列、取消、限流和应用关闭清理，已完成。
 - `M0-004`：Windows 壁纸技术验证，已完成。
-- `M0-005`：Eagle 单图导入技术验证，代码完成，实机待验证。
-- `M0-006`：Windows 与 Linux 构建检查，代码完成，Linux 实机待验证。
-- `M0-007`：M0 里程碑回归检查与提交，待开始。
+- `M0-005`：Eagle 单图导入技术验证，已完成。
+- `M0-006`：Windows 与 Linux 构建检查，已完成。
+- `M0-007`：M0 里程碑回归检查与提交，已完成。
 
 ## 10. 当前阻碍
 
-- Eagle 未运行，真实单图导入需要 Eagle 打开素材库并由用户选择测试文件/目标文件夹。
-- Docker Desktop 4.76.0 启动时无法移除旧的 `dockerInference` 运行时套接字，后端随即终止；Docker Linux 构建检查尚未执行。
+- M0 范围内没有当前阻碍。
+- GitHub 托管工作流需要 push 后运行；根据项目约定，本阶段没有执行 push。Windows 与 Linux 本地完整检查均已通过。
 
 ## 11. 当前开发环境
 
@@ -560,3 +569,87 @@ Windows 与 Linux 构建检查。
 - `reviewer` 复测 228 项 pytest、QML 离屏检查、无界面启动、发行包构建及隔离安装均通过，允许提交。
 - `intergrator` 已创建 M0-006 实现 commit `52d3afe0a3e9b327bc6a05b8a57edbd18dcb2789`，未执行 push。
 - Docker Desktop 因旧的 `dockerInference` 运行时套接字启动失败，没有创建 Linux 容器；M0-006 保持 Linux 实机待验证。
+- 已将 Docker 的三个旧运行目录保留为带时间标记的备份，Docker Linux 引擎恢复启动；项目持久数据未删除。
+- Linux 首轮检查发现虚拟环境 Python 符号链接被解析到系统解释器，第二轮检查发现缺少 GLib，第三轮检查发现缺少 GSSAPI；`developer` 已分别修正并加入回归测试。
+- `reviewer` 最终复核 Windows 与 Linux 各 230 项 pytest、QML 离屏检查、无界面启动、Wheel 与源码包、源码包重建及最终 Wheel 隔离安装，全部通过。
+- `intergrator` 已创建 Linux 实机修正 commit `4b6ecc09483f5c7805a5a7e276be0f430fb7c859`，未执行 push。
+- M0-006 已完成；GitHub 托管工作流尚未 push，远程运行结果待后续取得。当前主要任务切换为 `M0-007 M0 里程碑回归检查与提交`，状态为进行中。
+- `reviewer` 核对 M0 条件时发现应用只能读取图片网址，缺少真实媒体下载；M0-007 因此增加原图下载和关闭清理验证。
+- `developer` 已实现使用现有媒体任务队列的原图下载、100 MiB 上限、同目录临时文件、`fsync` 和原子替换，并补齐取消、超时、错误和关闭清理测试。
+- 缺少原图网址时的回退下载可能造成扩展名与内容不一致；修正后该情况返回 `invalid_request`，且不会发送媒体请求或创建文件。
+- `intergrator` 已创建下载实现 commit `2a05759655f6e9efa825362e6cbda3c405f7d329`，标题为 `feat(m0): add atomic danbooru media download`，未执行 push。
+- Windows 真实下载成功取得 Danbooru 作品 `12507729` 的原图：JPEG、241,452 字节、900 × 2498，命令行退出码为 0。
+- Eagle 真实探测发现 4.0.0 使用纯数字构建号；兼容修正经完整 259 项测试通过后，由 `intergrator` 创建 commit `7f32c7b2288e942ea00285ebc7e09470ebfefb90`，未执行 push。
+- 已将作品 `12507729` 导入当前 Eagle 素材库，并通过读取接口核对素材编号 `MW0QZ8PBE6PXI`、文件信息和全部元数据。
+- 当前 HEAD 的 Windows 最终构建验证通过：Python 3.11.9 下 259 项 pytest、`compileall`、源码无界面启动、QML 2 项、Wheel 与源码包、源码包重建和最终 Wheel 隔离安装全部通过。
+- Docker Desktop 关机后残留的 AF_UNIX 套接字和一次构建后台内存分配失败曾阻止 Linux 检查；旧运行目录均保留为时间标记备份，崩溃的 Docker 进程清理后完成干净启动。
+- 当前 HEAD 的 Linux 最终构建验证通过：Python 3.11.16 下 259 项 pytest、`compileall`、源码无界面启动、QML 2 项、Wheel 与源码包、源码包重建和最终 Wheel 隔离安装全部通过。
+- Linux 容器使用只读项目挂载，退出码为 0，结束后已经自动删除；Docker Desktop 和 WSL `docker-desktop` 已恢复停止状态。
+- `reviewer` 核对 M0 七项里程碑条件并全部判定通过，允许提交 `task.md`。
+- M0-007 和第 0 阶段已经完成；GitHub 托管工作流仍需 push 后运行，本阶段按照约定没有执行 push。
+
+## 13. 已完成任务 M0-007
+
+### 13.1 任务名称
+
+M0 里程碑回归检查与提交。
+
+### 13.2 状态
+
+已完成。
+
+### 13.3 任务范围
+
+- 按 M0 里程碑条件核对 Windows 启动、关闭、设置保存和数据库迁移。
+- 核对业务代码中是否存在硬编码操作系统路径，以及平台功能是否通过平台接口调用。
+- 核对应用关闭后网络请求、下载任务和任务队列是否完成清理。
+- 复用 M0-006 的 Windows 与 Linux 完整构建结果，检查当前提交状态和构建产物。
+- 明确记录 Eagle 真实单图导入结果，以及 GitHub 托管工作流仍需 push 的限制。
+
+### 13.4 里程碑核对结果
+
+- Windows 应用启动、事件循环退出和设置保存均有自动测试覆盖。
+- SQLite 首次建立和数据库版本迁移均有自动测试覆盖，当前数据库版本为 1。
+- 平台路径和平台服务边界已经增加静态检查；业务模块没有直接使用硬编码 Windows 或 Linux 路径。
+- Danbooru 元数据请求和原图下载均使用可取消任务；应用关闭会取消等待任务、中止活动请求、停止重试计时器并清理未完成的下载临时文件。
+- Windows 真实下载和 Eagle 真实导入已经完成，M0 的外部联调条件已经满足。
+
+### 13.5 媒体下载补充
+
+- 新增 `src/danbooru_multi_search/danbooru/download.py`，只下载作品模型中的原图地址，并写入平台运行目录提供的下载目录。
+- 下载过程限制最大响应为 100 MiB，先写入同目录 `.part` 临时文件，刷新到磁盘后使用原子替换生成最终文件。
+- HTTP 错误、网络错误、超时、空响应、超过大小限制、文件错误、取消和应用关闭均返回稳定结果并清理临时文件。
+- 新增 `--danbooru-download-smoke` 真实检查入口；默认 `--headless-check` 继续保持离线。
+- 实现 commit：`2a05759655f6e9efa825362e6cbda3c405f7d329`。
+
+### 13.6 Windows 最终验证
+
+- Python：3.11.9。
+- 完整 pytest：259 项通过。
+- `compileall`、源码 `headless-check` 和 QML 离屏启动退出：通过。
+- Wheel、源码包、从源码包重新构建 Wheel：通过。
+- 最终 Wheel 在隔离虚拟环境中的控制台入口、模块入口、QML 文件和源码隔离检查：通过。
+- 产物：`danbooru_multi_search-0.1.0-py3-none-any.whl`，50,328 字节；`danbooru_multi_search-0.1.0.tar.gz`，62,279 字节。
+
+### 13.7 Linux 最终验证
+
+- Docker Engine：29.5.2，Linux/amd64。
+- Python：3.11.16。
+- 完整 pytest：259 项通过。
+- `compileall`、源码 `headless-check` 和 QML 离屏启动退出：通过。
+- Wheel、源码包、从源码包重新构建 Wheel：通过。
+- 最终 Wheel 在隔离虚拟环境中的控制台入口、模块入口、QML 文件和源码隔离检查：通过。
+- 容器使用只读项目挂载，退出码为 0，结束后已经自动删除。
+- Docker Desktop 已停止，WSL `docker-desktop` 状态为 `Stopped`。
+
+### 13.8 验收结论
+
+- Windows 启动、关闭和设置保存：通过。
+- Linux 编译和空壳启动：通过。
+- SQLite 数据库迁移：通过。
+- 业务模块无硬编码操作系统路径：通过。
+- 平台功能通过平台接口调用：通过。
+- 应用关闭后网络请求、下载任务和计时器完成清理：通过。
+- Windows 真实 Danbooru 下载和 Eagle 测试导入：通过。
+- `reviewer` 已完成独立复核并允许提交。
+- GitHub 托管工作流没有运行，因为本阶段没有执行 push；该项不影响本地 M0 验收。
