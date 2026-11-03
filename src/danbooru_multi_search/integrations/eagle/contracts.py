@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Mapping, Protocol, runtime_checkable
 
-from danbooru_multi_search.platform.contracts import (
-    ServiceAvailability,
-    ValueResult,
-)
+if TYPE_CHECKING:
+    from danbooru_multi_search.platform.contracts import (
+        ServiceAvailability,
+        ValueResult,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,17 @@ class EagleLibraryInfo:
 @dataclass(frozen=True, slots=True)
 class EagleConnectionInfo:
     version: str
+    prerelease_version: str | None = None
+    build_version: str | None = None
+    platform: str | None = None
+    build_number: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EagleFolderInfo:
+    identifier: str
+    name: str
+    parent_identifier: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +73,11 @@ class EagleBridge(Protocol):
 
         ...
 
+    def list_folders(self) -> ValueResult[tuple[EagleFolderInfo, ...]]:
+        """Return all current-library folders, including nested children."""
+
+        ...
+
     def import_file(
         self,
         file_path: Path,
@@ -68,7 +85,7 @@ class EagleBridge(Protocol):
         folder_identifier: str | None = None,
         metadata: Mapping[str, object] | None = None,
     ) -> ValueResult[EagleImportResult]:
-        """Import one checked local file through the future Eagle Web API."""
+        """Import one checked local file through the Eagle Web API."""
 
         ...
 

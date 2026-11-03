@@ -1,4 +1,4 @@
-"""Side-effect-free Eagle bridge used until the Web API task begins."""
+"""Side-effect-free Eagle bridge for unsupported platforms."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Mapping, TypeVar
 
 from danbooru_multi_search.integrations.eagle.contracts import (
     EagleConnectionInfo,
+    EagleFolderInfo,
     EagleImportResult,
     EagleLibraryInfo,
 )
@@ -35,6 +36,9 @@ class UnavailableEagleBridge:
         return self._unavailable_result()
 
     def get_current_library(self) -> ValueResult[EagleLibraryInfo]:
+        return self._unavailable_result()
+
+    def list_folders(self) -> ValueResult[tuple[EagleFolderInfo, ...]]:
         return self._unavailable_result()
 
     def import_file(

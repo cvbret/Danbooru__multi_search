@@ -14,6 +14,7 @@ from PySide6.QtGui import QGuiApplication
 from danbooru_multi_search import __version__
 from danbooru_multi_search.core.bootstrap import initialize_runtime
 from danbooru_multi_search.danbooru import DEFAULT_TIMEOUT_MS, run_danbooru_smoke
+from danbooru_multi_search.integrations.eagle import EagleImportResult
 from danbooru_multi_search.platform import PlatformAdapter
 from danbooru_multi_search.ui.launcher import launch_gui
 
@@ -40,6 +41,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Read the current desktop wallpaper and print JSON without changing it.",
     )
+    mode.add_argument(
+        "--eagle-probe",
+        action="store_true",
+        help="Read Eagle application and current-library information without writing.",
+    )
+    mode.add_argument(
+        "--eagle-import-smoke",
+        type=Path,
+        metavar="FILE",
+        help="Explicitly import one local file into the current Eagle library.",
+    )
     parser.add_argument(
         "--danbooru-tags",
         default="rating:g",
@@ -55,6 +67,27 @@ def _build_parser() -> argparse.ArgumentParser:
         "--data-root",
         type=Path,
         help="Override application directories for development and automated checks.",
+    )
+    parser.add_argument(
+        "--eagle-folder",
+        help="Target folder identifier used by --eagle-import-smoke.",
+    )
+    parser.add_argument(
+        "--eagle-name",
+        help="Optional item name used by --eagle-import-smoke.",
+    )
+    parser.add_argument(
+        "--eagle-website",
+        help="Optional source website used by --eagle-import-smoke.",
+    )
+    parser.add_argument(
+        "--eagle-tag",
+        action="append",
+        help="Optional item tag; repeat this option for multiple tags.",
+    )
+    parser.add_argument(
+        "--eagle-annotation",
+        help="Optional annotation used by --eagle-import-smoke.",
     )
     parser.add_argument("--version", action="version", version=__version__)
     return parser
@@ -97,6 +130,102 @@ def wallpaper_probe_result(platform: PlatformAdapter) -> tuple[dict[str, object]
     )
 
 
+def _eagle_error_payload(
+    platform: PlatformAdapter,
+    *,
+    operation: str,
+    code: str | None,
+    message: str | None,
+) -> tuple[dict[str, object], int]:
+    return (
+        {
+            "status": "error",
+            "platform": platform.capabilities.os_name,
+            "operation": operation,
+            "code": code or "eagle_error",
+            "message": message or "Eagle operation failed.",
+        },
+        2,
+    )
+
+
+def eagle_probe_result(platform: PlatformAdapter) -> tuple[dict[str, object], int]:
+    """Read only Eagle application and current-library information."""
+
+    connection = platform.services.eagle.test_connection()
+    if not connection.succeeded or connection.value is None:
+        return _eagle_error_payload(
+            platform,
+            operation="connection",
+            code=connection.code,
+            message=connection.message,
+        )
+
+    library = platform.services.eagle.get_current_library()
+    if not library.succeeded or library.value is None:
+        return _eagle_error_payload(
+            platform,
+            operation="library",
+            code=library.code,
+            message=library.message,
+        )
+
+    connection_value = connection.value
+    library_value = library.value
+    return (
+        {
+            "status": "ok",
+            "platform": platform.capabilities.os_name,
+            "eagle": {
+                "version": connection_value.version,
+                "prerelease_version": connection_value.prerelease_version,
+                "build_version": connection_value.build_version,
+                "build_number": connection_value.build_number,
+                "platform": connection_value.platform,
+            },
+            "library": {
+                "identifier": library_value.identifier,
+                "name": library_value.name,
+                "path": str(library_value.path),
+            },
+        },
+        0,
+    )
+
+
+def eagle_import_smoke_result(
+    platform: PlatformAdapter,
+    file_path: Path,
+    *,
+    folder_identifier: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> tuple[dict[str, object], int]:
+    """Perform the explicit, write-capable Eagle import smoke operation."""
+
+    result = platform.services.eagle.import_file(
+        file_path,
+        folder_identifier=folder_identifier,
+        metadata=metadata,
+    )
+    if not result.succeeded or result.value is None:
+        return _eagle_error_payload(
+            platform,
+            operation="import",
+            code=result.code,
+            message=result.message,
+        )
+    import_result: EagleImportResult = result.value
+    return (
+        {
+            "status": "ok",
+            "platform": platform.capabilities.os_name,
+            "file": str(file_path.resolve()),
+            "item_identifier": import_result.item_identifier,
+        },
+        0,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the desktop application or its headless initialization check."""
 
@@ -104,7 +233,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     _configure_application_identity()
 
     headless_mode = (
-        args.headless_check or args.danbooru_smoke or args.wallpaper_probe
+        args.headless_check
+        or args.danbooru_smoke
+        or args.wallpaper_probe
+        or args.eagle_probe
+        or args.eagle_import_smoke is not None
     )
     application_type = QCoreApplication if headless_mode else QGuiApplication
     application = application_type([APPLICATION_NAME])
@@ -147,6 +280,31 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.wallpaper_probe:
         payload, exit_code = wallpaper_probe_result(runtime.platform)
+        print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+        return exit_code
+
+    if args.eagle_probe:
+        payload, exit_code = eagle_probe_result(runtime.platform)
+        print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+        return exit_code
+
+    if args.eagle_import_smoke is not None:
+        metadata: dict[str, object] = {}
+        for field, value in (
+            ("name", args.eagle_name),
+            ("website", args.eagle_website),
+            ("annotation", args.eagle_annotation),
+        ):
+            if value is not None:
+                metadata[field] = value
+        if args.eagle_tag is not None:
+            metadata["tags"] = args.eagle_tag
+        payload, exit_code = eagle_import_smoke_result(
+            runtime.platform,
+            args.eagle_import_smoke,
+            folder_identifier=args.eagle_folder,
+            metadata=metadata,
+        )
         print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
         return exit_code
 

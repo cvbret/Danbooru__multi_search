@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from danbooru_multi_search.integrations.eagle import EagleBridge
+from danbooru_multi_search.integrations.eagle import (
+    EagleBridge,
+    EagleWebApiBridge,
+    UnavailableEagleBridge,
+)
 from danbooru_multi_search.platform import (
     NOT_IMPLEMENTED,
     UNSUPPORTED_PLATFORM,
@@ -13,6 +17,7 @@ from danbooru_multi_search.platform import (
     MediaCapabilityService,
     PlatformPaths,
     QtPlatformPaths,
+    ServiceAvailability,
     SystemInfoService,
     WallpaperService,
     create_platform_adapter,
@@ -72,6 +77,18 @@ def test_linux_eagle_bridge_has_an_explicit_unsupported_state(tmp_path):
     assert "official Linux desktop client" in eagle.unavailable_reason
     assert eagle.test_connection().code == UNSUPPORTED_PLATFORM
     assert eagle.get_current_library().code == UNSUPPORTED_PLATFORM
+    assert eagle.list_folders().code == UNSUPPORTED_PLATFORM
+
+
+def test_windows_adapter_uses_the_real_eagle_bridge_without_connecting(tmp_path):
+    isolated_root = tmp_path / "not-created"
+    adapter = create_platform_adapter("win32", override_root=isolated_root)
+
+    assert isinstance(adapter.services.eagle, EagleWebApiBridge)
+    assert adapter.services.eagle.is_supported is True
+    assert adapter.services.eagle.availability.available is True
+    assert adapter.capabilities.local_eagle is True
+    assert not isolated_root.exists()
 
 
 @pytest.mark.parametrize("platform_name", ["win32", "linux"])
@@ -80,7 +97,20 @@ def test_unavailable_services_return_results_without_system_side_effects(
     platform_name,
 ):
     isolated_root = tmp_path / platform_name
-    adapter = create_platform_adapter(platform_name, override_root=isolated_root)
+    eagle_bridge = None
+    if platform_name == "win32":
+        eagle_bridge = UnavailableEagleBridge(
+            availability=ServiceAvailability.unavailable(
+                NOT_IMPLEMENTED,
+                "Eagle test bridge is intentionally unavailable.",
+            ),
+            is_supported=True,
+        )
+    adapter = create_platform_adapter(
+        platform_name,
+        override_root=isolated_root,
+        eagle_bridge=eagle_bridge,
+    )
     services = adapter.services
     absent_file = isolated_root / "input.png"
     absent_directory = isolated_root / "folder"
@@ -158,6 +188,33 @@ def test_non_windows_wallpaper_service_is_side_effect_free(
         wallpaper.get_current(),
         wallpaper.set_wallpaper(isolated_root / "image.png"),
         wallpaper.restore_previous(),
+    ]
+
+    assert all(result.succeeded is False for result in results)
+    assert all(result.code == expected_code for result in results)
+    assert not isolated_root.exists()
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "expected_code"),
+    [("linux", UNSUPPORTED_PLATFORM), ("darwin", UNSUPPORTED_PLATFORM)],
+)
+def test_non_windows_eagle_bridge_never_connects_or_reads_files(
+    tmp_path,
+    platform_name,
+    expected_code,
+):
+    isolated_root = tmp_path / f"eagle-{platform_name}"
+    eagle = create_platform_adapter(
+        platform_name,
+        override_root=isolated_root,
+    ).services.eagle
+
+    results = [
+        eagle.test_connection(),
+        eagle.get_current_library(),
+        eagle.list_folders(),
+        eagle.import_file(isolated_root / "missing.png"),
     ]
 
     assert all(result.succeeded is False for result in results)
