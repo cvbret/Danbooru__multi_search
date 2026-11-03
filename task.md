@@ -4,7 +4,7 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第 0 阶段 技术基线与平台结构
 - 当前里程碑：`M0 技术基线完成`
-- 当前主要任务：`M0-001 应用空壳与跨平台目录结构`
+- 当前主要任务：`M0-002 Danbooru 最小请求与单图显示验证`
 - 当前状态：待开始
 - 最后更新：2026-11-03
 
@@ -82,7 +82,7 @@
 - 进度 commit 标题：`docs: record setup completion`。
 - push：禁止执行。
 
-## 3. 下一任务 M0-001
+## 3. 已完成任务 M0-001
 
 ### 3.1 任务名称
 
@@ -90,7 +90,13 @@
 
 ### 3.2 状态
 
-待开始。
+已完成。
+
+### 3.2.1 负责人
+
+- 编码：`developer`。
+- 测试与审查：`reviewer`。
+- 暂存与本地提交：`intergrator`。
 
 ### 3.3 计划范围
 
@@ -102,7 +108,7 @@
 - 建立 SQLite 数据库连接及第一版迁移。
 - 建立 Windows、Linux 基础检查命令。
 
-### 3.4 计划验收条件
+### 3.4 验收条件
 
 - Windows 可以启动和关闭应用空壳。
 - 设置能够保存并在重新启动后读取。
@@ -111,10 +117,34 @@
 - 通用模块不包含硬编码操作系统路径。
 - 应用关闭后没有残留后台任务。
 
-## 4. 任务队列
+### 3.5 验证结果
+
+- pytest：14 项通过。
+- `compileall`：通过。
+- `headless-check`：通过。
+- `reviewer` 已完成复测并允许提交。
+- Linux 尚未进行实机验证；当前完成了 Linux 平台接口、空实现和 Windows 环境中的针对性测试。
+
+### 3.6 提交信息
+
+- commit：`bbd37159bc83355dcf9fdf56ebc7ff0f26edf82a`。
+- commit 标题：`feat(m0): add cross-platform application shell`。
+- push：禁止执行。
+
+## 4. 当前任务 M0-002
+
+### 4.1 任务名称
+
+Danbooru 最小请求与单图显示验证。
+
+### 4.2 状态
+
+待开始。
+
+## 5. 任务队列
 
 - `SETUP-001`：项目协作与文档初始化，已完成。
-- `M0-001`：应用空壳与跨平台目录结构，待开始。
+- `M0-001`：应用空壳与跨平台目录结构，已完成。
 - `M0-002`：Danbooru 最小请求与单图显示验证，待开始。
 - `M0-003`：任务队列、取消、限流和应用关闭清理，待开始。
 - `M0-004`：Windows 壁纸技术验证，待开始。
@@ -122,19 +152,19 @@
 - `M0-006`：Windows 与 Linux 构建检查，待开始。
 - `M0-007`：M0 里程碑回归检查与提交，待开始。
 
-## 5. 当前阻碍
+## 6. 当前阻碍
 
 - 暂无。
 
-## 6. 当前开发环境
+## 7. 当前开发环境
 
 - Python：3.11.9。
 - pytest：已安装。
-- PySide6：尚未安装，开始 `M0-001` 前需要建立项目依赖并安装。
+- PySide6：6.12.0，已经安装在项目 `.venv` 中。
 - Git 分支：`main`；项目初始化已建立本地提交，当前提交以 `git log` 为准。
 - Git 远程：`origin` 指向项目 GitHub 仓库；`origin/main` 显示为已不存在。
 
-## 7. 进度记录
+## 8. 进度记录
 
 ### 2026-11-03
 
@@ -145,4 +175,12 @@
 - `reviewer` 已完成文档审查并允许提交。
 - `intergrator` 已创建首个本地 commit `889d5d33f92ed8995f81e77d1ceb8d66097596eb`，未执行 push。
 - `intergrator` 已创建进度 commit `20e0783b873d5eab5e2c6a2cd75d3cbf005dd670`，未执行 push。
-- 下一步：启动 `M0-001`，建立 PySide6 与 QML 应用空壳及跨平台目录结构。
+- 已启动 `M0-001`，由 `developer` 建立 PySide6 与 QML 应用空壳及跨平台目录结构。
+- `developer` 已完成 M0-001 编码和自检：`compileall` 通过，9 项 pytest 通过，无界面入口及 Wheel 构建通过。
+- `reviewer` 独立验证现有测试、设置、数据库、Wheel 和 QML 均通过，但发现平台服务接口及 Windows/Linux 空实现不完整，结论为不通过。
+- 当前由 `developer` 补齐 `PlatformPaths`、`WallpaperService`、`MediaCapabilityService`、`EagleBridge`、`ExternalOpenService`、`CredentialStore`、`SystemInfoService` 接口及平台空实现。
+- `developer` 已完成平台接口修正，自检为 14 项 pytest 通过、`compileall` 和无界面检查通过，当前等待 `reviewer` 复测。
+- `reviewer` 复测 14 项 pytest、`compileall`、重复无界面初始化、平台服务完整性和空实现副作用，结论为允许提交。
+- `intergrator` 已创建 M0-001 本地 commit `bbd37159bc83355dcf9fdf56ebc7ff0f26edf82a`，未执行 push。
+- M0-001 已完成：14 项 pytest、`compileall` 和 `headless-check` 通过；Linux 尚未进行实机验证。
+- 当前主要任务已切换为 `M0-002 Danbooru 最小请求与单图显示验证`，状态为待开始。
