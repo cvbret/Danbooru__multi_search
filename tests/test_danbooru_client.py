@@ -8,8 +8,9 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtNetwork import QNetworkReply
 
 from danbooru_multi_search.danbooru import (
     USER_AGENT,
@@ -18,9 +19,55 @@ from danbooru_multi_search.danbooru import (
     RequestErrorKind,
     RequestState,
 )
+from danbooru_multi_search.tasks import TaskQueueConfig
 
 
 APPLICATION = QGuiApplication.instance() or QGuiApplication([])
+
+
+class FakeReply(QObject):
+    finished = Signal()
+
+    def __init__(self, payload: bytes, *, finish_on_abort: bool = True) -> None:
+        super().__init__()
+        self.payload = payload
+        self.finish_on_abort = finish_on_abort
+        self.abort_count = 0
+        self.network_error = QNetworkReply.NetworkError.NoError
+
+    def abort(self) -> None:
+        self.abort_count += 1
+        self.network_error = QNetworkReply.NetworkError.OperationCanceledError
+        if self.finish_on_abort:
+            self.finished.emit()
+
+    def finish(self) -> None:
+        self.finished.emit()
+
+    def readAll(self) -> bytes:
+        return self.payload
+
+    def error(self):
+        return self.network_error
+
+    def errorString(self) -> str:
+        return "cancelled" if self.abort_count else ""
+
+    def attribute(self, attribute):
+        return 200
+
+    def rawHeader(self, header_name: str) -> bytes:
+        return b""
+
+
+class FakeNetworkManager:
+    def __init__(self, replies: list[FakeReply]) -> None:
+        self.replies = replies
+        self.requests = []
+
+    def get(self, request):
+        self.requests.append(request)
+        return self.replies.pop(0)
 
 
 def _post_mapping() -> dict[str, object]:
@@ -160,3 +207,86 @@ def test_controller_reports_invalid_json_and_fields(
     assert outcome.state == RequestState.ERROR
     assert outcome.error_kind == RequestErrorKind.INVALID_RESPONSE
     assert controller.errorText
+
+
+def test_controller_cancels_waiting_request_before_network_start():
+    reply = FakeReply(json.dumps([_post_mapping()]).encode("utf-8"))
+    manager = FakeNetworkManager([reply])
+    controller = DanbooruSearchController(
+        "https://example.invalid",
+        network_manager=manager,
+    )
+    outcomes = []
+    controller.requestCompleted.connect(outcomes.append)
+
+    controller.search("cat")
+    controller.cancelCurrentRequest()
+    APPLICATION.processEvents()
+
+    assert manager.requests == []
+    assert controller.state == RequestState.CANCELLED
+    assert len(outcomes) == 1
+    assert outcomes[0].error_kind == RequestErrorKind.CANCELLED
+
+
+def test_active_cancel_aborts_reply_and_late_finish_cannot_override_new_search():
+    old_reply = FakeReply(
+        json.dumps([_post_mapping()]).encode("utf-8"),
+        finish_on_abort=False,
+    )
+    new_post = {**_post_mapping(), "id": 999}
+    new_reply = FakeReply(json.dumps([new_post]).encode("utf-8"))
+    manager = FakeNetworkManager([old_reply, new_reply])
+    controller = DanbooruSearchController(
+        "https://example.invalid",
+        network_manager=manager,
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+    )
+    outcomes = []
+    controller.requestCompleted.connect(outcomes.append)
+
+    controller.search("old")
+    APPLICATION.processEvents()
+    assert len(manager.requests) == 1
+    controller.cancelCurrentRequest()
+    assert old_reply.abort_count == 1
+    assert outcomes[-1].state == RequestState.CANCELLED
+
+    controller.search("new")
+    APPLICATION.processEvents()
+    assert len(manager.requests) == 2
+    new_reply.finish()
+    assert outcomes[-1].state == RequestState.SUCCESS
+    assert outcomes[-1].post is not None
+    assert outcomes[-1].post.id == 999
+
+    old_reply.finish()
+    assert len(outcomes) == 2
+    assert controller.state == RequestState.SUCCESS
+    assert "#999" in controller.postSummary
+
+
+def test_controller_shutdown_is_idempotent_and_aborts_active_reply():
+    reply = FakeReply(
+        json.dumps([_post_mapping()]).encode("utf-8"),
+        finish_on_abort=False,
+    )
+    manager = FakeNetworkManager([reply])
+    controller = DanbooruSearchController(
+        "https://example.invalid",
+        network_manager=manager,
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+    )
+    outcomes = []
+    controller.requestCompleted.connect(outcomes.append)
+
+    controller.search("cat")
+    APPLICATION.processEvents()
+    controller.shutdown()
+    controller.shutdown()
+
+    assert reply.abort_count == 1
+    assert len(outcomes) == 1
+    assert outcomes[0].state == RequestState.CANCELLED
+    reply.finish()
+    assert len(outcomes) == 1

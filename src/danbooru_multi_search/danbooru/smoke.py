@@ -46,6 +46,7 @@ def run_danbooru_smoke(
         event_loop.exec()
 
     outcome = outcomes[0]
+    controller.shutdown()
     common: dict[str, Any] = {
         "tags": tags.strip(),
         "message": outcome.message,

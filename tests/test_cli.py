@@ -116,8 +116,9 @@ def test_danbooru_smoke_check_failure_is_nonzero_json(local_http_server, tmp_pat
     assert output == {
         "error_kind": "http",
         "http_status": 503,
-        "message": "Danbooru 返回 HTTP 503。",
+        "message": "Danbooru 返回 HTTP 503，重试 2 次后仍然失败。",
         "status": "error",
         "tags": "cat",
     }
+    assert len(server.requests) == 3
 

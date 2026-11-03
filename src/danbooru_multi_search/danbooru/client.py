@@ -1,8 +1,9 @@
-"""Asynchronous QtNetwork controller for one minimal Danbooru request."""
+"""Queued QtNetwork controller for one minimal Danbooru request."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from PySide6.QtCore import QObject, Property, Signal, Slot, QUrl, QUrlQuery
 from PySide6.QtNetwork import (
@@ -17,6 +18,19 @@ from danbooru_multi_search.danbooru.parsing import (
     DanbooruParseError,
     parse_posts_response,
 )
+from danbooru_multi_search.tasks import (
+    BoundedTaskQueue,
+    QtScheduler,
+    SystemClock,
+    TaskAttemptResult,
+    TaskFinalResult,
+    TaskKind,
+    TaskQueueConfig,
+    TaskQueueFullError,
+    TaskQueueShutdownError,
+    TaskRecord,
+    TaskState,
+)
 
 
 USER_AGENT = (
@@ -28,10 +42,13 @@ DEFAULT_TIMEOUT_MS = 10_000
 
 class RequestState:
     IDLE = "idle"
+    WAITING = "waiting"
     LOADING = "loading"
+    RETRY_WAIT = "retry_wait"
     SUCCESS = "success"
     EMPTY = "empty"
     ERROR = "error"
+    CANCELLED = "cancelled"
 
 
 class RequestErrorKind:
@@ -40,6 +57,7 @@ class RequestErrorKind:
     TIMEOUT = "timeout"
     NETWORK = "network"
     INVALID_RESPONSE = "invalid_response"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +87,7 @@ def build_posts_request(
     *,
     timeout_ms: int = DEFAULT_TIMEOUT_MS,
 ) -> QNetworkRequest:
-    """Build the single-page, single-post request used by M0-002."""
+    """Build the single-page, single-post request used by the M0 checks."""
 
     if timeout_ms <= 0:
         raise ValueError("timeout_ms must be greater than zero")
@@ -96,8 +114,89 @@ def build_posts_request(
     return request
 
 
+class _QtNetworkAttempt(QObject):
+    """Own one QNetworkReply and convert it to a queue attempt result."""
+
+    def __init__(
+        self,
+        manager: QNetworkAccessManager,
+        request: QNetworkRequest,
+        completion: Callable[[TaskAttemptResult], None],
+        parent: QObject,
+    ) -> None:
+        super().__init__(parent)
+        self._completion: Callable[[TaskAttemptResult], None] | None = completion
+        self._reply: QNetworkReply | None = manager.get(request)
+        self._reply.finished.connect(self._finished)
+
+    def abort(self) -> None:
+        self._completion = None
+        if self._reply is not None:
+            self._reply.abort()
+
+    @Slot()
+    def _finished(self) -> None:
+        reply = self._reply
+        if reply is None:
+            return
+        self._reply = None
+
+        payload = bytes(reply.readAll())
+        network_error = reply.error()
+        network_error_text = reply.errorString()
+        status_value = reply.attribute(
+            QNetworkRequest.Attribute.HttpStatusCodeAttribute
+        )
+        http_status = int(status_value) if status_value is not None else None
+        retry_after_bytes = bytes(reply.rawHeader("Retry-After"))
+        retry_after = (
+            retry_after_bytes.decode("ascii", errors="replace").strip() or None
+        )
+        reply.deleteLater()
+
+        if http_status is not None and not 200 <= http_status < 300:
+            result = TaskAttemptResult.failure(
+                f"Danbooru 返回 HTTP {http_status}。",
+                error_code=RequestErrorKind.HTTP,
+                http_status=http_status,
+                retry_after=retry_after,
+            )
+        elif network_error != QNetworkReply.NetworkError.NoError:
+            if network_error == QNetworkReply.NetworkError.TimeoutError:
+                error_code = RequestErrorKind.TIMEOUT
+                message = "Danbooru 请求超时。"
+            else:
+                error_code = RequestErrorKind.NETWORK
+                message = f"Danbooru 网络错误：{network_error_text}"
+            result = TaskAttemptResult.failure(
+                message,
+                error_code=error_code,
+                http_status=http_status,
+            )
+        else:
+            try:
+                posts = parse_posts_response(payload)
+            except DanbooruParseError as exc:
+                result = TaskAttemptResult.failure(
+                    str(exc),
+                    error_code=RequestErrorKind.INVALID_RESPONSE,
+                    http_status=http_status,
+                )
+            else:
+                result = TaskAttemptResult.success(
+                    posts,
+                    http_status=http_status,
+                )
+
+        completion = self._completion
+        self._completion = None
+        if completion is not None:
+            completion(result)
+        self.deleteLater()
+
+
 class DanbooruSearchController(QObject):
-    """Expose one asynchronous Danbooru result to QML."""
+    """Expose one cancellable, rate-limited Danbooru result to QML."""
 
     stateChanged = Signal()
     statusTextChanged = Signal()
@@ -112,6 +211,8 @@ class DanbooruSearchController(QObject):
         *,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         network_manager: QNetworkAccessManager | None = None,
+        task_queue: BoundedTaskQueue | None = None,
+        queue_config: TaskQueueConfig | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -119,7 +220,18 @@ class DanbooruSearchController(QObject):
         self._base_url = base_url
         self._timeout_ms = timeout_ms
         self._network_manager = network_manager or QNetworkAccessManager(self)
-        self._active_reply: QNetworkReply | None = None
+        self._owns_queue = task_queue is None
+        if task_queue is None:
+            scheduler = QtScheduler(self)
+            task_queue = BoundedTaskQueue(
+                queue_config or TaskQueueConfig(),
+                clock=SystemClock(),
+                scheduler=scheduler,
+            )
+        self._task_queue = task_queue
+        self._active_task_id: str | None = None
+        self._request_generation = 0
+        self._shutdown = False
         self._state = RequestState.IDLE
         self._status_text = "请输入标签并请求一条作品。"
         self._error_text = ""
@@ -132,7 +244,11 @@ class DanbooruSearchController(QObject):
 
     @Property(bool, notify=stateChanged)
     def busy(self) -> bool:
-        return self._state == RequestState.LOADING
+        return self._state in {
+            RequestState.WAITING,
+            RequestState.LOADING,
+            RequestState.RETRY_WAIT,
+        }
 
     @Property(str, notify=statusTextChanged)
     def statusText(self) -> str:
@@ -152,9 +268,16 @@ class DanbooruSearchController(QObject):
 
     @Slot(str)
     def search(self, tags: str) -> None:
-        """Start one request and return immediately to the Qt event loop."""
-
         if self.busy:
+            return
+        if self._shutdown:
+            self._complete(
+                DanbooruRequestOutcome(
+                    state=RequestState.ERROR,
+                    message="应用正在关闭，不能开始新请求。",
+                    error_kind=RequestErrorKind.INVALID_REQUEST,
+                )
+            )
             return
 
         normalized_tags = tags.strip()
@@ -184,69 +307,130 @@ class DanbooruSearchController(QObject):
             )
             return
 
-        self._state = RequestState.LOADING
-        self._status_text = "正在请求 Danbooru……"
+        self._request_generation += 1
+        generation = self._request_generation
+        self._state = RequestState.WAITING
+        self._status_text = "请求正在等待执行。"
         self._error_text = ""
         self._image_url = ""
         self._post_summary = ""
         self._emit_view_changes()
 
-        reply = self._network_manager.get(request)
-        self._active_reply = reply
-        reply.finished.connect(self._handle_reply)
-
-    def _handle_reply(self) -> None:
-        reply = self._active_reply
-        if reply is None:
-            return
-
-        self._active_reply = None
-        payload = bytes(reply.readAll())
-        network_error = reply.error()
-        network_error_text = reply.errorString()
-        status_value = reply.attribute(
-            QNetworkRequest.Attribute.HttpStatusCodeAttribute
-        )
-        http_status = int(status_value) if status_value is not None else None
-        reply.deleteLater()
-
-        if http_status is not None and not 200 <= http_status < 300:
-            self._complete(
-                DanbooruRequestOutcome(
-                    state=RequestState.ERROR,
-                    message=f"Danbooru 返回 HTTP {http_status}。",
-                    error_kind=RequestErrorKind.HTTP,
-                    http_status=http_status,
-                )
+        def starter(
+            attempt_number: int,
+            completion: Callable[[TaskAttemptResult], None],
+        ) -> _QtNetworkAttempt:
+            return _QtNetworkAttempt(
+                self._network_manager,
+                request,
+                completion,
+                self,
             )
-            return
 
-        if network_error != QNetworkReply.NetworkError.NoError:
-            if network_error == QNetworkReply.NetworkError.TimeoutError:
-                kind = RequestErrorKind.TIMEOUT
-                message = f"Danbooru 请求在 {self._timeout_ms} 毫秒后超时。"
-            else:
-                kind = RequestErrorKind.NETWORK
-                message = f"Danbooru 网络错误：{network_error_text}"
-            self._complete(
-                DanbooruRequestOutcome(
-                    state=RequestState.ERROR,
-                    message=message,
-                    error_kind=kind,
-                    http_status=http_status,
-                )
-            )
-            return
+        def state_changed(record: TaskRecord) -> None:
+            self._task_state_changed(generation, record)
+
+        def completed(result: TaskFinalResult) -> None:
+            self._task_completed(generation, result)
 
         try:
-            posts = parse_posts_response(payload)
-        except DanbooruParseError as exc:
+            record = self._task_queue.submit(
+                TaskKind.METADATA,
+                starter,
+                completed,
+                state_listener=state_changed,
+            )
+        except (TaskQueueFullError, TaskQueueShutdownError) as exc:
             self._complete(
                 DanbooruRequestOutcome(
                     state=RequestState.ERROR,
                     message=str(exc),
+                    error_kind=RequestErrorKind.INVALID_REQUEST,
+                )
+            )
+            return
+        if self.busy and generation == self._request_generation:
+            self._active_task_id = record.identifier
+
+    @Slot()
+    def cancelCurrentRequest(self) -> None:
+        task_id = self._active_task_id
+        if task_id is not None:
+            self._task_queue.cancel(task_id, "用户取消了请求。")
+
+    @Slot()
+    def shutdown(self) -> None:
+        if self._shutdown:
+            return
+        self._shutdown = True
+        if self._owns_queue:
+            self._task_queue.shutdown()
+        elif self._active_task_id is not None:
+            self._task_queue.cancel(
+                self._active_task_id,
+                "Application is shutting down.",
+            )
+
+    def _task_state_changed(self, generation: int, record: TaskRecord) -> None:
+        if generation != self._request_generation or record.terminal:
+            return
+        if record.state == TaskState.WAITING:
+            self._state = RequestState.WAITING
+            self._status_text = "请求正在等待执行。"
+        elif record.state == TaskState.RUNNING:
+            self._state = RequestState.LOADING
+            self._status_text = f"正在请求 Danbooru（第 {record.attempts} 次）……"
+        elif record.state == TaskState.RETRY_WAIT:
+            self._state = RequestState.RETRY_WAIT
+            self._status_text = "Danbooru 要求稍后重试，当前正在等待。"
+        self._error_text = ""
+        self._emit_view_changes()
+
+    def _task_completed(self, generation: int, result: TaskFinalResult) -> None:
+        if generation != self._request_generation:
+            return
+        if (
+            self._active_task_id is not None
+            and result.task_id != self._active_task_id
+        ):
+            return
+        self._active_task_id = None
+
+        if result.state == TaskState.CANCELLED:
+            self._complete(
+                DanbooruRequestOutcome(
+                    state=RequestState.CANCELLED,
+                    message="请求已取消。",
+                    error_kind=RequestErrorKind.CANCELLED,
+                )
+            )
+            return
+
+        if result.state == TaskState.FAILED:
+            message = result.error or "Danbooru 请求失败。"
+            if result.retry_exhausted and result.http_status is not None:
+                message = (
+                    f"Danbooru 返回 HTTP {result.http_status}，"
+                    f"重试 {max(0, result.attempts - 1)} 次后仍然失败。"
+                )
+            self._complete(
+                DanbooruRequestOutcome(
+                    state=RequestState.ERROR,
+                    message=message,
+                    error_kind=result.error_code,
+                    http_status=result.http_status,
+                )
+            )
+            return
+
+        posts = result.value
+        if not isinstance(posts, tuple):
+            self._complete(
+                DanbooruRequestOutcome(
+                    state=RequestState.ERROR,
+                    message="Danbooru 请求返回了未知结果。",
                     error_kind=RequestErrorKind.INVALID_RESPONSE,
-                    http_status=http_status,
+                    http_status=result.http_status,
                 )
             )
             return
@@ -256,7 +440,7 @@ class DanbooruSearchController(QObject):
                 DanbooruRequestOutcome(
                     state=RequestState.EMPTY,
                     message="没有找到符合标签的作品。",
-                    http_status=http_status,
+                    http_status=result.http_status,
                 )
             )
             return
@@ -267,7 +451,7 @@ class DanbooruSearchController(QObject):
                 state=RequestState.SUCCESS,
                 message=f"已加载作品 #{post.id}。",
                 post=post,
-                http_status=http_status,
+                http_status=result.http_status,
             )
         )
 

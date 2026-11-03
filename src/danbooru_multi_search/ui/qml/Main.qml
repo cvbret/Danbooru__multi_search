@@ -56,6 +56,12 @@ ApplicationWindow {
                 enabled: !searchController.busy
                 onClicked: searchController.search(tagsInput.text)
             }
+
+            Button {
+                text: qsTr("取消请求")
+                visible: searchController.busy
+                onClicked: searchController.cancelCurrentRequest()
+            }
         }
 
         Label {
@@ -100,6 +106,8 @@ ApplicationWindow {
                          && searchController.state !== "error"
                 text: searchController.state === "empty"
                       ? qsTr("没有搜索结果")
+                      : searchController.state === "cancelled"
+                        ? qsTr("请求已取消")
                       : qsTr("搜索结果将在这里显示")
                 color: "#71717a"
             }

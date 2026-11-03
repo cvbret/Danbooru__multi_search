@@ -15,11 +15,24 @@ def main_qml_path() -> Path:
     return Path(__file__).resolve().parent / "qml" / "Main.qml"
 
 
-def launch_gui(application: QGuiApplication, *, danbooru_base_url: str) -> int:
+def create_qml_engine(
+    application: QGuiApplication,
+    *,
+    danbooru_base_url: str,
+) -> tuple[QQmlApplicationEngine, DanbooruSearchController]:
     engine = QQmlApplicationEngine()
     controller = DanbooruSearchController(danbooru_base_url, parent=engine)
+    application.aboutToQuit.connect(controller.shutdown)
     engine.rootContext().setContextProperty("searchController", controller)
     engine.load(QUrl.fromLocalFile(str(main_qml_path())))
+    return engine, controller
+
+
+def launch_gui(application: QGuiApplication, *, danbooru_base_url: str) -> int:
+    engine, _controller = create_qml_engine(
+        application,
+        danbooru_base_url=danbooru_base_url,
+    )
     if not engine.rootObjects():
         return 1
     return application.exec()
