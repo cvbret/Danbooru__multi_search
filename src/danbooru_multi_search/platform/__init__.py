@@ -22,6 +22,8 @@ from danbooru_multi_search.platform.contracts import (
     SystemInfoService,
     ValueResult,
     WallpaperService,
+    WallpaperSnapshot,
+    WallpaperStyle,
 )
 from danbooru_multi_search.platform.paths import (
     ApplicationPaths,
@@ -49,6 +51,8 @@ __all__ = [
     "UnsupportedPlatformAdapter",
     "ValueResult",
     "WallpaperService",
+    "WallpaperSnapshot",
+    "WallpaperStyle",
     "WindowsPlatformAdapter",
     "create_platform_adapter",
     "resolve_application_paths",

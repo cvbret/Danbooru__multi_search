@@ -114,7 +114,19 @@ def test_unavailable_services_return_results_without_system_side_effects(
         NOT_IMPLEMENTED if platform_name == "win32" else UNSUPPORTED_PLATFORM
     )
     assert results[-1].code == expected_eagle_code
-    assert all(result.code == NOT_IMPLEMENTED for result in results[:-3])
+    if platform_name == "win32" and services.wallpaper.availability.available:
+        assert results[0].code == "file_not_found"
+        assert results[1].code == "no_restore_point"
+    elif platform_name == "win32":
+        assert results[0].code in {
+            UNSUPPORTED_PLATFORM,
+            "windows_api_unavailable",
+        }
+        assert results[1].code == results[0].code
+    else:
+        assert results[0].code == NOT_IMPLEMENTED
+        assert results[1].code == NOT_IMPLEMENTED
+    assert all(result.code == NOT_IMPLEMENTED for result in results[2:-3])
 
 
 def test_path_service_resolution_does_not_create_directories(tmp_path):
@@ -124,4 +136,30 @@ def test_path_service_resolution_does_not_create_directories(tmp_path):
     resolved = path_service.resolve()
 
     assert resolved.config_dir == isolated_root / "config"
+    assert not isolated_root.exists()
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "expected_code"),
+    [("linux", NOT_IMPLEMENTED), ("darwin", UNSUPPORTED_PLATFORM)],
+)
+def test_non_windows_wallpaper_service_is_side_effect_free(
+    tmp_path,
+    platform_name,
+    expected_code,
+):
+    isolated_root = tmp_path / platform_name
+    wallpaper = create_platform_adapter(
+        platform_name,
+        override_root=isolated_root,
+    ).services.wallpaper
+
+    results = [
+        wallpaper.get_current(),
+        wallpaper.set_wallpaper(isolated_root / "image.png"),
+        wallpaper.restore_previous(),
+    ]
+
+    assert all(result.succeeded is False for result in results)
+    assert all(result.code == expected_code for result in results)
     assert not isolated_root.exists()

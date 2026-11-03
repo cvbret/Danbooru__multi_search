@@ -13,6 +13,7 @@ from danbooru_multi_search.platform.contracts import (
     PlatformPaths,
     PlatformServices,
     ServiceAvailability,
+    WallpaperService,
 )
 from danbooru_multi_search.platform.paths import QtPlatformPaths
 from danbooru_multi_search.platform.stubs import (
@@ -42,11 +43,21 @@ class PlatformAdapter:
 
 
 class WindowsPlatformAdapter(PlatformAdapter):
-    def __init__(self, paths: PlatformPaths | None = None) -> None:
+    def __init__(
+        self,
+        paths: PlatformPaths | None = None,
+        wallpaper_service: WallpaperService | None = None,
+    ) -> None:
+        if wallpaper_service is None:
+            from danbooru_multi_search.platform.windows_wallpaper import (
+                create_default_windows_wallpaper_service,
+            )
+
+            wallpaper_service = create_default_windows_wallpaper_service()
         super().__init__(
             capabilities=PlatformCapabilities(
                 os_name="windows",
-                desktop_wallpaper=True,
+                desktop_wallpaper=wallpaper_service.availability.available,
                 local_eagle=True,
                 media_playback_detection=True,
             ),
@@ -56,6 +67,7 @@ class WindowsPlatformAdapter(PlatformAdapter):
                 eagle_availability=_not_implemented(
                     "Eagle Web API integration is scheduled for task M0-005."
                 ),
+                wallpaper_service=wallpaper_service,
             ),
         )
 
@@ -69,7 +81,7 @@ class LinuxPlatformAdapter(PlatformAdapter):
         super().__init__(
             capabilities=PlatformCapabilities(
                 os_name="linux",
-                desktop_wallpaper=True,
+                desktop_wallpaper=False,
                 local_eagle=False,
                 media_playback_detection=True,
                 local_eagle_unavailable_reason=self.EAGLE_UNAVAILABLE_REASON,
@@ -123,13 +135,18 @@ def _build_services(
     eagle_supported: bool,
     eagle_availability: ServiceAvailability,
     default_availability: ServiceAvailability | None = None,
+    wallpaper_service: WallpaperService | None = None,
 ) -> PlatformServices:
     default = default_availability or _not_implemented(
         "This platform service is not implemented in task M0-001."
     )
     return PlatformServices(
         paths=paths,
-        wallpaper=UnavailableWallpaperService(default),
+        wallpaper=(
+            wallpaper_service
+            if wallpaper_service is not None
+            else UnavailableWallpaperService(default)
+        ),
         media=UnavailableMediaCapabilityService(default),
         eagle=UnavailableEagleBridge(
             availability=eagle_availability,
@@ -146,6 +163,7 @@ def create_platform_adapter(
     *,
     path_service: PlatformPaths | None = None,
     override_root: Path | None = None,
+    wallpaper_service: WallpaperService | None = None,
 ) -> PlatformAdapter:
     """Select an adapter using Python's stable platform identifier."""
 
@@ -155,7 +173,9 @@ def create_platform_adapter(
     selected_paths = path_service or QtPlatformPaths(override_root=override_root)
     selected = platform_name or sys.platform
     if selected == "win32":
-        return WindowsPlatformAdapter(selected_paths)
+        return WindowsPlatformAdapter(selected_paths, wallpaper_service)
+    if wallpaper_service is not None:
+        raise ValueError("wallpaper_service can only be supplied for win32.")
     if selected.startswith("linux"):
         return LinuxPlatformAdapter(selected_paths)
     return UnsupportedPlatformAdapter(selected, selected_paths)

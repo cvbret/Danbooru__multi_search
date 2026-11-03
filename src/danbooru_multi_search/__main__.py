@@ -14,6 +14,7 @@ from PySide6.QtGui import QGuiApplication
 from danbooru_multi_search import __version__
 from danbooru_multi_search.core.bootstrap import initialize_runtime
 from danbooru_multi_search.danbooru import DEFAULT_TIMEOUT_MS, run_danbooru_smoke
+from danbooru_multi_search.platform import PlatformAdapter
 from danbooru_multi_search.ui.launcher import launch_gui
 
 
@@ -33,6 +34,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--danbooru-smoke",
         action="store_true",
         help="Request one Danbooru post through QtNetwork and print JSON.",
+    )
+    mode.add_argument(
+        "--wallpaper-probe",
+        action="store_true",
+        help="Read the current desktop wallpaper and print JSON without changing it.",
     )
     parser.add_argument(
         "--danbooru-tags",
@@ -60,13 +66,46 @@ def _configure_application_identity() -> None:
     QCoreApplication.setApplicationVersion(__version__)
 
 
+def wallpaper_probe_result(platform: PlatformAdapter) -> tuple[dict[str, object], int]:
+    """Build the stable JSON result for the read-only wallpaper probe."""
+
+    result = platform.services.wallpaper.get_current()
+    if not result.succeeded or result.value is None:
+        return (
+            {
+                "status": "error",
+                "platform": platform.capabilities.os_name,
+                "code": result.code or "wallpaper_read_failed",
+                "message": result.message or "Unable to read the current wallpaper.",
+            },
+            2,
+        )
+
+    snapshot = result.value
+    return (
+        {
+            "status": "ok",
+            "platform": platform.capabilities.os_name,
+            "wallpaper": {
+                "path": str(snapshot.path) if snapshot.path is not None else None,
+                "style": snapshot.style.value if snapshot.style is not None else None,
+                "wallpaper_style_value": snapshot.wallpaper_style_value,
+                "tile_wallpaper_value": snapshot.tile_wallpaper_value,
+            },
+        },
+        0,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the desktop application or its headless initialization check."""
 
     args = _build_parser().parse_args(argv)
     _configure_application_identity()
 
-    headless_mode = args.headless_check or args.danbooru_smoke
+    headless_mode = (
+        args.headless_check or args.danbooru_smoke or args.wallpaper_probe
+    )
     application_type = QCoreApplication if headless_mode else QGuiApplication
     application = application_type([APPLICATION_NAME])
 
@@ -105,6 +144,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         print(json.dumps(result.payload, ensure_ascii=True, sort_keys=True))
         return result.exit_code
+
+    if args.wallpaper_probe:
+        payload, exit_code = wallpaper_probe_result(runtime.platform)
+        print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+        return exit_code
 
     return launch_gui(
         application,

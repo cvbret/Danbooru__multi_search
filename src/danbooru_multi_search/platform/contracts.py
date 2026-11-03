@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Generic, Protocol, TypeVar, runtime_checkable
 
@@ -66,6 +67,22 @@ class SystemInfo:
     architecture: str
 
 
+class WallpaperStyle(StrEnum):
+    FILL = "fill"
+    FIT = "fit"
+    STRETCH = "stretch"
+    TILE = "tile"
+    CENTER = "center"
+
+
+@dataclass(frozen=True, slots=True)
+class WallpaperSnapshot:
+    path: Path | None
+    style: WallpaperStyle | None
+    wallpaper_style_value: str | None
+    tile_wallpaper_value: str | None
+
+
 @runtime_checkable
 class PlatformPaths(Protocol):
     """Resolve application-owned paths for the current operating system."""
@@ -81,7 +98,13 @@ class WallpaperService(Protocol):
     @property
     def availability(self) -> ServiceAvailability: ...
 
-    def set_wallpaper(self, image_path: Path) -> OperationResult: ...
+    def get_current(self) -> ValueResult[WallpaperSnapshot]: ...
+
+    def set_wallpaper(
+        self,
+        image_path: Path,
+        style: WallpaperStyle | None = None,
+    ) -> OperationResult: ...
 
     def restore_previous(self) -> OperationResult: ...
 

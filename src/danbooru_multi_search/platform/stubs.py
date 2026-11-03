@@ -11,6 +11,8 @@ from danbooru_multi_search.platform.contracts import (
     ServiceAvailability,
     SystemInfo,
     ValueResult,
+    WallpaperSnapshot,
+    WallpaperStyle,
 )
 
 
@@ -21,7 +23,14 @@ UnavailableValue = TypeVar("UnavailableValue")
 class UnavailableWallpaperService:
     availability: ServiceAvailability
 
-    def set_wallpaper(self, image_path: Path) -> OperationResult:
+    def get_current(self) -> ValueResult[WallpaperSnapshot]:
+        return _value_unavailable(self.availability)
+
+    def set_wallpaper(
+        self,
+        image_path: Path,
+        style: WallpaperStyle | None = None,
+    ) -> OperationResult:
         return _operation_unavailable(self.availability)
 
     def restore_previous(self) -> OperationResult:

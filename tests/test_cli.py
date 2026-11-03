@@ -6,6 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from danbooru_multi_search.__main__ import _build_parser
+
 
 def test_headless_check_initializes_and_exits(tmp_path):
     project_root = Path(__file__).resolve().parents[1]
@@ -34,6 +38,55 @@ def test_headless_check_initializes_and_exits(tmp_path):
     assert output["status"] == "ok"
     assert output["schema_version"] == 1
     assert output["settings_created"] is True
+
+
+def test_wallpaper_probe_is_mutually_exclusive_with_other_modes():
+    parser = _build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--headless-check", "--wallpaper-probe"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--danbooru-smoke", "--wallpaper-probe"])
+
+
+def test_wallpaper_probe_outputs_stable_read_only_json(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(project_root / "src")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "danbooru_multi_search",
+            "--wallpaper-probe",
+            "--data-root",
+            str(tmp_path),
+        ],
+        cwd=project_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode in {0, 2}, result.stderr
+    output = json.loads(result.stdout)
+    assert output["platform"] in {"windows", "linux"}
+    if result.returncode == 0:
+        assert output["status"] == "ok"
+        assert set(output["wallpaper"]) == {
+            "path",
+            "style",
+            "wallpaper_style_value",
+            "tile_wallpaper_value",
+        }
+    else:
+        assert output["status"] == "error"
+        assert output["code"]
+        assert output["message"]
 
 
 def _write_settings(data_root: Path, base_url: str) -> None:
