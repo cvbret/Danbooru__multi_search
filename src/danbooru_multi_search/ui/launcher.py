@@ -8,7 +8,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
-from danbooru_multi_search.danbooru import DanbooruSearchController
+from danbooru_multi_search.danbooru import DanbooruGalleryController
 
 
 def main_qml_path() -> Path:
@@ -19,9 +19,9 @@ def create_qml_engine(
     application: QGuiApplication,
     *,
     danbooru_base_url: str,
-) -> tuple[QQmlApplicationEngine, DanbooruSearchController]:
+) -> tuple[QQmlApplicationEngine, DanbooruGalleryController]:
     engine = QQmlApplicationEngine()
-    controller = DanbooruSearchController(danbooru_base_url, parent=engine)
+    controller = DanbooruGalleryController(danbooru_base_url, parent=engine)
     application.aboutToQuit.connect(controller.shutdown)
     engine.rootContext().setContextProperty("searchController", controller)
     engine.load(QUrl.fromLocalFile(str(main_qml_path())))

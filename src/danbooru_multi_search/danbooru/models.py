@@ -12,8 +12,8 @@ class DanbooruPost:
     preview_url: str | None
     large_file_url: str | None
     file_url: str | None
-    score: int
-    fav_count: int
+    score: int | None
+    fav_count: int | None
     rating: str
     width: int
     height: int
@@ -30,6 +30,17 @@ class DanbooruPost:
         """Return only the original media URL matching ``file_ext``."""
 
         return self.file_url or ""
+
+    @property
+    def media_kind(self) -> str:
+        """Classify media for compact gallery badges."""
+
+        extension = self.file_ext.casefold()
+        if extension in {"mp4", "webm"}:
+            return "video"
+        if extension in {"gif", "zip"}:
+            return "animation"
+        return "image"
 
     def to_mapping(self) -> dict[str, Any]:
         return asdict(self)

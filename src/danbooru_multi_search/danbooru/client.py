@@ -73,7 +73,7 @@ class DanbooruRequestOutcome:
         return self.state == RequestState.SUCCESS
 
 
-def _select_preferred_tls_backend() -> None:
+def select_preferred_tls_backend() -> None:
     """Use Schannel when Qt provides it, avoiding external OpenSSL DLL coupling."""
 
     available_backends = QSslSocket.availableBackends()
@@ -85,12 +85,22 @@ def build_posts_request(
     base_url: str,
     tags: str,
     *,
+    page: int = 1,
+    limit: int = 1,
     timeout_ms: int = DEFAULT_TIMEOUT_MS,
 ) -> QNetworkRequest:
-    """Build the single-page, single-post request used by the M0 checks."""
+    """Build one validated ``posts.json`` page request."""
 
     if timeout_ms <= 0:
         raise ValueError("timeout_ms must be greater than zero")
+    if not isinstance(page, int) or isinstance(page, bool) or page < 1:
+        raise ValueError("page must be a positive integer")
+    if (
+        not isinstance(limit, int)
+        or isinstance(limit, bool)
+        or not 1 <= limit <= 200
+    ):
+        raise ValueError("limit must be between 1 and 200")
 
     endpoint = QUrl(f"{base_url.rstrip('/')}/posts.json")
     if (
@@ -102,8 +112,8 @@ def build_posts_request(
 
     query = QUrlQuery()
     query.addQueryItem("tags", tags)
-    query.addQueryItem("page", "1")
-    query.addQueryItem("limit", "1")
+    query.addQueryItem("page", str(page))
+    query.addQueryItem("limit", str(limit))
     endpoint.setQuery(query)
 
     request = QNetworkRequest(endpoint)
@@ -114,7 +124,7 @@ def build_posts_request(
     return request
 
 
-class _QtNetworkAttempt(QObject):
+class QtPostsRequestAttempt(QObject):
     """Own one QNetworkReply and convert it to a queue attempt result."""
 
     def __init__(
@@ -216,7 +226,7 @@ class DanbooruSearchController(QObject):
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        _select_preferred_tls_backend()
+        select_preferred_tls_backend()
         self._base_url = base_url
         self._timeout_ms = timeout_ms
         self._network_manager = network_manager or QNetworkAccessManager(self)
@@ -319,8 +329,8 @@ class DanbooruSearchController(QObject):
         def starter(
             attempt_number: int,
             completion: Callable[[TaskAttemptResult], None],
-        ) -> _QtNetworkAttempt:
-            return _QtNetworkAttempt(
+        ) -> QtPostsRequestAttempt:
+            return QtPostsRequestAttempt(
                 self._network_manager,
                 request,
                 completion,
@@ -465,10 +475,16 @@ class DanbooruSearchController(QObject):
             self._post_summary = ""
         else:
             post = outcome.post
+            score_text = str(post.score) if post.score is not None else "暂无数据"
+            favorite_text = (
+                str(post.fav_count)
+                if post.fav_count is not None
+                else "暂无数据"
+            )
             self._image_url = post.display_url
             self._post_summary = (
-                f"作品 #{post.id} · 得分 {post.score} · "
-                f"收藏 {post.fav_count} · 分级 {post.rating} · "
+                f"作品 #{post.id} · 得分 {score_text} · "
+                f"收藏 {favorite_text} · 分级 {post.rating} · "
                 f"{post.width}×{post.height} · {post.file_ext}"
             )
 
