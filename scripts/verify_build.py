@@ -91,6 +91,12 @@ def _venv_python(environment_root: Path) -> Path:
     return environment_root / "bin" / "python"
 
 
+def _current_python() -> Path:
+    """Keep the active virtual environment launcher without resolving symlinks."""
+
+    return Path(sys.executable).absolute()
+
+
 def _venv_console_script(environment_root: Path) -> Path:
     if os.name == "nt":
         return environment_root / "Scripts" / f"{EXPECTED_CONSOLE_SCRIPT}.exe"
@@ -235,7 +241,7 @@ def _copy_verified_artifacts(
 
 
 def run_validation(artifact_dir: Path) -> tuple[Path, Path]:
-    python = Path(sys.executable).resolve()
+    python = _current_python()
     base_environment = _clean_environment()
     qml_environment = _clean_environment(
         {

@@ -33,6 +33,8 @@ apt-get install -y --no-install-recommends \
     libfontconfig1 \
     libfreetype6 \
     libgl1 \
+    libglib2.0-0t64 \
+    libgssapi-krb5-2 \
     libx11-6 \
     libx11-xcb1 \
     libxkbcommon0 \
