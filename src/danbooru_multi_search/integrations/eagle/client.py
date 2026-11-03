@@ -43,7 +43,10 @@ _ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _VERSION_PATTERN = re.compile(
     r"^\s*(?P<major>\d+)(?:\.(?P<minor>\d+)(?:\.(?P<patch>\d+))?)?\s*$"
 )
-_BUILD_PATTERN = re.compile(r"^\s*build\s*(?P<number>\d+)\s*$", re.IGNORECASE)
+_BUILD_PATTERN = re.compile(
+    r"^\s*(?:build\s*)?(?P<number>[0-9]+)\s*$",
+    re.IGNORECASE,
+)
 _STRING_METADATA_FIELDS = frozenset({"name", "website", "annotation"})
 _ALLOWED_METADATA_FIELDS = _STRING_METADATA_FIELDS | {"tags"}
 

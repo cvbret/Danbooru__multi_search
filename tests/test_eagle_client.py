@@ -280,11 +280,36 @@ def test_connection_uses_expected_method_path_headers_and_limits(eagle_server):
     assert "content-type" not in request.headers
 
 
+def test_connection_accepts_current_eagle_numeric_build_version():
+    transport = RecordingTransport(
+        transport_response(
+            {
+                "version": "4.0.0",
+                "prereleaseVersion": None,
+                "buildVersion": "20260401",
+                "platform": "win32",
+            }
+        )
+    )
+
+    result = EagleWebApiBridge(transport=transport).test_connection()
+
+    assert result.succeeded is True
+    assert result.value is not None
+    assert result.value.build_version == "20260401"
+    assert result.value.build_number == 20_260_401
+
+
 @pytest.mark.parametrize(
     ("version", "build_version", "succeeded", "expected_code"),
     [
         ("3.9.9", "build100", False, "unsupported_eagle_version"),
         ("4.0.0", "build20", False, "unsupported_eagle_version"),
+        ("4.0.0", "0", False, "unsupported_eagle_version"),
+        ("4.0.0", "20", False, "unsupported_eagle_version"),
+        ("4.0.0", "21", True, None),
+        ("4.0.0", "00021", True, None),
+        ("4.0.0", "20260401", True, None),
         ("4.0", "build21", True, None),
         ("4.0.9", "Build 100", True, None),
         ("4.1.0", "build1", True, None),
@@ -311,6 +336,30 @@ def test_version_boundaries(version, build_version, succeeded, expected_code):
     assert result.code == expected_code
     assert transport.options == [(2.5, 12345)]
     assert len(transport.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "build_version",
+    [
+        "",
+        "   ",
+        "-1",
+        "+21",
+        "release100",
+        "21.0",
+        "build-21",
+        "0x15",
+    ],
+)
+def test_invalid_build_version_formats_are_rejected(build_version):
+    transport = RecordingTransport(
+        transport_response(app_info("5.0.0", build_version))
+    )
+
+    result = EagleWebApiBridge(transport=transport).test_connection()
+
+    assert result.succeeded is False
+    assert result.code == "eagle_invalid_app_info"
 
 
 @pytest.mark.parametrize(
