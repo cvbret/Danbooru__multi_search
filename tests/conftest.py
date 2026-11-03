@@ -24,6 +24,7 @@ class LocalHttpServer:
         status: int = 200,
         delay: float = 0,
         disconnect: bool = False,
+        include_content_length: bool = True,
     ) -> None:
         class TestServer(ThreadingHTTPServer):
             daemon_threads = True
@@ -49,10 +50,11 @@ class LocalHttpServer:
                 try:
                     self.send_response(server.response_status)  # type: ignore[attr-defined]
                     self.send_header("Content-Type", "application/json")
-                    self.send_header(
-                        "Content-Length",
-                        str(len(server.response_body)),  # type: ignore[attr-defined]
-                    )
+                    if server.include_content_length:  # type: ignore[attr-defined]
+                        self.send_header(
+                            "Content-Length",
+                            str(len(server.response_body)),  # type: ignore[attr-defined]
+                        )
                     self.end_headers()
                     self.wfile.write(server.response_body)  # type: ignore[attr-defined]
                 except OSError:
@@ -66,6 +68,7 @@ class LocalHttpServer:
         self._server.response_status = status
         self._server.response_delay = delay
         self._server.disconnect_without_response = disconnect
+        self._server.include_content_length = include_content_length
         self._server.recorded_requests = []
         host, port = self._server.server_address
         self.base_url = f"http://{host}:{port}"
@@ -96,12 +99,14 @@ def local_http_server() -> Callable[..., LocalHttpServer]:
         status: int = 200,
         delay: float = 0,
         disconnect: bool = False,
+        include_content_length: bool = True,
     ) -> LocalHttpServer:
         server = LocalHttpServer(
             body,
             status=status,
             delay=delay,
             disconnect=disconnect,
+            include_content_length=include_content_length,
         )
         servers.append(server)
         return server

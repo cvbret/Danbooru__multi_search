@@ -13,7 +13,11 @@ from PySide6.QtGui import QGuiApplication
 
 from danbooru_multi_search import __version__
 from danbooru_multi_search.core.bootstrap import initialize_runtime
-from danbooru_multi_search.danbooru import DEFAULT_TIMEOUT_MS, run_danbooru_smoke
+from danbooru_multi_search.danbooru import (
+    DEFAULT_TIMEOUT_MS,
+    run_danbooru_download_smoke,
+    run_danbooru_smoke,
+)
 from danbooru_multi_search.integrations.eagle import EagleImportResult
 from danbooru_multi_search.platform import PlatformAdapter
 from danbooru_multi_search.ui.launcher import launch_gui
@@ -37,6 +41,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Request one Danbooru post through QtNetwork and print JSON.",
     )
     mode.add_argument(
+        "--danbooru-download-smoke",
+        action="store_true",
+        help="Request one Danbooru post, download its media, and print JSON.",
+    )
+    mode.add_argument(
         "--wallpaper-probe",
         action="store_true",
         help="Read the current desktop wallpaper and print JSON without changing it.",
@@ -55,13 +64,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--danbooru-tags",
         default="rating:g",
-        help="Tags used by --danbooru-smoke (default: rating:g).",
+        help=(
+            "Tags used by --danbooru-smoke and --danbooru-download-smoke "
+            "(default: rating:g)."
+        ),
     )
     parser.add_argument(
         "--danbooru-timeout-ms",
         type=int,
         default=DEFAULT_TIMEOUT_MS,
-        help=f"Network timeout for --danbooru-smoke (default: {DEFAULT_TIMEOUT_MS}).",
+        help=(
+            "Network timeout for Danbooru smoke checks "
+            f"(default: {DEFAULT_TIMEOUT_MS})."
+        ),
     )
     parser.add_argument(
         "--data-root",
@@ -235,6 +250,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     headless_mode = (
         args.headless_check
         or args.danbooru_smoke
+        or args.danbooru_download_smoke
         or args.wallpaper_probe
         or args.eagle_probe
         or args.eagle_import_smoke is not None
@@ -271,6 +287,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "status": "error",
                 "error_kind": "internal",
                 "message": f"Danbooru smoke check failed: {exc}",
+                "tags": args.danbooru_tags.strip(),
+            }
+            print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+            return 1
+        print(json.dumps(result.payload, ensure_ascii=True, sort_keys=True))
+        return result.exit_code
+
+    if args.danbooru_download_smoke:
+        try:
+            result = run_danbooru_download_smoke(
+                runtime.settings.danbooru_api_url,
+                args.danbooru_tags,
+                runtime.paths.download_dir,
+                timeout_ms=args.danbooru_timeout_ms,
+            )
+        except Exception as exc:
+            payload = {
+                "status": "error",
+                "operation": "download",
+                "error_kind": "internal",
+                "message": f"Danbooru download smoke check failed: {exc}",
                 "tags": args.danbooru_tags.strip(),
             }
             print(json.dumps(payload, ensure_ascii=True, sort_keys=True))

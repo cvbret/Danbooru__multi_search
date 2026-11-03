@@ -25,5 +25,11 @@ class DanbooruPost:
 
         return self.preview_url or self.large_file_url or self.file_url or ""
 
+    @property
+    def download_url(self) -> str:
+        """Return only the original media URL matching ``file_ext``."""
+
+        return self.file_url or ""
+
     def to_mapping(self) -> dict[str, Any]:
         return asdict(self)
