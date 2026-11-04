@@ -330,6 +330,7 @@ class DanbooruPostListModel(QAbstractListModel):
     """Expose shared ``DanbooruPost`` objects through stable QML roles."""
 
     countChanged = Signal()
+    revisionChanged = Signal()
 
     _ROLE_NAMES = {
         PostRole.POST_ID: QByteArray(b"postId"),
@@ -349,10 +350,15 @@ class DanbooruPostListModel(QAbstractListModel):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._posts: tuple[DanbooruPost, ...] = ()
+        self._revision = 0
 
     @Property(int, notify=countChanged)
     def count(self) -> int:
         return len(self._posts)
+
+    @Property(int, notify=revisionChanged)
+    def revision(self) -> int:
+        return self._revision
 
     @property
     def posts(self) -> tuple[DanbooruPost, ...]:
@@ -391,7 +397,10 @@ class DanbooruPostListModel(QAbstractListModel):
             PostRole.MEDIA_KIND: post.media_kind,
             PostRole.MEDIA_LABEL: {
                 "video": "视频",
-                "animation": "动画",
+                "gif": "GIF",
+                "ugoira": "Ugoira",
+                "flash": "Flash",
+                "unknown": "未知格式",
             }.get(post.media_kind, ""),
         }
         return values[post_role]
@@ -399,8 +408,33 @@ class DanbooruPostListModel(QAbstractListModel):
     def set_posts(self, posts: tuple[DanbooruPost, ...]) -> None:
         self.beginResetModel()
         self._posts = posts
+        self._revision += 1
         self.endResetModel()
         self.countChanged.emit()
+        self.revisionChanged.emit()
+
+    def post_at(self, row: int) -> DanbooruPost | None:
+        if not isinstance(row, int) or isinstance(row, bool):
+            return None
+        if not 0 <= row < len(self._posts):
+            return None
+        return self._posts[row]
+
+    def row_for_post_id(self, post_id: int) -> int:
+        if not isinstance(post_id, int) or isinstance(post_id, bool):
+            return -1
+        return next(
+            (
+                row
+                for row, post in enumerate(self._posts)
+                if post.id == post_id
+            ),
+            -1,
+        )
+
+    @Slot(int, result=int)
+    def rowForPostId(self, post_id: int) -> int:
+        return self.row_for_post_id(post_id)
 
     def clear(self) -> None:
         if self._posts:

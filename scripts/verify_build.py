@@ -21,7 +21,11 @@ from typing import Mapping, Sequence
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PACKAGE_ROOT = PROJECT_ROOT / "src"
 INSTALLED_CHECK_SCRIPT = PROJECT_ROOT / "scripts" / "check_installed_package.py"
-EXPECTED_QML_MEMBER = "danbooru_multi_search/ui/qml/Main.qml"
+EXPECTED_QML_MEMBERS = (
+    "danbooru_multi_search/ui/qml/Main.qml",
+    "danbooru_multi_search/ui/qml/DetailPage.qml",
+    "danbooru_multi_search/ui/qml/ImageViewer.qml",
+)
 EXPECTED_CONSOLE_SCRIPT = "danbooru-multi-search"
 EXPECTED_CONSOLE_TARGET = "danbooru_multi_search.__main__:main"
 EXPECTED_WHEEL_NAME = "danbooru_multi_search-0.1.0-py3-none-any.whl"
@@ -119,7 +123,9 @@ def verify_wheel(wheel_path: Path) -> None:
     try:
         with zipfile.ZipFile(wheel_path) as archive:
             names = archive.namelist()
-            qml_count = names.count(EXPECTED_QML_MEMBER)
+            qml_counts = {
+                member: names.count(member) for member in EXPECTED_QML_MEMBERS
+            }
             metadata_names = [
                 name for name in names if name.endswith(".dist-info/METADATA")
             ]
@@ -138,10 +144,18 @@ def verify_wheel(wheel_path: Path) -> None:
     except UnicodeDecodeError as exc:
         raise ValidationError(f"Wheel entry points are not UTF-8: {exc}") from exc
 
-    if qml_count != 1:
+    invalid_qml_members = {
+        member: count for member, count in qml_counts.items() if count != 1
+    }
+    if invalid_qml_members:
+        details = ", ".join(
+            f"{member}: {count}"
+            for member, count in invalid_qml_members.items()
+        )
         raise ValidationError(
-            f"Wheel must contain {EXPECTED_QML_MEMBER} exactly once; found "
-            f"{qml_count}."
+            "Wheel must contain every required QML file exactly once; found "
+            + details
+            + "."
         )
 
     metadata = BytesParser(policy=email.policy.default).parsebytes(metadata_bytes)
@@ -195,7 +209,9 @@ def verify_source_distribution(
         for path in package_root.rglob("*.py")
         if path.is_file()
     )
-    expected_members.add("src/danbooru_multi_search/ui/qml/Main.qml")
+    expected_members.update(
+        f"src/{member}" for member in EXPECTED_QML_MEMBERS
+    )
 
     try:
         with tarfile.open(source_distribution, mode="r:gz") as archive:

@@ -27,6 +27,7 @@ from danbooru_multi_search.danbooru import (
     merge_tag_suggestions,
     replace_active_tag_fragment,
 )
+from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 from danbooru_multi_search.tasks import TaskQueueConfig
 
 
@@ -451,9 +452,15 @@ def test_controller_imports_local_qurl_recomputes_and_preserves_index_on_failure
     )
     bad_path = Path(tmp_path) / "bad.csv"
     bad_path.write_text("wrong,header\n", encoding="utf-8")
+    translations = TagTranslationStore()
+    snapshot_changes = []
+    translations.snapshotChanged.connect(
+        lambda: snapshot_changes.append(translations.snapshot)
+    )
     controller = DanbooruTagSuggestionController(
         "https://example.invalid",
         queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        translation_store=translations,
     )
     outcomes = []
     controller.importCompleted.connect(outcomes.append)
@@ -476,6 +483,7 @@ def test_controller_imports_local_qurl_recomputes_and_preserves_index_on_failure
     controller.importCsv(QUrl("https://example.invalid/tags.csv"))
     assert outcomes[-1].error_code == "invalid_file_url"
     assert controller.localTagCount == 1
+    assert len(snapshot_changes) == 1
 
 
 def test_new_import_cancels_old_worker_and_shutdown_waits_for_worker(tmp_path):
@@ -504,10 +512,14 @@ def test_new_import_cancels_old_worker_and_shutdown_waits_for_worker(tmp_path):
         shutdown_exited.set()
         raise TagCsvImportCancelled()
 
+    translations = TagTranslationStore()
+    snapshot_changes = []
+    translations.snapshotChanged.connect(lambda: snapshot_changes.append(True))
     controller = DanbooruTagSuggestionController(
         "https://example.invalid",
         queue_config=TaskQueueConfig(minimum_interval_seconds=0),
         csv_loader=loader,
+        translation_store=translations,
     )
     controller.importCsv(QUrl.fromLocalFile(str(first_path)))
     assert _wait_until(first_started.is_set)
@@ -525,6 +537,7 @@ def test_new_import_cancels_old_worker_and_shutdown_waits_for_worker(tmp_path):
     assert shutdown_exited.is_set()
     assert controller.importBusy is False
     assert controller.suggestionsModel.count == 0
+    assert snapshot_changes == [True]
 
 
 def test_import_state_listener_can_shutdown_before_worker_starts(tmp_path):

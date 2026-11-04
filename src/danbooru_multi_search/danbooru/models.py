@@ -18,6 +18,14 @@ class DanbooruPost:
     width: int
     height: int
     file_ext: str
+    created_at: str | None = None
+    file_size: int | None = None
+    source: str | None = None
+    artist_tags: tuple[str, ...] = ()
+    character_tags: tuple[str, ...] = ()
+    copyright_tags: tuple[str, ...] = ()
+    general_tags: tuple[str, ...] = ()
+    meta_tags: tuple[str, ...] = ()
 
     @property
     def display_url(self) -> str:
@@ -35,12 +43,18 @@ class DanbooruPost:
     def media_kind(self) -> str:
         """Classify media for compact gallery badges."""
 
-        extension = self.file_ext.casefold()
+        extension = self.file_ext.strip().casefold()
+        if extension in {"jpg", "jpeg", "png", "webp", "avif"}:
+            return "image"
+        if extension == "gif":
+            return "gif"
         if extension in {"mp4", "webm"}:
             return "video"
-        if extension in {"gif", "zip"}:
-            return "animation"
-        return "image"
+        if extension == "zip":
+            return "ugoira"
+        if extension == "swf":
+            return "flash"
+        return "unknown"
 
     def to_mapping(self) -> dict[str, Any]:
         return asdict(self)

@@ -13,6 +13,7 @@ ApplicationWindow {
     title: qsTr("Danbooru Multi Search")
     color: "#15171c"
     property bool autocompleteReady: false
+    property bool resetGalleryOnNextModel: false
 
     function submitGallerySearch() {
         tagSuggestionController.closeSuggestions()
@@ -40,6 +41,58 @@ ApplicationWindow {
         if (searchWhenValid && replacement.shouldSearch)
             submitGallerySearch()
         return true
+    }
+
+    function openPostDetails(row) {
+        galleryGrid.currentIndex = row
+        tagSuggestionController.closeSuggestions()
+        detailController.openPost(
+            row,
+            galleryGrid.contentY,
+            galleryGrid.currentIndex,
+            galleryGrid.width,
+            galleryGrid.height,
+            root.width,
+            root.height
+        )
+    }
+
+    function returnToGallery() {
+        if (!detailController.closeDetail())
+            return
+        Qt.callLater(root.restoreGallerySnapshot)
+    }
+
+    function restoreGallerySnapshot() {
+        galleryGrid.forceLayout()
+        const plan = detailController.takeGalleryRestorePlan(
+            searchController.postsModel,
+            galleryGrid.width,
+            galleryGrid.height,
+            root.width,
+            root.height,
+            galleryGrid.originY,
+            galleryGrid.contentHeight
+        )
+        if (!plan.available)
+            return
+        galleryGrid.currentIndex = plan.index
+        galleryGrid.contentY = plan.contentY
+    }
+
+    function searchFromDetailTag(tagName) {
+        tagsInput.suppressAutocomplete = true
+        tagsInput.text = tagName
+        tagsInput.cursorPosition = tagsInput.text.length
+        tagsInput.suppressAutocomplete = false
+        galleryGrid.currentIndex = -1
+        galleryGrid.positionViewAtBeginning()
+        resetGalleryOnNextModel = true
+        searchController.search(
+            tagName,
+            ratingFilter.currentValue,
+            pageSizeInput.value
+        )
     }
 
     function ratingColor(code) {
@@ -177,10 +230,38 @@ ApplicationWindow {
         }
     }
 
-    ColumnLayout {
+    Connections {
+        target: detailController
+
+        function onTagSearchRequested(tagName) {
+            root.searchFromDetailTag(tagName)
+        }
+    }
+
+    Connections {
+        target: searchController.postsModel
+
+        function onModelReset() {
+            if (root.resetGalleryOnNextModel) {
+                galleryGrid.currentIndex = -1
+                galleryGrid.positionViewAtBeginning()
+                root.resetGalleryOnNextModel = false
+            }
+        }
+    }
+
+    StackLayout {
+        id: pageStack
         anchors.fill: parent
-        anchors.margins: 18
-        spacing: 12
+        currentIndex: detailController.isOpen ? 1 : 0
+
+        Item {
+            id: galleryPage
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 18
+                spacing: 12
 
         RowLayout {
             Layout.fillWidth: true
@@ -385,6 +466,7 @@ ApplicationWindow {
                 delegate: Rectangle {
                     id: card
                     objectName: "postCard_" + postId
+                    required property int index
                     required property int postId
                     required property string previewUrl
                     required property string scoreText
@@ -400,6 +482,10 @@ ApplicationWindow {
                     radius: 7
                     color: "#191c23"
                     border.color: "#343944"
+
+                    TapHandler {
+                        onTapped: root.openPostDetails(card.index)
+                    }
 
                     Image {
                         id: thumbnail
@@ -588,6 +674,21 @@ ApplicationWindow {
                 enabled: searchController.canNext
                 onClicked: searchController.nextPage()
             }
+                }
+            }
         }
+
+        DetailPage {
+            controller: detailController
+            onBackRequested: root.returnToGallery()
+            onImportTagsRequested: tagCsvDialog.open()
+        }
+    }
+
+    Shortcut {
+        objectName: "detailEscapeShortcut"
+        enabled: detailController.isOpen
+        sequence: StandardKey.Cancel
+        onActivated: root.returnToGallery()
     }
 }

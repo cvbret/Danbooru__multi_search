@@ -48,6 +48,7 @@ from danbooru_multi_search.danbooru.tags import (
     build_tags_request,
     normalize_tag_fragment,
 )
+from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 from danbooru_multi_search.tasks import (
     BoundedTaskQueue,
     QtScheduler,
@@ -408,6 +409,7 @@ class DanbooruTagSuggestionController(QObject):
         task_queue: BoundedTaskQueue | None = None,
         queue_config: TaskQueueConfig | None = None,
         index_snapshot: TagIndexSnapshot | None = None,
+        translation_store: TagTranslationStore | None = None,
         csv_loader: Callable[..., TagCsvImportResult] = load_tag_csv,
         parent: QObject | None = None,
     ) -> None:
@@ -425,7 +427,14 @@ class DanbooruTagSuggestionController(QObject):
             )
         self._task_queue = task_queue
         self._model = TagSuggestionListModel(self)
-        self._index = index_snapshot or TagIndexSnapshot.empty()
+        if translation_store is not None and index_snapshot is not None:
+            raise ValueError(
+                "index_snapshot and translation_store cannot both be provided"
+            )
+        self._translation_store = translation_store or TagTranslationStore(
+            index_snapshot,
+            self,
+        )
         self._csv_loader = csv_loader
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -480,7 +489,7 @@ class DanbooruTagSuggestionController(QObject):
 
     @Property(int, notify=importStateChanged)
     def localTagCount(self) -> int:
-        return len(self._index.records)
+        return len(self._translation_store.snapshot.records)
 
     @Slot(str, int)
     def updateInput(self, text: str, cursor: int) -> None:
@@ -508,12 +517,14 @@ class DanbooruTagSuggestionController(QObject):
             return
 
         if context.fragment.isascii():
-            local = self._index.search_english(
+            local = self._translation_store.snapshot.search_english(
                 context.fragment,
                 limit=DEFAULT_TAG_SUGGESTION_LIMIT * 2,
             )
         else:
-            local = self._index.search_chinese(context.fragment)
+            local = self._translation_store.snapshot.search_chinese(
+                context.fragment
+            )
         self._local_suggestions = local
         visible_local = local[:DEFAULT_TAG_SUGGESTION_LIMIT]
         self._is_open = bool(visible_local)
@@ -792,8 +803,10 @@ class DanbooruTagSuggestionController(QObject):
             self.importCompleted.emit(outcome)
             return
 
-        self._index = result.snapshot
         request_generation = self._request_generation
+        self._translation_store.replace_snapshot(result.snapshot)
+        if generation != self._import_generation or self._shutdown:
+            return
         self._import_status_text = (
             f"导入完成：总记录 {result.total_records}，有效 {result.valid_records}，"
             f"跳过 {result.skipped_records}，合并重复 {result.duplicate_records}，"
@@ -839,3 +852,17 @@ class DanbooruTagSuggestionController(QObject):
         self.openChanged.emit()
         self.remoteStateChanged.emit()
         self.noticeTextChanged.emit()
+
+    @property
+    def translation_store(self) -> TagTranslationStore:
+        return self._translation_store
+
+    @property
+    def _index(self) -> TagIndexSnapshot:
+        """Compatibility view for existing tests while the store is shared."""
+
+        return self._translation_store.snapshot
+
+    @_index.setter
+    def _index(self, snapshot: TagIndexSnapshot) -> None:
+        self._translation_store.replace_snapshot(snapshot)

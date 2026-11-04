@@ -10,8 +10,10 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtNetwork import QNetworkAccessManager
 
 from danbooru_multi_search.danbooru import (
+    DanbooruDetailController,
     DanbooruGalleryController,
     DanbooruTagSuggestionController,
+    TagTranslationStore,
 )
 from danbooru_multi_search.tasks import (
     BoundedTaskQueue,
@@ -44,16 +46,24 @@ class _UiSession(QObject):
             scheduler=scheduler,
         )
         self.network_manager = network_manager or QNetworkAccessManager(self)
+        self.translation_store = TagTranslationStore(parent=self)
         self.gallery_controller = DanbooruGalleryController(
             danbooru_base_url,
             network_manager=self.network_manager,
             task_queue=self.task_queue,
             parent=self,
         )
+        self.detail_controller = DanbooruDetailController(
+            danbooru_base_url,
+            self.gallery_controller.postsModel,
+            self.translation_store,
+            parent=self,
+        )
         self.tag_controller = DanbooruTagSuggestionController(
             danbooru_base_url,
             network_manager=self.network_manager,
             task_queue=self.task_queue,
+            translation_store=self.translation_store,
             parent=self,
         )
         self._closed = False
@@ -64,6 +74,7 @@ class _UiSession(QObject):
         if self._closed:
             return
         self._closed = True
+        self.detail_controller.shutdown()
         self.gallery_controller.shutdown()
         self.tag_controller.shutdown()
         self.task_queue.shutdown()
@@ -89,6 +100,10 @@ def create_qml_engine(
     engine.rootContext().setContextProperty(
         "tagSuggestionController",
         session.tag_controller,
+    )
+    engine.rootContext().setContextProperty(
+        "detailController",
+        session.detail_controller,
     )
     engine.load(QUrl.fromLocalFile(str(main_qml_path())))
     return engine, session.gallery_controller

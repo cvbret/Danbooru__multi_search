@@ -280,7 +280,7 @@ def test_list_model_distinguishes_missing_zero_and_negative_popularity():
     assert model.data(model.index(0), int(PostRole.FAVORITE_TEXT)) == "暂无数据"
     assert model.data(model.index(1), int(PostRole.SCORE_TEXT)) == "0"
     assert model.data(model.index(1), int(PostRole.FAVORITE_TEXT)) == "0"
-    assert model.data(model.index(1), int(PostRole.MEDIA_LABEL)) == "动画"
+    assert model.data(model.index(1), int(PostRole.MEDIA_LABEL)) == "GIF"
     assert model.data(model.index(2), int(PostRole.SCORE_TEXT)) == "-5"
     assert model.data(model.index(2), int(PostRole.MEDIA_LABEL)) == "视频"
 

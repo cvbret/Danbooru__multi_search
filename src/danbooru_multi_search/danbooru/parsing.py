@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from danbooru_multi_search.danbooru.models import DanbooruPost
@@ -13,11 +15,26 @@ class DanbooruParseError(ValueError):
     """Raised when Danbooru returns JSON that cannot form the required model."""
 
 
+_CREATED_AT_PATTERN = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+    r"[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]{1,6})?"
+    r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
+)
+_TAG_FIELDS = (
+    ("tag_string_artist", "artist_tags"),
+    ("tag_string_character", "character_tags"),
+    ("tag_string_copyright", "copyright_tags"),
+    ("tag_string_general", "general_tags"),
+    ("tag_string_meta", "meta_tags"),
+)
+
+
 def parse_posts_response(payload: bytes) -> tuple[DanbooruPost, ...]:
     """Parse and validate a Danbooru ``posts.json`` response."""
 
     try:
-        raw = json.loads(payload)
+        raw = json.loads(payload, parse_constant=_reject_json_constant)
     except (
         json.JSONDecodeError,
         UnicodeDecodeError,
@@ -46,6 +63,7 @@ def _parse_post(raw: Mapping[str, Any], index: int) -> DanbooruPost:
             f"Post at index {index} has no usable preview, large, or file URL."
         )
 
+    tag_groups = _tag_groups(raw, index)
     return DanbooruPost(
         id=_required_integer(raw, "id", index, minimum=1),
         preview_url=preview_url,
@@ -56,8 +74,96 @@ def _parse_post(raw: Mapping[str, Any], index: int) -> DanbooruPost:
         rating=_rating(raw, index),
         width=_required_integer(raw, "image_width", index, minimum=1),
         height=_required_integer(raw, "image_height", index, minimum=1),
-        file_ext=_required_string(raw, "file_ext", index),
+        file_ext=_required_string(raw, "file_ext", index).casefold(),
+        created_at=_created_at(raw, index),
+        file_size=_optional_integer(raw, "file_size", index, minimum=0),
+        source=_source(raw, index),
+        **tag_groups,
     )
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-standard JSON constant is not allowed: {value}")
+
+
+def _created_at(raw: Mapping[str, Any], index: int) -> str | None:
+    value = raw.get("created_at")
+    if value is None:
+        return None
+    if not isinstance(value, str) or _CREATED_AT_PATTERN.fullmatch(value) is None:
+        raise DanbooruParseError(
+            f"Post at index {index} field 'created_at' must be a timezone-aware "
+            "ISO 8601 timestamp."
+        )
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        offset = parsed.utcoffset()
+        if offset is None:
+            raise ValueError("timestamp has no UTC offset")
+        normalized = parsed.astimezone(timezone.utc)
+    except (OverflowError, ValueError) as exc:
+        raise DanbooruParseError(
+            f"Post at index {index} field 'created_at' is not a valid timestamp."
+        ) from exc
+    return normalized.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _source(raw: Mapping[str, Any], index: int) -> str | None:
+    value = raw.get("source")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise DanbooruParseError(
+            f"Post at index {index} field 'source' must be a string or null."
+        )
+    if len(value) > 1200:
+        raise DanbooruParseError(
+            f"Post at index {index} field 'source' must not exceed 1200 characters."
+        )
+    return value if value.strip() else None
+
+
+def _tag_groups(raw: Mapping[str, Any], index: int) -> dict[str, tuple[str, ...]]:
+    # Imported lazily to avoid a parsing -> tags -> gallery -> client cycle.
+    from danbooru_multi_search.danbooru.tags import normalize_tag_name
+
+    parsed_groups: dict[str, tuple[str, ...]] = {}
+    seen: set[str] = set()
+    for field_name, model_name in _TAG_FIELDS:
+        value = raw.get(field_name)
+        if value is None:
+            parsed_groups[model_name] = ()
+            continue
+        if not isinstance(value, str):
+            raise DanbooruParseError(
+                f"Post at index {index} field '{field_name}' must be a string or null."
+            )
+        if any(ord(character) < 32 or ord(character) > 126 for character in value):
+            raise DanbooruParseError(
+                f"Post at index {index} field '{field_name}' contains a non-ASCII "
+                "or control character."
+            )
+        if not value.strip(" "):
+            parsed_groups[model_name] = ()
+            continue
+
+        normalized_tags: list[str] = []
+        for raw_tag in (part for part in value.split(" ") if part):
+            try:
+                tag = normalize_tag_name(raw_tag)
+            except ValueError as exc:
+                raise DanbooruParseError(
+                    f"Post at index {index} field '{field_name}' contains an "
+                    f"invalid tag: {exc}"
+                ) from exc
+            if tag in seen:
+                raise DanbooruParseError(
+                    f"Post at index {index} contains duplicate tag '{tag}'."
+                )
+            seen.add(tag)
+            normalized_tags.append(tag)
+        parsed_groups[model_name] = tuple(normalized_tags)
+    return parsed_groups
 
 
 def _required_integer(

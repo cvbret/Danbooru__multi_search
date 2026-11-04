@@ -31,6 +31,8 @@ def test_minimal_qml_window_loads():
         "nextPageButton",
         "refreshButton",
         "retryButton",
+        "detailPage",
+        "detailImageViewer",
     ):
         assert root.findChild(QObject, object_name) is not None
     rating_filter = root.findChild(QObject, "ratingFilter")
@@ -149,11 +151,13 @@ def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
     tag_controller = engine.rootContext().contextProperty(
         "tagSuggestionController"
     )
+    detail_controller = engine.rootContext().contextProperty("detailController")
     shared_queue = gallery_controller._task_queue
 
     assert tag_controller._task_queue is shared_queue
     assert gallery_controller._owns_queue is False
     assert tag_controller._owns_queue is False
+    assert detail_controller.translation_store is tag_controller.translation_store
 
     tag_controller.shutdown()
     assert shared_queue.is_shutdown is False
