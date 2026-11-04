@@ -6,23 +6,204 @@ import QtQuick.Layouts
 ApplicationWindow {
     id: root
     visible: true
-    width: 1280
-    height: 820
-    minimumWidth: 820
-    minimumHeight: 600
+    x: sessionController.initialWindowX
+    y: sessionController.initialWindowY
+    width: sessionController.initialWindowWidth
+    height: sessionController.initialWindowHeight
+    minimumWidth: sessionController.minimumWindowWidth
+    minimumHeight: sessionController.minimumWindowHeight
     title: qsTr("Danbooru Multi Search")
     color: "#15171c"
     property bool autocompleteReady: false
     property bool resetGalleryOnNextModel: false
+    property bool controlUpdateInProgress: false
+    property bool stateTrackingReady: false
+    property bool windowStateReportPending: false
+
+    function ratingIndex(value) {
+        for (let index = 0; index < ratingFilter.count; ++index) {
+            if (ratingFilter.model[index].value === value)
+                return index
+        }
+        return 0
+    }
+
+    function applySearchControls(tags, rating, pageSize) {
+        controlUpdateInProgress = true
+        tagsInput.suppressAutocomplete = true
+        tagSuggestionController.closeSuggestions()
+        tagsInput.text = tags
+        tagsInput.cursorPosition = tagsInput.text.length
+        ratingFilter.currentIndex = ratingIndex(rating)
+        pageSizeInput.value = pageSize
+        tagsInput.suppressAutocomplete = false
+        controlUpdateInProgress = false
+    }
+
+    function reportWindowState() {
+        if (!stateTrackingReady
+                || (root.visibility !== Window.Windowed
+                    && root.visibility !== Window.Maximized))
+            return
+        sessionController.updateWindowState(
+            root.x,
+            root.y,
+            root.width,
+            root.height,
+            root.visibility === Window.Maximized,
+            root.visibility === Window.Minimized
+        )
+    }
+
+    function scheduleWindowStateReport() {
+        if (!stateTrackingReady || windowStateReportPending)
+            return
+        windowStateReportPending = true
+        Qt.callLater(function() {
+            windowStateReportPending = false
+            reportWindowState()
+        })
+    }
+
+    function reportGalleryPosition() {
+        if (!stateTrackingReady
+                || searchController.postsModel.count === 0)
+            return
+        const maximum = Math.max(
+            galleryGrid.originY,
+            galleryGrid.originY + galleryGrid.contentHeight - galleryGrid.height
+        )
+        const boundedContentY = Math.max(
+            galleryGrid.originY,
+            Math.min(galleryGrid.contentY, maximum)
+        )
+        let index = -1
+        let firstY = Number.POSITIVE_INFINITY
+        let firstX = Number.POSITIVE_INFINITY
+        for (let candidate = 0;
+             candidate < searchController.postsModel.count;
+             ++candidate) {
+            const candidateItem = galleryGrid.itemAtIndex(candidate)
+            if (!candidateItem
+                    || candidateItem.y + candidateItem.height <= boundedContentY
+                    || candidateItem.y >= boundedContentY + galleryGrid.height)
+                continue
+            if (candidateItem.y < firstY
+                    || (candidateItem.y === firstY && candidateItem.x < firstX)) {
+                index = candidate
+                firstY = candidateItem.y
+                firstX = candidateItem.x
+            }
+        }
+        if (index < 0)
+            return
+        const item = galleryGrid.itemAtIndex(index)
+        const postId = searchController.postsModel.postIdAt(index)
+        if (!item || postId < 1)
+            return
+        sessionController.updateGalleryPosition(
+            postId,
+            index,
+            item.y - boundedContentY,
+            boundedContentY,
+            searchController.postsModel.revision
+        )
+    }
+
+    function restoreHistoryPosition() {
+        galleryGrid.forceLayout()
+        const plan = sessionController.takeGalleryRestorePlan(
+            galleryGrid.originY,
+            galleryGrid.contentHeight,
+            galleryGrid.height
+        )
+        if (!plan.available)
+            return
+        if (!sessionController.galleryRestorePlanCurrent(
+                plan.token,
+                plan.modelRevision)) {
+            sessionController.finishGalleryRestorePlan(plan.token)
+            return
+        }
+        if (plan.index < 0) {
+            galleryGrid.currentIndex = -1
+            galleryGrid.contentY = plan.absoluteContentY
+            sessionController.finishGalleryRestorePlan(plan.token)
+            return
+        }
+        if (!plan.hasAnchor) {
+            galleryGrid.currentIndex = plan.index
+            galleryGrid.contentY = plan.absoluteContentY
+            sessionController.finishGalleryRestorePlan(plan.token)
+            return
+        }
+        Qt.callLater(function() {
+            if (!sessionController.galleryRestorePlanCurrent(
+                    plan.token,
+                    plan.modelRevision)) {
+                sessionController.finishGalleryRestorePlan(plan.token)
+                return
+            }
+            galleryGrid.currentIndex = plan.index
+            galleryGrid.positionViewAtIndex(plan.index, GridView.Beginning)
+            galleryGrid.forceLayout()
+            const item = galleryGrid.itemAtIndex(plan.index)
+            if (!item) {
+                galleryGrid.contentY = plan.absoluteContentY
+                sessionController.finishGalleryRestorePlan(plan.token)
+                return
+            }
+            const maximum = Math.max(
+                galleryGrid.originY,
+                galleryGrid.originY + galleryGrid.contentHeight - galleryGrid.height
+            )
+            galleryGrid.contentY = Math.max(
+                galleryGrid.originY,
+                Math.min(item.y - plan.anchorOffset, maximum)
+            )
+            sessionController.finishGalleryRestorePlan(plan.token)
+        })
+    }
 
     function submitGallerySearch() {
         tagSuggestionController.closeSuggestions()
+        sessionController.controlsEdited()
+        resetGalleryOnNextModel = true
         searchController.search(
             tagsInput.text,
             ratingFilter.currentValue,
             pageSizeInput.value
         )
         tagsInput.forceActiveFocus()
+    }
+
+    Component.onCompleted: {
+        applySearchControls(
+            sessionController.initialTags,
+            sessionController.initialRating,
+            sessionController.initialPageSize
+        )
+        autocompleteReady = true
+        if (sessionController.startMaximized) {
+            showMaximized()
+            Qt.callLater(function() {
+                stateTrackingReady = true
+                scheduleWindowStateReport()
+            })
+        } else {
+            stateTrackingReady = true
+            scheduleWindowStateReport()
+        }
+    }
+
+    onXChanged: scheduleWindowStateReport()
+    onYChanged: scheduleWindowStateReport()
+    onWidthChanged: scheduleWindowStateReport()
+    onHeightChanged: scheduleWindowStateReport()
+    onVisibilityChanged: scheduleWindowStateReport()
+    onClosing: {
+        windowStateReportPending = false
+        reportWindowState()
     }
 
     function applySuggestion(index, searchWhenValid) {
@@ -85,6 +266,7 @@ ApplicationWindow {
         tagsInput.text = tagName
         tagsInput.cursorPosition = tagsInput.text.length
         tagsInput.suppressAutocomplete = false
+        sessionController.controlsEdited()
         galleryGrid.currentIndex = -1
         galleryGrid.positionViewAtBeginning()
         resetGalleryOnNextModel = true
@@ -110,6 +292,84 @@ ApplicationWindow {
         fileMode: FileDialog.OpenFile
         nameFilters: [qsTr("CSV 文件 (*.csv)"), qsTr("所有文件 (*)")]
         onAccepted: tagSuggestionController.importCsv(selectedFile)
+    }
+
+    Popup {
+        id: historyPopup
+        objectName: "historyPopup"
+        parent: Overlay.overlay
+        width: Math.min(620, root.width - 48)
+        height: Math.min(420, root.height - 80)
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            color: "#20242c"
+            border.color: "#4b5362"
+            radius: 8
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 8
+
+            Label {
+                text: qsTr("最近查询")
+                color: "#f4f4f5"
+                font.pixelSize: 20
+                font.bold: true
+            }
+
+            ListView {
+                id: historyList
+                objectName: "historyList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: sessionController.historyModel
+
+                delegate: ItemDelegate {
+                    required property int index
+                    required property string summaryText
+                    width: historyList.width
+                    text: summaryText
+                    onClicked: {
+                        sessionController.selectHistory(index)
+                        historyPopup.close()
+                        tagsInput.forceActiveFocus()
+                    }
+                }
+
+                Label {
+                    anchors.centerIn: parent
+                    visible: historyList.count === 0
+                    text: qsTr("暂无查询历史")
+                    color: "#71717a"
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Button {
+                    objectName: "clearHistoryButton"
+                    text: qsTr("清理历史")
+                    enabled: historyList.count > 0
+                    onClicked: {
+                        sessionController.clearHistory()
+                        historyPopup.close()
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: qsTr("关闭")
+                    onClicked: historyPopup.close()
+                }
+            }
+        }
     }
 
     Popup {
@@ -215,6 +475,100 @@ ApplicationWindow {
         }
     }
 
+    Popup {
+        id: imageCachePopup
+        objectName: "imageCachePopup"
+        parent: Overlay.overlay
+        width: Math.min(460, root.width - 48)
+        modal: true
+        focus: true
+        anchors.centerIn: parent
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        onAboutToShow: {
+            cacheLimitInput.value = Math.round(
+                imageCacheController.maximumBytes / 1048576
+            )
+            imageCacheController.refreshUsage()
+        }
+
+        background: Rectangle {
+            color: "#20242c"
+            border.color: "#4b5362"
+            radius: 8
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 10
+
+            Label {
+                text: qsTr("图片缓存")
+                color: "#f4f4f5"
+                font.pixelSize: 20
+                font.bold: true
+            }
+
+            Label {
+                objectName: "imageCacheUsageLabel"
+                text: qsTr("当前占用：%1 MiB")
+                      .arg((imageCacheController.currentBytes / 1048576).toFixed(2))
+                color: "#d4d4d8"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Label {
+                    text: qsTr("上限（MiB）")
+                    color: "#d4d4d8"
+                }
+
+                SpinBox {
+                    id: cacheLimitInput
+                    objectName: "imageCacheLimitInput"
+                    from: 64
+                    to: 16384
+                    value: 512
+                    editable: true
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    objectName: "applyImageCacheLimitButton"
+                    text: qsTr("保存上限")
+                    onClicked: imageCacheController.setMaximumBytes(
+                        cacheLimitInput.value * 1048576
+                    )
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: text.length > 0
+                text: imageCacheController.statusText
+                color: "#fbbf24"
+                wrapMode: Text.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Button {
+                    objectName: "clearImageCacheButton"
+                    text: qsTr("清理图片缓存")
+                    onClicked: imageCacheController.clearCache()
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: qsTr("关闭")
+                    onClicked: imageCachePopup.close()
+                }
+            }
+        }
+    }
+
     Connections {
         target: tagSuggestionController
 
@@ -239,6 +593,26 @@ ApplicationWindow {
     }
 
     Connections {
+        target: sessionController
+
+        function onControlsRequested(tags, rating, pageSize) {
+            root.applySearchControls(tags, rating, pageSize)
+        }
+
+        function onGalleryRestoreReady() {
+            Qt.callLater(root.restoreHistoryPosition)
+        }
+    }
+
+    Connections {
+        target: searchController
+
+        function onPageRequestCompleted() {
+            Qt.callLater(root.reportGalleryPosition)
+        }
+    }
+
+    Connections {
         target: searchController.postsModel
 
         function onModelReset() {
@@ -247,6 +621,7 @@ ApplicationWindow {
                 galleryGrid.positionViewAtBeginning()
                 root.resetGalleryOnNextModel = false
             }
+            Qt.callLater(root.reportGalleryPosition)
         }
     }
 
@@ -302,7 +677,7 @@ ApplicationWindow {
                 objectName: "tagsInput"
                 Layout.fillWidth: true
                 placeholderText: qsTr("输入一个或两个英文标签，例如 landscape 1girl")
-                text: "landscape"
+                text: sessionController.initialTags
                 selectByMouse: true
                 property bool suppressAutocomplete: false
 
@@ -314,7 +689,10 @@ ApplicationWindow {
 
                 onTextChanged: updateSuggestions()
                 onCursorPositionChanged: updateSuggestions()
-                Component.onCompleted: root.autocompleteReady = true
+                onTextEdited: {
+                    if (!root.controlUpdateInProgress)
+                        sessionController.controlsEdited()
+                }
 
                 Keys.onPressed: function(event) {
                     if (inputMethodComposing)
@@ -358,6 +736,30 @@ ApplicationWindow {
                 onClicked: tagCsvDialog.open()
             }
 
+            Button {
+                objectName: "historyButton"
+                text: qsTr("最近查询")
+                onClicked: historyPopup.open()
+            }
+
+            Button {
+                objectName: "imageCacheButton"
+                text: qsTr("图片缓存")
+                onClicked: imageCachePopup.open()
+            }
+
+            Button {
+                objectName: "restoreQueryButton"
+                text: qsTr("恢复查询")
+                enabled: sessionController.canRestoreSelected
+                         && !searchController.busy
+                onClicked: {
+                    tagSuggestionController.closeSuggestions()
+                    root.resetGalleryOnNextModel = false
+                    sessionController.restoreSelected()
+                }
+            }
+
             ComboBox {
                 id: ratingFilter
                 objectName: "ratingFilter"
@@ -371,6 +773,10 @@ ApplicationWindow {
                     { "label": "Questionable", "value": "questionable" },
                     { "label": "Explicit", "value": "explicit" }
                 ]
+                onActivated: {
+                    if (!root.controlUpdateInProgress)
+                        sessionController.controlsEdited()
+                }
             }
 
             Label {
@@ -386,6 +792,10 @@ ApplicationWindow {
                 value: 40
                 editable: true
                 Layout.preferredWidth: 96
+                onValueModified: {
+                    if (!root.controlUpdateInProgress)
+                        sessionController.controlsEdited()
+                }
             }
 
             Button {
@@ -398,7 +808,10 @@ ApplicationWindow {
                 objectName: "cancelButton"
                 text: qsTr("取消")
                 visible: searchController.busy
-                onClicked: searchController.cancelCurrentRequest()
+                onClicked: {
+                    sessionController.cancelRestore()
+                    searchController.cancelCurrentRequest()
+                }
             }
         }
 
@@ -418,6 +831,14 @@ ApplicationWindow {
                 objectName: "tagSuggestionNotice"
                 visible: text.length > 0
                 text: tagSuggestionController.noticeText
+                color: "#fbbf24"
+                elide: Text.ElideRight
+            }
+
+            Label {
+                objectName: "sessionNotice"
+                visible: text.length > 0
+                text: sessionController.noticeText
                 color: "#fbbf24"
                 elide: Text.ElideRight
             }
@@ -462,6 +883,11 @@ ApplicationWindow {
                 cellHeight: 340
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar {}
+                onContentYChanged: root.reportGalleryPosition()
+                onCurrentIndexChanged: root.reportGalleryPosition()
+                onWidthChanged: Qt.callLater(root.reportGalleryPosition)
+                onHeightChanged: Qt.callLater(root.reportGalleryPosition)
+                onContentHeightChanged: Qt.callLater(root.reportGalleryPosition)
 
                 delegate: Rectangle {
                     id: card
@@ -476,6 +902,9 @@ ApplicationWindow {
                     required property string dimensionsText
                     required property string fileExtension
                     required property string mediaLabel
+                    property int thumbnailRebuildToken: 0
+                    property bool thumbnailFailed: false
+                    property bool thumbnailLoading: false
 
                     width: GridView.view.cellWidth - 12
                     height: GridView.view.cellHeight - 12
@@ -483,42 +912,139 @@ ApplicationWindow {
                     color: "#191c23"
                     border.color: "#343944"
 
+                    function rebuildThumbnail() {
+                        const token = ++thumbnailRebuildToken
+                        thumbnailFailed = false
+                        thumbnailLoading = card.previewUrl.length > 0
+                        thumbnailLoader.active = false
+                        Qt.callLater(function() {
+                            if (token !== thumbnailRebuildToken)
+                                return
+                            thumbnailLoader.active = card.previewUrl.length > 0
+                        })
+                    }
+
+                    function handleThumbnailStatus(token, url, cacheGeneration, status) {
+                        if (token !== thumbnailRebuildToken || url !== card.previewUrl)
+                            return
+                        if (status === Image.Ready) {
+                            thumbnailLoading = false
+                            const action = imageCacheController.decodeSuccessActionForGeneration(
+                                url,
+                                cacheGeneration
+                            )
+                            if (action === "accepted") {
+                                thumbnailFailed = false
+                            } else if (action === "stopped") {
+                                thumbnailFailed = true
+                            }
+                        } else if (status === Image.Error) {
+                            thumbnailLoading = false
+                            const finalUrl = imageCacheController.finalUrlFor(url)
+                            const action = imageCacheController.decodeFailureActionForGeneration(
+                                url,
+                                finalUrl,
+                                cacheGeneration
+                            )
+                            if (action === "retry") {
+                                rebuildThumbnail()
+                            } else if (action === "stopped"
+                                       || action === "failed") {
+                                thumbnailFailed = true
+                            }
+                        }
+                    }
+
+                    function retryThumbnail() {
+                        imageCacheController.prepareManualRetry(
+                            card.previewUrl,
+                            imageCacheController.finalUrlFor(card.previewUrl)
+                        )
+                        rebuildThumbnail()
+                    }
+
+                    Component.onCompleted: rebuildThumbnail()
+                    onPreviewUrlChanged: rebuildThumbnail()
+                    Component.onDestruction: {
+                        ++thumbnailRebuildToken
+                        thumbnailLoader.active = false
+                    }
+
                     TapHandler {
                         onTapped: root.openPostDetails(card.index)
                     }
 
-                    Image {
-                        id: thumbnail
-                        objectName: "thumbnail_" + card.postId
+                    Loader {
+                        id: thumbnailLoader
+                        objectName: "thumbnailLoader_" + card.postId
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.margins: 8
                         height: 220
-                        source: card.previewUrl
-                        fillMode: Image.PreserveAspectFit
-                        asynchronous: true
-                        cache: true
+                        active: false
+                        asynchronous: false
+                        sourceComponent: thumbnailComponent
+                    }
 
-                        BusyIndicator {
-                            anchors.centerIn: parent
-                            running: thumbnail.status === Image.Loading
-                            visible: running
+                    Component {
+                        id: thumbnailComponent
+
+                        Image {
+                            objectName: "thumbnail_" + card.postId
+                            source: ""
+                            fillMode: Image.PreserveAspectFit
+                            asynchronous: true
+                            cache: false
+                            property int frozenToken: 0
+                            property int frozenCacheGeneration: 0
+                            property string frozenUrl: ""
+
+                            Component.onCompleted: {
+                                frozenToken = card.thumbnailRebuildToken
+                                frozenCacheGeneration = imageCacheController.cacheGeneration
+                                frozenUrl = card.previewUrl
+                                source = frozenUrl
+                            }
+
+                            onStatusChanged: card.handleThumbnailStatus(
+                                frozenToken,
+                                frozenUrl,
+                                frozenCacheGeneration,
+                                status
+                            )
                         }
+                    }
 
-                        Rectangle {
-                            objectName: "thumbnailError_" + card.postId
-                            anchors.fill: parent
-                            color: "#242832"
-                            visible: thumbnail.status === Image.Error
+                    BusyIndicator {
+                        anchors.centerIn: thumbnailLoader
+                        running: card.thumbnailLoading
+                        visible: running
+                    }
 
+                    Rectangle {
+                        objectName: "thumbnailError_" + card.postId
+                        anchors.fill: thumbnailLoader
+                        color: "#242832"
+                        visible: card.thumbnailFailed
+
+                        Column {
+                            anchors.centerIn: parent
+                            width: parent.width - 24
+                            spacing: 8
                             Label {
-                                anchors.centerIn: parent
-                                width: parent.width - 24
+                                width: parent.width
                                 text: qsTr("此缩略图加载失败")
                                 color: "#fda4af"
                                 horizontalAlignment: Text.AlignHCenter
                                 wrapMode: Text.Wrap
+                            }
+
+                            Button {
+                                objectName: "thumbnailRetry_" + card.postId
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: qsTr("重试")
+                                onClicked: card.retryThumbnail()
                             }
                         }
                     }

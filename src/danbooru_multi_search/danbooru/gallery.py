@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from enum import IntEnum, StrEnum
 from typing import Callable
 
@@ -175,6 +176,14 @@ class ContentRating(StrEnum):
     EXPLICIT = "explicit"
 
 
+class GalleryRequestOrigin(StrEnum):
+    SEARCH = "search"
+    RESTORE = "restore"
+    PAGINATION = "pagination"
+    REFRESH = "refresh"
+    RETRY = "retry"
+
+
 _RATING_ALIASES = {
     "": ContentRating.ALL,
     "all": ContentRating.ALL,
@@ -225,6 +234,37 @@ class GalleryRequestSpec:
         if rating_metatag is not None:
             parts.append(rating_metatag)
         return " ".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class GalleryRequestAccepted:
+    """Immutable description emitted exactly once after queue acceptance."""
+
+    request_id: int
+    spec: GalleryRequestSpec
+    display_text: str
+    origin: GalleryRequestOrigin
+    restore_history_id: int | None = None
+    preserve_gallery_position: bool = False
+    accepted_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+    @property
+    def counts_as_query_use(self) -> bool:
+        return self.origin in {
+            GalleryRequestOrigin.SEARCH,
+            GalleryRequestOrigin.RESTORE,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GalleryRequestContext:
+    spec: GalleryRequestSpec
+    display_text: str
+    origin: GalleryRequestOrigin
+    restore_history_id: int | None = None
+    preserve_gallery_position: bool = False
 
 
 def build_gallery_request_spec(
@@ -436,6 +476,11 @@ class DanbooruPostListModel(QAbstractListModel):
     def rowForPostId(self, post_id: int) -> int:
         return self.row_for_post_id(post_id)
 
+    @Slot(int, result=int)
+    def postIdAt(self, row: int) -> int:
+        post = self.post_at(row)
+        return post.id if post is not None else -1
+
     def clear(self) -> None:
         if self._posts:
             self.set_posts(())
@@ -449,6 +494,8 @@ class GalleryPageOutcome:
     posts: tuple[DanbooruPost, ...] = ()
     error_kind: str | None = None
     http_status: int | None = None
+    request_id: int | None = None
+    restore_history_id: int | None = None
 
 
 class DanbooruGalleryController(QObject):
@@ -458,6 +505,8 @@ class DanbooruGalleryController(QObject):
     statusTextChanged = Signal()
     errorTextChanged = Signal()
     navigationChanged = Signal()
+    requestAccepted = Signal(object)
+    pageDisplayed = Signal(object)
     pageRequestCompleted = Signal(object)
 
     def __init__(
@@ -468,12 +517,18 @@ class DanbooruGalleryController(QObject):
         network_manager: QNetworkAccessManager | None = None,
         task_queue: BoundedTaskQueue | None = None,
         queue_config: TaskQueueConfig | None = None,
+        accepted_clock: Callable[[], datetime] | None = None,
+        connect_application_quit: bool = True,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         select_preferred_tls_backend()
         self._base_url = base_url
         self._timeout_ms = timeout_ms
+        self._accepted_clock = accepted_clock or (
+            lambda: datetime.now(timezone.utc)
+        )
+        self._last_accepted_at: datetime | None = None
         self._network_manager = network_manager or QNetworkAccessManager(self)
         self._owns_queue = task_queue is None
         if task_queue is None:
@@ -487,21 +542,31 @@ class DanbooruGalleryController(QObject):
         self._posts_model = DanbooruPostListModel(self)
         self._active_task_id: str | None = None
         self._request_generation = 0
+        self._closing = False
         self._shutdown = False
         self._state = RequestState.IDLE
         self._status_text = "请输入一个或两个 Danbooru 英文标签。"
         self._error_text = ""
         self._committed_spec: GalleryRequestSpec | None = None
+        self._committed_context: GalleryRequestContext | None = None
         self._has_next_page = False
         self._failed_spec: GalleryRequestSpec | None = None
+        self._failed_context: GalleryRequestContext | None = None
+        self._failed_request_id: int | None = None
 
         application = QCoreApplication.instance()
-        if application is not None:
+        if connect_application_quit and application is not None:
             application.aboutToQuit.connect(self.shutdown)
 
     @Property(QObject, constant=True)
     def postsModel(self) -> QObject:
         return self._posts_model
+
+    @property
+    def request_generation(self) -> int:
+        """Return the latest request generation for session invalidation guards."""
+
+        return self._request_generation
 
     @Property(str, notify=stateChanged)
     def state(self) -> str:
@@ -593,6 +658,8 @@ class DanbooruGalleryController(QObject):
         except GalleryQueryError as exc:
             self._invalidate_active_request()
             self._failed_spec = None
+            self._failed_context = None
+            self._failed_request_id = None
             self._finish_immediate_error(
                 str(exc),
                 RequestErrorKind.INVALID_REQUEST,
@@ -600,33 +667,174 @@ class DanbooruGalleryController(QObject):
             return
 
         self._failed_spec = None
-        self._request_page(spec)
+        self._failed_context = None
+        self._failed_request_id = None
+        self._request_page(
+            GalleryRequestContext(
+                spec=spec,
+                display_text=raw_tags,
+                origin=GalleryRequestOrigin.SEARCH,
+            )
+        )
+
+    @Slot(int, str, str, int, int)
+    def restoreSearch(
+        self,
+        history_id: int,
+        raw_tags: str,
+        rating: str,
+        page_size: int,
+        page: int,
+    ) -> None:
+        """Request one saved page while retaining its history identity."""
+
+        if self._requests_disabled:
+            self._finish_immediate_error(
+                "应用或任务队列正在关闭，不能恢复查询。",
+                RequestErrorKind.INVALID_REQUEST,
+                page=page,
+            )
+            return
+        if (
+            not isinstance(history_id, int)
+            or isinstance(history_id, bool)
+            or history_id < 1
+        ):
+            self._finish_immediate_error(
+                "恢复查询记录编号无效。",
+                RequestErrorKind.INVALID_REQUEST,
+                page=page,
+            )
+            return
+        try:
+            spec = build_gallery_request_spec(
+                raw_tags,
+                rating,
+                page=page,
+                limit=page_size,
+            )
+        except GalleryQueryError as exc:
+            self._invalidate_active_request()
+            self._failed_spec = None
+            self._failed_context = None
+            self._failed_request_id = None
+            self._finish_immediate_error(
+                str(exc),
+                RequestErrorKind.INVALID_REQUEST,
+                page=page,
+            )
+            return
+        self._failed_spec = None
+        self._failed_context = None
+        self._failed_request_id = None
+        self._request_page(
+            GalleryRequestContext(
+                spec=spec,
+                display_text=raw_tags,
+                origin=GalleryRequestOrigin.RESTORE,
+                restore_history_id=history_id,
+                preserve_gallery_position=True,
+            )
+        )
 
     @Slot()
     def previousPage(self) -> None:
         if self.canPrevious:
-            self._request_page(self._spec_for_page(self.currentPage - 1))
+            self._request_page(
+                self._context_for_page(
+                    self.currentPage - 1,
+                    GalleryRequestOrigin.PAGINATION,
+                )
+            )
 
     @Slot()
     def nextPage(self) -> None:
         if self.canNext:
-            self._request_page(self._spec_for_page(self.currentPage + 1))
+            self._request_page(
+                self._context_for_page(
+                    self.currentPage + 1,
+                    GalleryRequestOrigin.PAGINATION,
+                )
+            )
 
     @Slot()
     def refresh(self) -> None:
-        if self.canRefresh and self._committed_spec is not None:
-            self._request_page(self._committed_spec)
+        if self.canRefresh and self._committed_context is not None:
+            self._request_page(
+                GalleryRequestContext(
+                    spec=self._committed_context.spec,
+                    display_text=self._committed_context.display_text,
+                    origin=GalleryRequestOrigin.REFRESH,
+                    restore_history_id=self._committed_context.restore_history_id,
+                    preserve_gallery_position=True,
+                )
+            )
 
     @Slot()
     def retry(self) -> None:
-        if self.canRetry and self._failed_spec is not None:
-            self._request_page(self._failed_spec)
+        if self.canRetry and self._failed_context is not None:
+            self._request_page(
+                GalleryRequestContext(
+                    spec=self._failed_context.spec,
+                    display_text=self._failed_context.display_text,
+                    origin=GalleryRequestOrigin.RETRY,
+                    restore_history_id=self._failed_context.restore_history_id,
+                    preserve_gallery_position=(
+                        self._failed_context.preserve_gallery_position
+                    ),
+                )
+            )
 
     @Slot()
     def cancelCurrentRequest(self) -> None:
         task_id = self._active_task_id
         if task_id is not None:
             self._task_queue.cancel(task_id, "用户取消了请求。")
+
+    def cancel_request(self, request_id: int) -> bool:
+        """Invalidate one exact request and remove only its retry snapshot."""
+
+        if (
+            not isinstance(request_id, int)
+            or isinstance(request_id, bool)
+            or request_id < 1
+        ):
+            return False
+        matches_current = request_id == self._request_generation
+        matches_failed = request_id == self._failed_request_id
+        if not matches_current and not matches_failed:
+            return False
+
+        task_id: str | None = None
+        if matches_current:
+            self._request_generation += 1
+            task_id = self._active_task_id
+            self._active_task_id = None
+        if matches_failed:
+            self._failed_spec = None
+            self._failed_context = None
+            self._failed_request_id = None
+        if task_id is not None:
+            self._task_queue.cancel(task_id, "恢复请求已失效。")
+        if matches_current and not self._shutdown:
+            self._state = RequestState.CANCELLED
+            self._status_text = "恢复请求已取消，当前画廊内容保持不变。"
+            self._error_text = ""
+            self._emit_view_changes()
+        return True
+
+    @Slot(int, result=bool)
+    def cancelRequest(self, request_id: int) -> bool:
+        return self.cancel_request(request_id)
+
+    @Slot()
+    def begin_shutdown(self) -> None:
+        """Reject reentrant requests while the session saves its final state."""
+
+        if self._closing or self._shutdown:
+            return
+        self._closing = True
+        self._emit_view_changes()
 
     @Slot()
     def shutdown(self) -> None:
@@ -641,19 +849,31 @@ class DanbooruGalleryController(QObject):
         elif task_id is not None:
             self._task_queue.cancel(task_id, "Application is shutting down.")
         self._failed_spec = None
+        self._failed_context = None
+        self._failed_request_id = None
         self._state = RequestState.CANCELLED
         self._status_text = "应用正在关闭，活动请求已取消。"
         self._error_text = ""
         self._emit_view_changes()
 
-    def _spec_for_page(self, page: int) -> GalleryRequestSpec:
-        if self._committed_spec is None:
+    def _context_for_page(
+        self,
+        page: int,
+        origin: GalleryRequestOrigin,
+    ) -> GalleryRequestContext:
+        if self._committed_context is None:
             raise RuntimeError("The gallery does not have a committed query.")
-        return GalleryRequestSpec(
-            tags=self._committed_spec.tags,
-            rating=self._committed_spec.rating,
-            page=page,
-            limit=self._committed_spec.limit,
+        committed = self._committed_context
+        return GalleryRequestContext(
+            spec=GalleryRequestSpec(
+                tags=committed.spec.tags,
+                rating=committed.spec.rating,
+                page=page,
+                limit=committed.spec.limit,
+            ),
+            display_text=committed.display_text,
+            origin=origin,
+            restore_history_id=committed.restore_history_id,
         )
 
     def _invalidate_active_request(self) -> int:
@@ -664,7 +884,8 @@ class DanbooruGalleryController(QObject):
             self._task_queue.cancel(task_id, "A newer gallery request replaced this one.")
         return self._request_generation
 
-    def _request_page(self, spec: GalleryRequestSpec) -> None:
+    def _request_page(self, context: GalleryRequestContext) -> None:
+        spec = context.spec
         if self._requests_disabled:
             self._finish_immediate_error(
                 "应用或任务队列正在关闭，不能开始新请求。",
@@ -683,6 +904,8 @@ class DanbooruGalleryController(QObject):
             )
         except ValueError as exc:
             self._failed_spec = None
+            self._failed_context = None
+            self._failed_request_id = None
             self._finish_immediate_error(
                 str(exc),
                 RequestErrorKind.INVALID_REQUEST,
@@ -691,12 +914,11 @@ class DanbooruGalleryController(QObject):
             return
 
         self._failed_spec = None
+        self._failed_context = None
+        self._failed_request_id = None
         self._state = RequestState.WAITING
         self._status_text = f"第 {spec.page} 页请求正在等待执行。"
         self._error_text = ""
-        self._emit_view_changes()
-        if generation != self._request_generation or self._requests_disabled:
-            return
 
         def starter(
             attempt_number: int,
@@ -712,33 +934,94 @@ class DanbooruGalleryController(QObject):
         def state_changed(record: TaskRecord) -> None:
             self._task_state_changed(generation, spec, record)
 
+        completion_is_live = False
+        deferred_results: list[TaskFinalResult] = []
+
         def completed(result: TaskFinalResult) -> None:
-            self._task_completed(generation, spec, result)
+            if not completion_is_live:
+                deferred_results.append(result)
+                return
+            self._task_completed(generation, context, result)
 
         try:
             record = self._task_queue.submit(
                 TaskKind.METADATA,
                 starter,
                 completed,
-                state_listener=state_changed,
             )
         except (TaskQueueFullError, TaskQueueShutdownError) as exc:
             if generation == self._request_generation and not self._shutdown:
                 self._failed_spec = None
+                self._failed_context = None
+                self._failed_request_id = None
                 self._finish_immediate_error(
                     str(exc),
                     RequestErrorKind.INVALID_REQUEST,
                     page=spec.page,
                 )
             return
-        if generation != self._request_generation or self._requests_disabled:
-            self._task_queue.cancel(
-                record.identifier,
-                "A newer gallery request replaced this queued task.",
-            )
-            return
-        if not record.terminal and self.busy:
+        if not record.terminal and generation == self._request_generation:
             self._active_task_id = record.identifier
+        record.add_listener(state_changed)
+
+        if not self._shutdown:
+            self.requestAccepted.emit(
+                GalleryRequestAccepted(
+                    request_id=generation,
+                    spec=spec,
+                    display_text=context.display_text,
+                    origin=context.origin,
+                    restore_history_id=context.restore_history_id,
+                    preserve_gallery_position=(
+                        context.preserve_gallery_position
+                    ),
+                    accepted_at=self._next_accepted_at(),
+                )
+            )
+        completion_is_live = True
+        if generation != self._request_generation or self._requests_disabled:
+            if not record.terminal:
+                self._task_queue.cancel(
+                    record.identifier,
+                    "A newer gallery request replaced this queued task.",
+                )
+            return
+        # The queue has accepted the task and requestAccepted listeners have had
+        # a chance to bind its exact request id before any reentrant view signal.
+        self._emit_view_changes()
+        if generation != self._request_generation or self._requests_disabled:
+            if not record.terminal:
+                self._task_queue.cancel(
+                    record.identifier,
+                    "A newer gallery request replaced this queued task.",
+                )
+            return
+        state_changed(record)
+        if generation != self._request_generation or self._requests_disabled:
+            if not record.terminal:
+                self._task_queue.cancel(
+                    record.identifier,
+                    "A newer gallery request replaced this queued task.",
+                )
+            return
+        for deferred_result in deferred_results:
+            self._task_completed(generation, context, deferred_result)
+            if generation != self._request_generation or self._requests_disabled:
+                break
+
+    def _next_accepted_at(self) -> datetime:
+        value = self._accepted_clock()
+        if not isinstance(value, datetime) or value.tzinfo is None:
+            raise ValueError("accepted clock must return a timezone-aware datetime")
+        value = value.astimezone(timezone.utc)
+        previous = self._last_accepted_at
+        if previous is not None and value <= previous:
+            try:
+                value = previous + timedelta(microseconds=1)
+            except OverflowError:
+                value = previous
+        self._last_accepted_at = value
+        return value
 
     def _task_state_changed(
         self,
@@ -770,9 +1053,10 @@ class DanbooruGalleryController(QObject):
     def _task_completed(
         self,
         generation: int,
-        spec: GalleryRequestSpec,
+        context: GalleryRequestContext,
         result: TaskFinalResult,
     ) -> None:
+        spec = context.spec
         if generation != self._request_generation:
             return
         if self._active_task_id is not None and result.task_id != self._active_task_id:
@@ -781,18 +1065,24 @@ class DanbooruGalleryController(QObject):
 
         if result.state == TaskState.CANCELLED:
             self._failed_spec = None
+            self._failed_context = None
+            self._failed_request_id = None
             self._complete(
                 GalleryPageOutcome(
                     state=RequestState.CANCELLED,
                     message="请求已取消，当前画廊内容保持不变。",
                     page=spec.page,
                     error_kind=RequestErrorKind.CANCELLED,
+                    request_id=generation,
+                    restore_history_id=context.restore_history_id,
                 )
             )
             return
 
         if result.state == TaskState.FAILED:
             self._failed_spec = spec
+            self._failed_context = context
+            self._failed_request_id = generation
             message = self._failure_message(result)
             self._complete(
                 GalleryPageOutcome(
@@ -801,6 +1091,8 @@ class DanbooruGalleryController(QObject):
                     page=spec.page,
                     error_kind=result.error_code,
                     http_status=result.http_status,
+                    request_id=generation,
+                    restore_history_id=context.restore_history_id,
                 )
             )
             return
@@ -810,6 +1102,8 @@ class DanbooruGalleryController(QObject):
             isinstance(post, DanbooruPost) for post in posts
         ):
             self._failed_spec = spec
+            self._failed_context = context
+            self._failed_request_id = generation
             self._complete(
                 GalleryPageOutcome(
                     state=RequestState.ERROR,
@@ -817,57 +1111,79 @@ class DanbooruGalleryController(QObject):
                     page=spec.page,
                     error_kind=RequestErrorKind.INVALID_RESPONSE,
                     http_status=result.http_status,
+                    request_id=generation,
+                    restore_history_id=context.restore_history_id,
                 )
             )
             return
 
         self._failed_spec = None
+        self._failed_context = None
+        self._failed_request_id = None
         if posts:
             self._committed_spec = spec
+            self._committed_context = context
             self._has_next_page = len(posts) == spec.limit
+            displayed_revision = self._posts_model.revision + 1
             self._posts_model.set_posts(posts)
+            outcome = GalleryPageOutcome(
+                state=RequestState.SUCCESS,
+                message=f"第 {spec.page} 页已加载 {len(posts)} 项作品。",
+                page=spec.page,
+                posts=posts,
+                http_status=result.http_status,
+                request_id=generation,
+                restore_history_id=context.restore_history_id,
+            )
+            self._emit_displayed_outcome_if_current(
+                outcome,
+                displayed_revision,
+            )
             if generation != self._request_generation or self._requests_disabled:
                 return
-            self._complete(
-                GalleryPageOutcome(
-                    state=RequestState.SUCCESS,
-                    message=f"第 {spec.page} 页已加载 {len(posts)} 项作品。",
-                    page=spec.page,
-                    posts=posts,
-                    http_status=result.http_status,
-                ),
-                generation=generation,
+            self._complete(outcome, generation=generation)
+        elif spec.page > 1:
+            if self._is_empty_next_page(spec):
+                self._has_next_page = False
+            retained_message = (
+                f"第 {spec.page} 页没有作品，已保留第 {self.currentPage} 页。"
+                if self._committed_spec is not None
+                else f"第 {spec.page} 页没有作品，当前画廊保持不变。"
             )
-        elif self._is_empty_next_page(spec):
-            self._has_next_page = False
             self._complete(
                 GalleryPageOutcome(
                     state=RequestState.EMPTY,
-                    message=(
-                        f"第 {spec.page} 页没有作品，已保留第 {self.currentPage} 页。"
-                    ),
+                    message=retained_message,
                     page=spec.page,
                     posts=(),
                     http_status=result.http_status,
+                    request_id=generation,
+                    restore_history_id=context.restore_history_id,
                 ),
                 generation=generation,
             )
         else:
             self._committed_spec = spec
+            self._committed_context = context
             self._has_next_page = False
+            displayed_revision = self._posts_model.revision + 1
             self._posts_model.set_posts(())
+            outcome = GalleryPageOutcome(
+                state=RequestState.EMPTY,
+                message=f"第 {spec.page} 页没有符合条件的作品。",
+                page=spec.page,
+                posts=(),
+                http_status=result.http_status,
+                request_id=generation,
+                restore_history_id=context.restore_history_id,
+            )
+            self._emit_displayed_outcome_if_current(
+                outcome,
+                displayed_revision,
+            )
             if generation != self._request_generation or self._requests_disabled:
                 return
-            self._complete(
-                GalleryPageOutcome(
-                    state=RequestState.EMPTY,
-                    message=f"第 {spec.page} 页没有符合条件的作品。",
-                    page=spec.page,
-                    posts=(),
-                    http_status=result.http_status,
-                ),
-                generation=generation,
-            )
+            self._complete(outcome, generation=generation)
 
     def _is_empty_next_page(self, spec: GalleryRequestSpec) -> bool:
         committed = self._committed_spec
@@ -878,6 +1194,19 @@ class DanbooruGalleryController(QObject):
             and committed.limit == spec.limit
             and spec.page > committed.page
         )
+
+    def _emit_displayed_outcome_if_current(
+        self,
+        outcome: GalleryPageOutcome,
+        displayed_revision: int,
+    ) -> None:
+        """Record a page that remains visible after a synchronous reentrant request."""
+
+        if (
+            not self._requests_disabled
+            and self._posts_model.revision == displayed_revision
+        ):
+            self.pageDisplayed.emit(outcome)
 
     @staticmethod
     def _failure_message(result: TaskFinalResult) -> str:
@@ -901,7 +1230,7 @@ class DanbooruGalleryController(QObject):
 
     @property
     def _requests_disabled(self) -> bool:
-        return self._shutdown or self._task_queue.is_shutdown
+        return self._closing or self._shutdown or self._task_queue.is_shutdown
 
     def _finish_immediate_error(
         self,

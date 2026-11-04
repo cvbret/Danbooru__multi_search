@@ -23,6 +23,17 @@ Item {
         )
     }
 
+    function retryCurrentMedia() {
+        const url = controller.mediaUrl
+        if (url.length > 0) {
+            imageCacheController.prepareManualRetry(
+                url,
+                imageCacheController.finalUrlFor(url)
+            )
+        }
+        controller.retryMedia()
+    }
+
     Connections {
         target: controller
 
@@ -158,6 +169,10 @@ Item {
                     onCandidateFailed: function(generation, attempt, url) {
                         controller.reportMediaFailure(generation, attempt, url)
                     }
+
+                    onCandidateStopped: function(generation, attempt, url) {
+                        controller.reportMediaStopped(generation, attempt, url)
+                    }
                 }
 
                 RowLayout {
@@ -188,7 +203,7 @@ Item {
                         objectName: "detailRetryMediaButton"
                         visible: controller.canRetryMedia
                         text: qsTr("重试图片")
-                        onClicked: controller.retryMedia()
+                        onClicked: page.retryCurrentMedia()
                     }
                 }
             }

@@ -710,6 +710,23 @@ class DanbooruDetailController(QObject):
         self.mediaChanged.emit()
         return True
 
+    @Slot(int, int, str, result=bool)
+    def reportMediaStopped(
+        self,
+        generation: int,
+        candidate_attempt: int,
+        url: str,
+    ) -> bool:
+        """Keep a cleared active image stopped until the user retries it."""
+
+        candidate = self._matching_candidate(generation, candidate_attempt, url)
+        if candidate is None:
+            return False
+        self._media_state = DetailMediaState.ERROR
+        self._media_message = "图片缓存已清理，请手动重试这张图片。"
+        self.mediaChanged.emit()
+        return True
+
     @Slot(str, result=bool)
     def activateTag(self, tag_name: str) -> bool:
         if (

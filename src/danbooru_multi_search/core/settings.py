@@ -5,9 +5,15 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Mapping
+
+
+DEFAULT_IMAGE_CACHE_LIMIT_BYTES = 512 * 1024 * 1024
+MIN_IMAGE_CACHE_LIMIT_BYTES = 64 * 1024 * 1024
+MAX_IMAGE_CACHE_LIMIT_BYTES = 16 * 1024 * 1024 * 1024
 
 
 class SettingsError(RuntimeError):
@@ -16,14 +22,16 @@ class SettingsError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class AppSettings:
-    """Settings required by the M0 application shell."""
+    """Version 1 application settings with backward-compatible defaults."""
 
     schema_version: int = 1
     language: str = "zh-CN"
     theme: str = "system"
-    page_size: int = 20
+    page_size: int = 40
     danbooru_api_url: str = "https://danbooru.donmai.us"
     download_directory: str = ""
+    tag_csv_path: str = ""
+    image_cache_limit_bytes: int = DEFAULT_IMAGE_CACHE_LIMIT_BYTES
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "AppSettings":
@@ -53,14 +61,30 @@ class AppSettings:
             raise SettingsError(f"Unsupported theme: {settings.theme}")
         if not isinstance(settings.page_size, int) or isinstance(settings.page_size, bool):
             raise SettingsError("page_size must be an integer")
-        if not 1 <= settings.page_size <= 100:
-            raise SettingsError("page_size must be between 1 and 100")
+        if not 1 <= settings.page_size <= 200:
+            raise SettingsError("page_size must be between 1 and 200")
         if not isinstance(settings.danbooru_api_url, str):
             raise SettingsError("danbooru_api_url must be a string")
         if not settings.danbooru_api_url.startswith(("https://", "http://")):
             raise SettingsError("danbooru_api_url must be an HTTP or HTTPS URL")
         if not isinstance(settings.download_directory, str):
             raise SettingsError("download_directory must be a string")
+        if not isinstance(settings.tag_csv_path, str):
+            raise SettingsError("tag_csv_path must be a string")
+        if settings.tag_csv_path and not Path(settings.tag_csv_path).is_absolute():
+            raise SettingsError("tag_csv_path must be an absolute path or empty")
+        if not isinstance(settings.image_cache_limit_bytes, int) or isinstance(
+            settings.image_cache_limit_bytes, bool
+        ):
+            raise SettingsError("image_cache_limit_bytes must be an integer")
+        if not (
+            MIN_IMAGE_CACHE_LIMIT_BYTES
+            <= settings.image_cache_limit_bytes
+            <= MAX_IMAGE_CACHE_LIMIT_BYTES
+        ):
+            raise SettingsError(
+                "image_cache_limit_bytes must be between 64 MiB and 16 GiB"
+            )
         return settings
 
     def to_mapping(self) -> dict[str, Any]:
@@ -130,4 +154,48 @@ class SettingsStore:
         finally:
             if temporary_path is not None and temporary_path.exists():
                 temporary_path.unlink(missing_ok=True)
+
+
+class SettingsController:
+    """Serialize merged settings updates around one in-memory snapshot."""
+
+    def __init__(
+        self,
+        store: SettingsStore,
+        settings: AppSettings,
+    ) -> None:
+        self._store = store
+        self._settings = settings
+        self._lock = threading.RLock()
+
+    @property
+    def settings(self) -> AppSettings:
+        """Return the latest successfully persisted immutable settings."""
+
+        with self._lock:
+            return self._settings
+
+    def update(self, **changes: Any) -> AppSettings:
+        """Merge, validate, and atomically persist fields as one serialized update."""
+
+        with self._lock:
+            merged = self._settings.to_mapping()
+            merged.update(changes)
+            updated = AppSettings.from_mapping(merged)
+            self._store.save(updated)
+            self._settings = updated
+            return updated
+
+    def set_tag_csv_path(self, path: Path) -> AppSettings:
+        """Persist the absolute path of the last successful CSV import."""
+
+        local_path = Path(path)
+        if not local_path.is_absolute():
+            raise SettingsError("tag CSV path must be absolute")
+        return self.update(tag_csv_path=str(local_path))
+
+    def set_image_cache_limit_bytes(self, value: int) -> AppSettings:
+        """Persist the image disk-cache capacity after shared validation."""
+
+        return self.update(image_cache_limit_bytes=value)
 

@@ -9,6 +9,7 @@ Item {
     property string componentType: "none"
     property int candidateGeneration: 0
     property int candidateAttempt: 0
+    property int mediaRebuildToken: 0
     property real intrinsicWidth: 0
     property real intrinsicHeight: 0
     property real zoomScale: 1.0
@@ -21,6 +22,7 @@ Item {
     signal candidateSucceeded(int generation, int attempt, string url,
                               real pixelWidth, real pixelHeight)
     signal candidateFailed(int generation, int attempt, string url)
+    signal candidateStopped(int generation, int attempt, string url)
 
     function loadCandidate(url, component, generation, attempt) {
         if (candidateUrl === url
@@ -28,6 +30,7 @@ Item {
                 && candidateGeneration === generation
                 && candidateAttempt === attempt)
             return
+        ++mediaRebuildToken
         mediaLoader.active = false
         candidateUrl = url
         componentType = component
@@ -46,6 +49,7 @@ Item {
     }
 
     function clearMedia() {
+        ++mediaRebuildToken
         mediaLoader.active = false
         candidateUrl = ""
         componentType = "none"
@@ -55,6 +59,55 @@ Item {
         scaleMode = "fit-window"
         viewport.contentX = 0
         viewport.contentY = 0
+    }
+
+    function retryDecodedCandidate(generation, attempt, url) {
+        if (generation !== candidateGeneration
+                || attempt !== candidateAttempt
+                || url !== candidateUrl)
+            return false
+        const token = ++mediaRebuildToken
+        mediaLoader.active = false
+        Qt.callLater(function() {
+            if (token !== mediaRebuildToken
+                    || generation !== candidateGeneration
+                    || attempt !== candidateAttempt
+                    || url !== candidateUrl)
+                return
+            mediaLoader.active = true
+        })
+        return true
+    }
+
+    function handleDecodeFailure(generation, attempt, url, cacheGeneration) {
+        if (generation !== candidateGeneration
+                || attempt !== candidateAttempt
+                || url !== candidateUrl)
+            return
+        const finalUrl = imageCacheController.finalUrlFor(url)
+        const action = imageCacheController.decodeFailureActionForGeneration(
+            url,
+            finalUrl,
+            cacheGeneration
+        )
+        if (action === "retry") {
+            retryDecodedCandidate(generation, attempt, url)
+            return
+        }
+        if (action === "stopped")
+            stopCandidate(generation, attempt, url)
+        else if (action === "failed")
+            candidateFailed(generation, attempt, url)
+    }
+
+    function stopCandidate(generation, attempt, url) {
+        if (generation !== candidateGeneration
+                || attempt !== candidateAttempt
+                || url !== candidateUrl)
+            return
+        candidateStopped(generation, attempt, url)
+        ++mediaRebuildToken
+        mediaLoader.active = false
     }
 
     function acceptDecodedDimensions(generation, attempt, url, pixelWidth, pixelHeight) {
@@ -218,26 +271,45 @@ Item {
 
             property int frozenGeneration: 0
             property int frozenAttempt: 0
+            property int frozenCacheGeneration: 0
             property string frozenUrl: ""
 
             Component.onCompleted: {
                 frozenGeneration = viewer.candidateGeneration
                 frozenAttempt = viewer.candidateAttempt
+                frozenCacheGeneration = imageCacheController.cacheGeneration
                 frozenUrl = viewer.candidateUrl
                 source = frozenUrl
             }
 
             onStatusChanged: {
                 if (status === Image.Ready) {
-                    viewer.candidateSucceeded(
+                    const action = imageCacheController.decodeSuccessActionForGeneration(
+                        frozenUrl,
+                        frozenCacheGeneration
+                    )
+                    if (action === "accepted") {
+                        viewer.candidateSucceeded(
+                            frozenGeneration,
+                            frozenAttempt,
+                            frozenUrl,
+                            sourceSize.width > 0 ? sourceSize.width : implicitWidth,
+                            sourceSize.height > 0 ? sourceSize.height : implicitHeight
+                        )
+                    } else if (action === "stopped") {
+                        viewer.stopCandidate(
+                            frozenGeneration,
+                            frozenAttempt,
+                            frozenUrl
+                        )
+                    }
+                } else if (status === Image.Error) {
+                    viewer.handleDecodeFailure(
                         frozenGeneration,
                         frozenAttempt,
                         frozenUrl,
-                        sourceSize.width > 0 ? sourceSize.width : implicitWidth,
-                        sourceSize.height > 0 ? sourceSize.height : implicitHeight
+                        frozenCacheGeneration
                     )
-                } else if (status === Image.Error) {
-                    viewer.candidateFailed(frozenGeneration, frozenAttempt, frozenUrl)
                 }
             }
         }
@@ -257,26 +329,45 @@ Item {
 
             property int frozenGeneration: 0
             property int frozenAttempt: 0
+            property int frozenCacheGeneration: 0
             property string frozenUrl: ""
 
             Component.onCompleted: {
                 frozenGeneration = viewer.candidateGeneration
                 frozenAttempt = viewer.candidateAttempt
+                frozenCacheGeneration = imageCacheController.cacheGeneration
                 frozenUrl = viewer.candidateUrl
                 source = frozenUrl
             }
 
             onStatusChanged: {
                 if (status === Image.Ready) {
-                    viewer.candidateSucceeded(
+                    const action = imageCacheController.decodeSuccessActionForGeneration(
+                        frozenUrl,
+                        frozenCacheGeneration
+                    )
+                    if (action === "accepted") {
+                        viewer.candidateSucceeded(
+                            frozenGeneration,
+                            frozenAttempt,
+                            frozenUrl,
+                            sourceSize.width > 0 ? sourceSize.width : implicitWidth,
+                            sourceSize.height > 0 ? sourceSize.height : implicitHeight
+                        )
+                    } else if (action === "stopped") {
+                        viewer.stopCandidate(
+                            frozenGeneration,
+                            frozenAttempt,
+                            frozenUrl
+                        )
+                    }
+                } else if (status === Image.Error) {
+                    viewer.handleDecodeFailure(
                         frozenGeneration,
                         frozenAttempt,
                         frozenUrl,
-                        sourceSize.width > 0 ? sourceSize.width : implicitWidth,
-                        sourceSize.height > 0 ? sourceSize.height : implicitHeight
+                        frozenCacheGeneration
                     )
-                } else if (status === Image.Error) {
-                    viewer.candidateFailed(frozenGeneration, frozenAttempt, frozenUrl)
                 }
             }
         }

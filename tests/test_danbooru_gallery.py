@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -18,6 +19,7 @@ from danbooru_multi_search.danbooru import (
     DanbooruPost,
     DanbooruPostListModel,
     GalleryQueryError,
+    GalleryRequestOrigin,
     PostRole,
     RequestErrorKind,
     RequestState,
@@ -316,6 +318,87 @@ def test_controller_requests_a_page_and_commits_the_result():
     assert controller.canPrevious is False
 
 
+def test_request_accepted_event_preserves_display_order_and_origin():
+    reply = FakeReply(_payload(_post_mapping(1)))
+    manager = FakeNetworkManager([reply])
+    controller = DanbooruGalleryController(
+        "https://example.invalid",
+        network_manager=manager,
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+    )
+    accepted = []
+    controller.requestAccepted.connect(accepted.append)
+
+    controller.search("  Dog   cat ", "general", 40)
+
+    assert len(accepted) == 1
+    event = accepted[0]
+    assert event.display_text == "  Dog   cat "
+    assert event.spec.tags == ("dog", "cat")
+    assert event.spec.page == 1
+    assert event.origin == GalleryRequestOrigin.SEARCH
+    assert event.counts_as_query_use is True
+    assert event.restore_history_id is None
+
+
+def test_equal_accepted_clock_values_are_made_strictly_monotonic():
+    replies = [
+        FakeReply(_payload(_post_mapping(1))),
+        FakeReply(_payload(_post_mapping(2))),
+    ]
+    manager = FakeNetworkManager(replies)
+    fixed = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    controller = DanbooruGalleryController(
+        "https://example.invalid",
+        network_manager=manager,
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        accepted_clock=lambda: fixed,
+    )
+    accepted = []
+    controller.requestAccepted.connect(accepted.append)
+
+    controller.search("cat", "all", 1)
+    controller.search("dog", "all", 1)
+
+    assert len(accepted) == 2
+    assert accepted[0].accepted_at == fixed
+    assert accepted[1].accepted_at == fixed + timedelta(microseconds=1)
+
+
+def test_restore_and_retry_keep_history_identity_without_double_tag_use():
+    failed = FakeReply(b"server error", status=500)
+    retried = FakeReply(_payload(_post_mapping(5)))
+    manager = FakeNetworkManager([failed, retried])
+    controller = DanbooruGalleryController(
+        "https://example.invalid",
+        network_manager=manager,
+        queue_config=TaskQueueConfig(
+            minimum_interval_seconds=0,
+            max_retries=0,
+        ),
+    )
+    accepted = []
+    controller.requestAccepted.connect(accepted.append)
+
+    controller.restoreSearch(17, "cat", "general", 40, 5)
+    _dispatch()
+    failed.finish()
+    controller.retry()
+    _dispatch()
+
+    assert [event.origin for event in accepted] == [
+        GalleryRequestOrigin.RESTORE,
+        GalleryRequestOrigin.RETRY,
+    ]
+    assert [event.restore_history_id for event in accepted] == [17, 17]
+    assert [event.spec.page for event in accepted] == [5, 5]
+    assert [event.counts_as_query_use for event in accepted] == [True, False]
+
+    retried.finish()
+    assert controller.currentPage == 5
+    assert controller.postsModel.posts[0].id == 5
+
+
 @pytest.mark.parametrize(
     ("tags", "rating", "limit"),
     [
@@ -395,6 +478,33 @@ def test_empty_first_page_commits_an_empty_gallery():
     assert controller.postsModel.count == 0
     assert controller.canRefresh is True
     assert controller.canNext is False
+
+
+def test_empty_restored_nonfirst_page_does_not_commit_or_replace_gallery():
+    initial_reply = FakeReply(_payload(_post_mapping(1)))
+    restored_reply = FakeReply(b"[]")
+    manager = FakeNetworkManager([initial_reply, restored_reply])
+    controller = DanbooruGalleryController(
+        "https://example.invalid",
+        network_manager=manager,
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+    )
+    displayed = []
+    controller.pageDisplayed.connect(displayed.append)
+
+    controller.search("visible", "all", 1)
+    _dispatch()
+    initial_reply.finish()
+    controller.restoreSearch(30, "restored", "all", 40, 3)
+    _dispatch()
+    restored_reply.finish()
+
+    assert controller.state == RequestState.EMPTY
+    assert controller.currentPage == 1
+    assert [post.id for post in controller.postsModel.posts] == [1]
+    assert len(displayed) == 1
+    assert displayed[0].posts[0].id == 1
+    assert "保留第 1 页" in controller.statusText
 
 
 def test_failed_page_and_exact_retry_preserve_then_commit():

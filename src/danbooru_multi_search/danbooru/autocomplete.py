@@ -104,6 +104,9 @@ class TagImportOutcome:
     message: str
     error_code: str | None = None
     result: TagCsvImportResult | None = None
+    path: Path | None = None
+    generation: int = 0
+    path_saved: bool | None = None
 
 
 def locate_active_tag_fragment(text: str, cursor: int) -> ActiveTagFragment:
@@ -411,6 +414,8 @@ class DanbooruTagSuggestionController(QObject):
         index_snapshot: TagIndexSnapshot | None = None,
         translation_store: TagTranslationStore | None = None,
         csv_loader: Callable[..., TagCsvImportResult] = load_tag_csv,
+        csv_path_saver: Callable[[Path], None] | None = None,
+        connect_application_quit: bool = True,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -436,6 +441,7 @@ class DanbooruTagSuggestionController(QObject):
             self,
         )
         self._csv_loader = csv_loader
+        self._csv_path_saver = csv_path_saver
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(TAG_SUGGESTION_DEBOUNCE_MS)
@@ -451,12 +457,15 @@ class DanbooruTagSuggestionController(QObject):
         self._notice_text = ""
         self._import_generation = 0
         self._import_thread: _CsvImportThread | None = None
+        self._import_path: Path | None = None
+        self._persist_import_path = False
         self._import_busy = False
         self._import_status_text = "尚未导入本地标签库。"
+        self._closing = False
         self._shutdown = False
 
         application = QCoreApplication.instance()
-        if application is not None:
+        if connect_application_quit and application is not None:
             application.aboutToQuit.connect(self.shutdown)
 
     @Property(QObject, constant=True)
@@ -493,7 +502,7 @@ class DanbooruTagSuggestionController(QObject):
 
     @Slot(str, int)
     def updateInput(self, text: str, cursor: int) -> None:
-        if self._shutdown:
+        if self._closing or self._shutdown:
             return
         generation = self._invalidate_remote_request()
         self._current_text = text
@@ -543,7 +552,7 @@ class DanbooruTagSuggestionController(QObject):
 
     @Slot()
     def closeSuggestions(self) -> None:
-        if self._shutdown:
+        if self._closing or self._shutdown:
             return
         self._invalidate_remote_request()
         self._local_suggestions = ()
@@ -559,7 +568,7 @@ class DanbooruTagSuggestionController(QObject):
         cursor: int,
         index: int,
     ) -> dict[str, object]:
-        if self._shutdown:
+        if self._closing or self._shutdown:
             return TagReplacement(text, cursor, False, False).to_mapping()
         if not 0 <= index < len(self._model.items):
             return TagReplacement(text, cursor, False, False).to_mapping()
@@ -573,7 +582,7 @@ class DanbooruTagSuggestionController(QObject):
 
     @Slot(QUrl)
     def importCsv(self, url: QUrl) -> None:
-        if self._shutdown:
+        if self._closing or self._shutdown:
             return
         self._import_generation += 1
         generation = self._import_generation
@@ -592,24 +601,69 @@ class DanbooruTagSuggestionController(QObject):
             )
             return
 
+        self._begin_csv_import(
+            generation,
+            Path(local_path).expanduser().resolve(),
+            persist_path=True,
+        )
+
+    @Slot(str)
+    def importSavedCsv(self, path: str) -> None:
+        """Load a saved local index without writing the same setting again."""
+
+        if self._closing or self._shutdown or not isinstance(path, str) or not path:
+            return
+        self._import_generation += 1
+        generation = self._import_generation
+        self._cancel_import_thread(wait=True)
+        self._begin_csv_import(
+            generation,
+            Path(path).expanduser().resolve(),
+            persist_path=False,
+        )
+
+    def _begin_csv_import(
+        self,
+        generation: int,
+        path: Path,
+        *,
+        persist_path: bool,
+    ) -> None:
         thread = _CsvImportThread(
             generation,
-            Path(local_path),
+            path,
             self._csv_loader,
             self,
         )
         thread.completed.connect(self._import_finished)
         self._import_thread = thread
+        self._import_path = path
+        self._persist_import_path = persist_path
         self._import_busy = True
-        self._import_status_text = "正在读取本地标签 CSV……"
+        self._import_status_text = (
+            "正在恢复本地标签 CSV……"
+            if not persist_path
+            else "正在读取本地标签 CSV……"
+        )
         self.importStateChanged.emit()
         if (
-            self._shutdown
+            self._closing
+            or self._shutdown
             or generation != self._import_generation
             or self._import_thread is not thread
         ):
             return
         thread.start()
+
+    @Slot()
+    def begin_shutdown(self) -> None:
+        """Reject new UI work before the coordinated shutdown reaches this controller."""
+
+        if self._closing or self._shutdown:
+            return
+        self._closing = True
+        self._invalidate_remote_request()
+        self._import_generation += 1
 
     @Slot()
     def shutdown(self) -> None:
@@ -686,7 +740,10 @@ class DanbooruTagSuggestionController(QObject):
                 state_listener=state_changed,
             )
         except (TaskQueueFullError, TaskQueueShutdownError) as exc:
-            if generation == self._request_generation and not self._shutdown:
+            if (
+                generation == self._request_generation
+                and not self._requests_disabled
+            ):
                 self._remote_busy = False
                 self._notice_text = f"标签建议暂时不可用：{exc}"
                 self._emit_view_changes()
@@ -725,7 +782,7 @@ class DanbooruTagSuggestionController(QObject):
         fragment: str,
         result: TaskFinalResult,
     ) -> None:
-        if generation != self._request_generation or self._shutdown:
+        if generation != self._request_generation or self._requests_disabled:
             return
         if self._active_task_id is not None and result.task_id != self._active_task_id:
             return
@@ -780,11 +837,19 @@ class DanbooruTagSuggestionController(QObject):
         error: Exception | None,
     ) -> None:
         thread = self._import_thread
+        import_path = self._import_path
+        persist_path = self._persist_import_path
         if thread is not None and generation == self._import_generation:
             thread.wait()
             thread.deleteLater()
             self._import_thread = None
-        if generation != self._import_generation or self._shutdown:
+            self._import_path = None
+            self._persist_import_path = False
+        if (
+            generation != self._import_generation
+            or self._closing
+            or self._shutdown
+        ):
             return
 
         self._import_busy = False
@@ -795,31 +860,80 @@ class DanbooruTagSuggestionController(QObject):
             else:
                 code = "import_failed"
                 message = str(error or "标签 CSV 导入失败。")
-            outcome = TagImportOutcome(False, message, error_code=code)
+            outcome = TagImportOutcome(
+                False,
+                message,
+                error_code=code,
+                path=import_path,
+                generation=generation,
+            )
             self._import_status_text = message
             self.importStateChanged.emit()
-            if generation != self._import_generation or self._shutdown:
+            if (
+                generation != self._import_generation
+                or self._closing
+                or self._shutdown
+            ):
                 return
             self.importCompleted.emit(outcome)
             return
 
         request_generation = self._request_generation
         self._translation_store.replace_snapshot(result.snapshot)
-        if generation != self._import_generation or self._shutdown:
+        if (
+            generation != self._import_generation
+            or self._closing
+            or self._shutdown
+        ):
             return
-        self._import_status_text = (
+        path_saved: bool | None = None
+        save_error: Exception | None = None
+        if (
+            persist_path
+            and self._csv_path_saver is not None
+            and import_path is not None
+        ):
+            try:
+                self._csv_path_saver(import_path)
+                path_saved = True
+            except Exception as exc:
+                path_saved = False
+                save_error = exc
+        if (
+            generation != self._import_generation
+            or self._closing
+            or self._shutdown
+        ):
+            return
+        success_text = (
             f"导入完成：总记录 {result.total_records}，有效 {result.valid_records}，"
             f"跳过 {result.skipped_records}，合并重复 {result.duplicate_records}，"
             f"唯一标签 {result.unique_tags}。"
         )
-        outcome = TagImportOutcome(True, self._import_status_text, result=result)
+        if save_error is not None:
+            success_text += f" 路径保存失败：{save_error}"
+        self._import_status_text = success_text
+        outcome = TagImportOutcome(
+            True,
+            success_text,
+            error_code=("settings_save_failed" if save_error is not None else None),
+            result=result,
+            path=import_path,
+            generation=generation,
+            path_saved=path_saved,
+        )
         self.importStateChanged.emit()
-        if generation != self._import_generation or self._shutdown:
+        if (
+            generation != self._import_generation
+            or self._closing
+            or self._shutdown
+        ):
             return
         self.importCompleted.emit(outcome)
         if (
             generation != self._import_generation
             or request_generation != self._request_generation
+            or self._closing
             or self._shutdown
         ):
             return
@@ -830,15 +944,30 @@ class DanbooruTagSuggestionController(QObject):
         self._import_busy = False
         self._import_status_text = message
         self.importStateChanged.emit()
-        if generation != self._import_generation or self._shutdown:
+        if (
+            generation != self._import_generation
+            or self._closing
+            or self._shutdown
+        ):
             return
-        self.importCompleted.emit(TagImportOutcome(False, message, error_code=code))
+        self.importCompleted.emit(
+            TagImportOutcome(
+                False,
+                message,
+                error_code=code,
+                generation=generation,
+            )
+        )
 
     def _cancel_import_thread(self, *, wait: bool) -> None:
         thread = self._import_thread
         if thread is None:
+            self._import_path = None
+            self._persist_import_path = False
             return
         self._import_thread = None
+        self._import_path = None
+        self._persist_import_path = False
         thread.request_cancel()
         if wait:
             thread.wait()
@@ -846,7 +975,7 @@ class DanbooruTagSuggestionController(QObject):
 
     @property
     def _requests_disabled(self) -> bool:
-        return self._shutdown or self._task_queue.is_shutdown
+        return self._closing or self._shutdown or self._task_queue.is_shutdown
 
     def _emit_view_changes(self) -> None:
         self.openChanged.emit()

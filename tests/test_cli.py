@@ -36,7 +36,7 @@ def test_headless_check_initializes_and_exits(tmp_path):
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)
     assert output["status"] == "ok"
-    assert output["schema_version"] == 1
+    assert output["schema_version"] == 2
     assert output["settings_created"] is True
 
 

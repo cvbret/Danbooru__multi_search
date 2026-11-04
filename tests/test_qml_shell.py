@@ -4,12 +4,24 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest
+
 from PySide6.QtCore import QEventLoop, QObject, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQuick import QQuickItem
 
 from danbooru_multi_search.danbooru import DanbooruPost, RequestState
+from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.storage import HistoryError
 from danbooru_multi_search.ui.launcher import create_qml_engine, launch_gui
+
+
+def test_create_qml_engine_rejects_non_gui_application():
+    with pytest.raises(RuntimeError, match="QGuiApplication"):
+        create_qml_engine(
+            QObject(),
+            danbooru_base_url="https://example.invalid",
+        )
 
 
 def test_minimal_qml_window_loads():
@@ -167,3 +179,82 @@ def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
 
     assert shared_queue.is_shutdown is True
     assert shared_queue.has_work is False
+
+
+def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
+    tmp_path,
+    monkeypatch,
+):
+    application = QGuiApplication.instance() or QGuiApplication([])
+    runtime = initialize_runtime(tmp_path)
+    engine, gallery = create_qml_engine(
+        application,
+        danbooru_base_url="https://example.invalid",
+        runtime=runtime,
+    )
+    session_controller = engine.rootContext().contextProperty(
+        "sessionController"
+    )
+    ui_session = session_controller.parent()
+    detail = ui_session.detail_controller
+    tags = ui_session.tag_controller
+    images = ui_session.image_cache_controller
+    queue = ui_session.task_queue
+    events: list[str] = []
+    accepted_requests = []
+    gallery.requestAccepted.connect(accepted_requests.append)
+
+    def fail_final_save(**_kwargs):
+        raise HistoryError("simulated final save failure")
+
+    monkeypatch.setattr(
+        ui_session.history_repository,
+        "save_browser_state",
+        fail_final_save,
+    )
+    for name, owner, attribute in (
+        ("session", session_controller, "begin_shutdown"),
+        ("detail", detail, "shutdown"),
+        ("gallery", gallery, "shutdown"),
+        ("tags", tags, "shutdown"),
+        ("images", images, "shutdown"),
+        ("queue", queue, "shutdown"),
+    ):
+        original = getattr(owner, attribute)
+
+        def record(*args, _name=name, _original=original, **kwargs):
+            events.append(_name)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(owner, attribute, record)
+
+    reentry_count = 0
+
+    def reenter_shutdown_and_request() -> None:
+        nonlocal reentry_count
+        reentry_count += 1
+        ui_session.shutdown()
+        gallery.search("reentrant")
+        tags.updateInput("cat", 3)
+
+    session_controller.noticeTextChanged.connect(reenter_shutdown_and_request)
+    gallery.search("waiting")
+    assert queue.has_work is True
+    assert len(accepted_requests) == 1
+
+    ui_session.shutdown()
+
+    assert reentry_count == 1
+    assert events == ["session", "detail", "gallery", "tags", "images", "queue"]
+    assert "simulated final save failure" in session_controller.noticeText
+    assert detail._shutdown is True
+    assert gallery._shutdown is True
+    assert tags._shutdown is True
+    assert images.closed is True
+    assert queue.is_shutdown is True
+    assert queue.has_work is False
+    assert len(accepted_requests) == 1
+
+    for root in engine.rootObjects():
+        root.close()
+    engine.deleteLater()

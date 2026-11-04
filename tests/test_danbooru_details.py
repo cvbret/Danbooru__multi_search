@@ -355,6 +355,22 @@ def test_media_attempt_has_one_terminal_result():
     assert controller.mediaState == DetailMediaState.ERROR.value
 
 
+def test_cache_clear_stops_current_candidate_without_starting_fallback():
+    controller, _model, _store = _controller(_post())
+    controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    generation = controller.mediaGeneration
+    attempt = controller.candidateAttempt
+    url = controller.mediaUrl
+
+    assert controller.reportMediaStopped(generation, attempt, url) is True
+    assert controller.mediaState == DetailMediaState.ERROR.value
+    assert controller.canRetryMedia is True
+    assert controller.candidateAttempt == attempt
+    assert controller.mediaUrl == url
+    assert "缓存已清理" in controller.mediaMessage
+    assert controller.reportMediaFailure(generation, attempt, url) is False
+
+
 def test_quality_change_same_quality_retry_and_close_generation_rules():
     controller, _model, _store = _controller(_post())
     controller.openPost(0, 0, 0, 800, 600, 1280, 820)

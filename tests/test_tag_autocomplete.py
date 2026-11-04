@@ -442,6 +442,265 @@ def _import_result(name: str) -> TagCsvImportResult:
     return TagCsvImportResult(snapshot, 1, 1, 0, 0, 1, "utf-8")
 
 
+def test_successful_import_replaces_index_saves_absolute_path_before_completion(
+    tmp_path,
+):
+    csv_path = Path(tmp_path) / "nested" / "success.csv"
+    csv_path.parent.mkdir()
+    csv_path.write_text("placeholder", encoding="utf-8")
+    translations = TagTranslationStore()
+    events: list[tuple[str, object]] = []
+    controller = None
+
+    def save_path(path: Path) -> None:
+        assert controller is not None
+        events.append(("save", path))
+        assert controller._index.records[0].name == "imported"
+
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid",
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        csv_loader=lambda path, *, cancel_event: _import_result("imported"),
+        csv_path_saver=save_path,
+        translation_store=translations,
+    )
+    translations.snapshotChanged.connect(
+        lambda: events.append(("snapshot", translations.snapshot.records[0].name))
+    )
+    controller.importStateChanged.connect(
+        lambda: (
+            events.append(("state", controller.importStatusText))
+            if not controller.importBusy
+            else None
+        )
+    )
+    outcomes = []
+    controller.importCompleted.connect(
+        lambda outcome: (events.append(("complete", outcome)), outcomes.append(outcome))
+    )
+
+    controller.importCsv(QUrl.fromLocalFile(str(csv_path)))
+
+    assert _wait_until(lambda: len(outcomes) == 1)
+    resolved_path = csv_path.resolve()
+    assert [event[0] for event in events] == [
+        "snapshot",
+        "save",
+        "state",
+        "complete",
+    ]
+    assert events[1] == ("save", resolved_path)
+    assert outcomes[0].path == resolved_path
+    assert outcomes[0].generation == 1
+    assert outcomes[0].path_saved is True
+
+
+def test_successful_import_without_path_saver_does_not_claim_path_was_saved(
+    tmp_path,
+):
+    csv_path = Path(tmp_path) / "success.csv"
+    csv_path.write_text("placeholder", encoding="utf-8")
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid",
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        csv_loader=lambda path, *, cancel_event: _import_result("imported"),
+    )
+    outcomes = []
+    controller.importCompleted.connect(outcomes.append)
+
+    controller.importCsv(QUrl.fromLocalFile(str(csv_path)))
+
+    assert _wait_until(lambda: len(outcomes) == 1)
+    assert outcomes[0].succeeded is True
+    assert outcomes[0].path_saved is None
+
+
+def test_begin_shutdown_rejects_late_import_result_before_formal_shutdown(
+    tmp_path,
+):
+    csv_path = Path(tmp_path) / "late.csv"
+    csv_path.write_text("placeholder", encoding="utf-8")
+    saved_paths: list[Path] = []
+    old_snapshot = _snapshot(TagSuggestion("old", ("旧值",), 1, 0))
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid",
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        csv_path_saver=saved_paths.append,
+        index_snapshot=old_snapshot,
+    )
+    controller._import_generation = 7
+    controller._import_path = csv_path.resolve()
+    controller._persist_import_path = True
+
+    controller.begin_shutdown()
+    controller._import_finished(7, _import_result("late"), None)
+
+    assert controller._index == old_snapshot
+    assert saved_paths == []
+    assert controller._import_generation == 8
+
+
+def test_success_callback_starting_new_import_never_resaves_old_path(tmp_path):
+    first_path = Path(tmp_path) / "first.csv"
+    second_path = Path(tmp_path) / "second.csv"
+    first_path.write_text("placeholder", encoding="utf-8")
+    second_path.write_text("placeholder", encoding="utf-8")
+    saved_paths: list[Path] = []
+    outcomes = []
+
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid",
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        csv_loader=lambda path, *, cancel_event: _import_result(path.stem),
+        csv_path_saver=saved_paths.append,
+    )
+
+    def start_second_import(outcome) -> None:
+        outcomes.append(outcome)
+        if outcome.path == first_path.resolve():
+            controller.importCsv(QUrl.fromLocalFile(str(second_path)))
+
+    controller.importCompleted.connect(start_second_import)
+    controller.importCsv(QUrl.fromLocalFile(str(first_path)))
+
+    assert _wait_until(lambda: len(outcomes) == 2)
+    assert saved_paths == [first_path.resolve(), second_path.resolve()]
+    assert [outcome.generation for outcome in outcomes] == [1, 2]
+    assert controller._index.records[0].name == "second"
+
+
+def test_success_callback_shutdown_does_not_save_another_path(tmp_path):
+    csv_path = Path(tmp_path) / "success.csv"
+    csv_path.write_text("placeholder", encoding="utf-8")
+    saved_paths: list[Path] = []
+    outcomes = []
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid",
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        csv_loader=lambda path, *, cancel_event: _import_result("imported"),
+        csv_path_saver=saved_paths.append,
+    )
+
+    def shutdown_on_completion(outcome) -> None:
+        outcomes.append(outcome)
+        controller.shutdown()
+
+    controller.importCompleted.connect(shutdown_on_completion)
+    controller.importCsv(QUrl.fromLocalFile(str(csv_path)))
+
+    assert _wait_until(lambda: len(outcomes) == 1)
+    APPLICATION.processEvents()
+    assert saved_paths == [csv_path.resolve()]
+    assert outcomes[0].path_saved is True
+    assert controller.importBusy is False
+
+
+def test_path_save_failure_keeps_new_index_and_persisted_old_path(tmp_path):
+    old_path = Path(tmp_path) / "old.csv"
+    new_path = Path(tmp_path) / "new.csv"
+    new_path.write_text("placeholder", encoding="utf-8")
+    persisted_paths = [old_path]
+    save_attempts: list[Path] = []
+
+    def failing_saver(path: Path) -> None:
+        save_attempts.append(path)
+        raise OSError("simulated settings failure")
+
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid",
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        csv_loader=lambda path, *, cancel_event: _import_result("new_index"),
+        csv_path_saver=failing_saver,
+        index_snapshot=_snapshot(TagSuggestion("old_index", ("旧索引",), 1, 0)),
+    )
+    outcomes = []
+    controller.importCompleted.connect(outcomes.append)
+
+    controller.importCsv(QUrl.fromLocalFile(str(new_path)))
+
+    assert _wait_until(lambda: len(outcomes) == 1)
+    assert save_attempts == [new_path.resolve()]
+    assert persisted_paths == [old_path]
+    assert controller._index.records[0].name == "new_index"
+    assert outcomes[0].succeeded is True
+    assert outcomes[0].error_code == "settings_save_failed"
+    assert outcomes[0].path_saved is False
+    assert "路径保存失败" in controller.importStatusText
+
+
+def test_saved_csv_load_rebuilds_index_without_resaving_path(tmp_path):
+    csv_path = Path(tmp_path) / "saved.csv"
+    csv_path.write_text("placeholder", encoding="utf-8")
+    save_attempts: list[Path] = []
+    loaded_paths: list[Path] = []
+
+    def loader(path: Path, *, cancel_event: threading.Event):
+        loaded_paths.append(path)
+        return _import_result("restored")
+
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid",
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        csv_loader=loader,
+        csv_path_saver=save_attempts.append,
+    )
+    outcomes = []
+    controller.importCompleted.connect(outcomes.append)
+
+    controller.importSavedCsv(str(csv_path))
+
+    assert _wait_until(lambda: len(outcomes) == 1)
+    assert loaded_paths == [csv_path.resolve()]
+    assert save_attempts == []
+    assert controller._index.records[0].name == "restored"
+    assert outcomes[0].path == csv_path.resolve()
+    assert outcomes[0].path_saved is None
+
+
+@pytest.mark.parametrize(
+    ("startup_load", "error_code"),
+    [
+        (True, "file_missing"),
+        (True, "csv_error"),
+        (False, "csv_error"),
+    ],
+)
+def test_failed_csv_load_preserves_existing_index_and_saved_path(
+    tmp_path,
+    startup_load,
+    error_code,
+):
+    saved_path = Path(tmp_path) / "saved.csv"
+    failed_path = Path(tmp_path) / "missing.csv"
+    persisted_paths = [saved_path]
+    save_attempts: list[Path] = []
+
+    def failing_loader(path: Path, *, cancel_event: threading.Event):
+        raise TagCsvImportError(error_code, "标签 CSV 无法载入。")
+
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid",
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        index_snapshot=_snapshot(TagSuggestion("existing", ("现有",), 1, 0)),
+        csv_loader=failing_loader,
+        csv_path_saver=save_attempts.append,
+    )
+    outcomes = []
+    controller.importCompleted.connect(outcomes.append)
+
+    if startup_load:
+        controller.importSavedCsv(str(failed_path))
+    else:
+        controller.importCsv(QUrl.fromLocalFile(str(failed_path)))
+
+    assert _wait_until(lambda: len(outcomes) == 1)
+    assert controller._index.records[0].name == "existing"
+    assert persisted_paths == [saved_path]
+    assert save_attempts == []
+    assert outcomes[0].succeeded is False
+    assert outcomes[0].error_code == error_code
+
+
 def test_controller_imports_local_qurl_recomputes_and_preserves_index_on_failure(
     tmp_path,
 ):

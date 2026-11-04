@@ -348,6 +348,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return launch_gui(
         application,
         danbooru_base_url=runtime.settings.danbooru_api_url,
+        runtime=runtime,
     )
 
 
