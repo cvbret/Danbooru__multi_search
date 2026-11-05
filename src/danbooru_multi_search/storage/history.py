@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import sqlite3
 import threading
@@ -11,7 +10,31 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from danbooru_multi_search.danbooru.query_controller import GalleryResultSummary
+from danbooru_multi_search.danbooru.query_definition import (
+    GalleryQueryDefinition,
+    QueryMode,
+)
+from danbooru_multi_search.danbooru.query_execution import QueryExecutionLimits
+from danbooru_multi_search.danbooru.query_language import parse_query_expression
+from danbooru_multi_search.danbooru.query_planning import QueryRating
+from danbooru_multi_search.danbooru.result_processing import (
+    ResultFilterSpec,
+    ResultSortSpec,
+)
 from danbooru_multi_search.storage.database import Database
+from danbooru_multi_search.storage.query_serialization import (
+    QUERY_DEFINITION_VERSION,
+    QuerySerializationError,
+    decode_normalized_tags,
+    decode_query_definition,
+    decode_result_summary,
+    encode_normalized_tags,
+    encode_query_definition,
+    encode_result_summary,
+    query_definition_key,
+    query_definition_tags,
+)
 
 
 MAX_RECENT_QUERIES = 50
@@ -49,6 +72,8 @@ class RecentQuery:
     anchor_offset: float | None
     scroll_position: float
     last_used_at: str
+    definition: GalleryQueryDefinition
+    result_summary: GalleryResultSummary | None
 
     @property
     def restore_page(self) -> int:
@@ -154,36 +179,79 @@ class HistoryRepository:
         count_tag_usage: bool,
         used_at: datetime | None = None,
     ) -> RecentQuery | None:
-        """Record an accepted request and optionally count a user query action.
+        """Keep the M1 simple-tag API as a version-1 definition wrapper."""
 
-        An accepted event older than every retained non-active query may be
-        removed by the same capacity-cleanup transaction.  In that case the
-        tag counters and cleanup still commit and ``None`` is returned.
-        """
-
-        if not isinstance(display_text, str) or not display_text.strip():
-            raise ValueError("display_text must be a non-empty string")
         tags = canonicalize_query_tags(normalized_tags)
         rating_code = _validate_rating(rating)
         _validate_page_size(page_size)
+        parsed = parse_query_expression(" AND ".join(tags))
+        definition = GalleryQueryDefinition(
+            mode=QueryMode.STANDARD,
+            normalized_expression=parsed.normalized_text,
+            rating=QueryRating(rating_code),
+            filter_spec=ResultFilterSpec(),
+            sort_spec=ResultSortSpec(),
+            limits=QueryExecutionLimits(page_size=page_size),
+        )
+        return self.record_accepted_definition(
+            definition=definition,
+            display_text=display_text,
+            page=page,
+            count_tag_usage=count_tag_usage,
+            used_at=used_at,
+        )
+
+    def record_accepted_definition(
+        self,
+        *,
+        definition: GalleryQueryDefinition,
+        display_text: str,
+        page: int,
+        count_tag_usage: bool,
+        used_at: datetime | None = None,
+    ) -> RecentQuery | None:
+        """Record one accepted M2 definition and its unique expression tags.
+
+        Capacity cleanup may immediately remove an older non-active event. Its
+        tag counters still commit in the same transaction and ``None`` is
+        returned.
+        """
+
+        if not isinstance(definition, GalleryQueryDefinition):
+            raise TypeError("definition must be a GalleryQueryDefinition")
+        if not isinstance(display_text, str) or not display_text.strip():
+            raise ValueError("display_text must be a non-empty string")
+        if not isinstance(count_tag_usage, bool):
+            raise TypeError("count_tag_usage must be a boolean")
         _validate_page(page)
         used_at_text = self._timestamp(used_at)
-        encoded_tags = _encode_tags(tags)
+        tags = query_definition_tags(definition)
+        encoded_tags = encode_normalized_tags(tags)
+        definition_json = encode_query_definition(definition)
+        query_key = query_definition_key(definition)
 
         try:
             with self._lock, closing(self._database.connect()) as connection:
                 with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    _validate_existing_query_identity(
+                        connection,
+                        definition_json,
+                    )
                     connection.execute(
                         """
                         INSERT INTO recent_queries(
-                            display_text,
-                            normalized_tags,
-                            rating,
-                            page_size,
-                            last_submitted_page,
-                            last_used_at
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(normalized_tags, rating, page_size) DO UPDATE SET
+                            query_key, definition_version, query_mode,
+                            definition_json, result_summary_json, display_text,
+                            normalized_tags, rating, page_size,
+                            last_submitted_page, last_used_at
+                        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(query_key) DO UPDATE SET
+                            result_summary_json = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.result_summary_json
+                                ELSE recent_queries.result_summary_json
+                            END,
                             display_text = CASE
                                 WHEN excluded.last_used_at >= recent_queries.last_used_at
                                 THEN excluded.display_text
@@ -200,10 +268,14 @@ class HistoryRepository:
                             )
                         """,
                         (
+                            query_key,
+                            QUERY_DEFINITION_VERSION,
+                            definition.mode.value,
+                            definition_json,
                             display_text,
                             encoded_tags,
-                            rating_code,
-                            page_size,
+                            definition.rating.value,
+                            definition.limits.page_size,
                             page,
                             used_at_text,
                         ),
@@ -215,13 +287,161 @@ class HistoryRepository:
                     row = connection.execute(
                         """
                         SELECT * FROM recent_queries
-                        WHERE normalized_tags = ? AND rating = ? AND page_size = ?
+                        WHERE query_key = ?
                         """,
-                        (encoded_tags, rating_code, page_size),
+                        (query_key,),
                     ).fetchone()
+                    result = _row_to_query(row) if row is not None else None
         except sqlite3.Error as exc:
             raise HistoryError(f"Unable to record accepted query: {exc}") from exc
-        return _row_to_query(row) if row is not None else None
+        return result
+
+    def record_view_definition(
+        self,
+        *,
+        source_query_id: int,
+        definition: GalleryQueryDefinition,
+        used_at: datetime | None = None,
+    ) -> RecentQuery | None:
+        """Create or reuse a view identity without incrementing recent tags."""
+
+        _validate_identifier(source_query_id, "source_query_id")
+        if not isinstance(definition, GalleryQueryDefinition):
+            raise TypeError("definition must be a GalleryQueryDefinition")
+        used_at_text = self._timestamp(used_at)
+        definition_json = encode_query_definition(definition)
+        query_key = query_definition_key(definition)
+        encoded_tags = encode_normalized_tags(query_definition_tags(definition))
+        try:
+            with self._lock, closing(self._database.connect()) as connection:
+                with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    source = connection.execute(
+                        "SELECT * FROM recent_queries WHERE id = ?",
+                        (source_query_id,),
+                    ).fetchone()
+                    if source is None:
+                        return None
+                    source_query = _row_to_query(source)
+                    _validate_existing_query_identity(
+                        connection,
+                        definition_json,
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO recent_queries(
+                            query_key, definition_version, query_mode,
+                            definition_json, result_summary_json, display_text,
+                            normalized_tags, rating, page_size,
+                            last_submitted_page, last_committed_page,
+                            anchor_post_id, anchor_index, anchor_offset,
+                            scroll_position, last_used_at
+                        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(query_key) DO UPDATE SET
+                            result_summary_json = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.result_summary_json
+                                ELSE recent_queries.result_summary_json
+                            END,
+                            display_text = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.display_text
+                                ELSE recent_queries.display_text
+                            END,
+                            last_submitted_page = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.last_submitted_page
+                                ELSE recent_queries.last_submitted_page
+                            END,
+                            last_committed_page = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.last_committed_page
+                                ELSE recent_queries.last_committed_page
+                            END,
+                            anchor_post_id = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.anchor_post_id
+                                ELSE recent_queries.anchor_post_id
+                            END,
+                            anchor_index = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.anchor_index
+                                ELSE recent_queries.anchor_index
+                            END,
+                            anchor_offset = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.anchor_offset
+                                ELSE recent_queries.anchor_offset
+                            END,
+                            scroll_position = CASE
+                                WHEN excluded.last_used_at >= recent_queries.last_used_at
+                                THEN excluded.scroll_position
+                                ELSE recent_queries.scroll_position
+                            END,
+                            last_used_at = MAX(
+                                recent_queries.last_used_at,
+                                excluded.last_used_at
+                            )
+                        """,
+                        (
+                            query_key,
+                            QUERY_DEFINITION_VERSION,
+                            definition.mode.value,
+                            definition_json,
+                            source_query.display_text,
+                            encoded_tags,
+                            definition.rating.value,
+                            definition.limits.page_size,
+                            source_query.last_submitted_page,
+                            source_query.last_committed_page,
+                            source_query.anchor_post_id,
+                            source_query.anchor_index,
+                            source_query.anchor_offset,
+                            source_query.scroll_position,
+                            used_at_text,
+                        ),
+                    )
+                    self._trim_queries(connection)
+                    row = connection.execute(
+                        "SELECT * FROM recent_queries WHERE query_key = ?",
+                        (query_key,),
+                    ).fetchone()
+                    result = _row_to_query(row) if row is not None else None
+        except sqlite3.Error as exc:
+            raise HistoryError(f"Unable to record view definition: {exc}") from exc
+        return result
+
+    def update_result_summary(
+        self,
+        query_id: int,
+        summary: GalleryResultSummary,
+    ) -> bool:
+        """Update only the result summary without changing query identity."""
+
+        _validate_identifier(query_id, "query_id")
+        encoded = encode_result_summary(summary)
+        try:
+            with self._lock, closing(self._database.connect()) as connection:
+                with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    row = connection.execute(
+                        "SELECT * FROM recent_queries WHERE id = ?",
+                        (query_id,),
+                    ).fetchone()
+                    if row is None:
+                        return False
+                    _row_to_query(row)
+                    cursor = connection.execute(
+                        """
+                        UPDATE recent_queries
+                        SET result_summary_json = ?
+                        WHERE id = ?
+                        """,
+                        (encoded, query_id),
+                    )
+                    return cursor.rowcount == 1
+        except sqlite3.Error as exc:
+            raise HistoryError(f"Unable to update result summary: {exc}") from exc
 
     def mark_query_committed(
         self,
@@ -632,43 +852,164 @@ def _validate_identifier(value: int, name: str) -> None:
         raise ValueError(f"{name} must be a positive integer")
 
 
-def _encode_tags(tags: tuple[str, ...]) -> str:
-    return json.dumps(tags, ensure_ascii=True, separators=(",", ":"))
+def _validate_existing_query_identity(
+    connection: sqlite3.Connection,
+    definition_json: str,
+) -> None:
+    """Reject damaged redundant columns before an identity can be duplicated."""
+
+    rows = connection.execute(
+        """
+        SELECT * FROM recent_queries
+        WHERE query_key = ? OR definition_json = ?
+        ORDER BY id
+        """,
+        (definition_json, definition_json),
+    ).fetchall()
+    for row in rows:
+        _row_to_query(row)
 
 
 def _row_to_query(row: sqlite3.Row) -> RecentQuery:
     try:
-        decoded = json.loads(str(row["normalized_tags"]))
-    except (json.JSONDecodeError, TypeError, ValueError) as exc:
-        raise HistoryError("Stored recent-query tags are invalid JSON") from exc
-    if not isinstance(decoded, list) or not all(
-        isinstance(value, str) for value in decoded
-    ):
-        raise HistoryError("Stored recent-query tags must be a JSON string list")
-    tags = canonicalize_query_tags(decoded)
-    return RecentQuery(
-        id=int(row["id"]),
-        display_text=str(row["display_text"]),
-        normalized_tags=tags,
-        rating=str(row["rating"]),
-        page_size=int(row["page_size"]),
-        last_submitted_page=int(row["last_submitted_page"]),
-        last_committed_page=(
-            int(row["last_committed_page"])
-            if row["last_committed_page"] is not None
-            else None
-        ),
-        anchor_post_id=(
-            int(row["anchor_post_id"])
-            if row["anchor_post_id"] is not None
-            else None
-        ),
-        anchor_index=(
-            int(row["anchor_index"]) if row["anchor_index"] is not None else None
-        ),
-        anchor_offset=(
-            float(row["anchor_offset"]) if row["anchor_offset"] is not None else None
-        ),
-        scroll_position=float(row["scroll_position"]),
-        last_used_at=str(row["last_used_at"]),
-    )
+        definition_json = _stored_text(row["definition_json"], "definition_json")
+        definition = decode_query_definition(definition_json)
+        query_key = _stored_text(row["query_key"], "query_key")
+        if query_key != definition_json or query_key != query_definition_key(definition):
+            raise HistoryError("Stored recent-query key does not match its definition")
+        version = _stored_integer(row["definition_version"], "definition_version")
+        if version != QUERY_DEFINITION_VERSION:
+            raise HistoryError("Stored recent-query definition version is unsupported")
+        if _stored_text(row["query_mode"], "query_mode") != definition.mode.value:
+            raise HistoryError("Stored recent-query mode does not match its definition")
+        tags = decode_normalized_tags(
+            _stored_text(row["normalized_tags"], "normalized_tags"),
+            allow_empty=True,
+        )
+        if tags != query_definition_tags(definition):
+            raise HistoryError("Stored recent-query tags do not match its definition")
+        rating = _stored_text(row["rating"], "rating")
+        if rating != definition.rating.value:
+            raise HistoryError("Stored recent-query rating does not match its definition")
+        page_size = _stored_integer(row["page_size"], "page_size")
+        if page_size != definition.limits.page_size:
+            raise HistoryError("Stored recent-query page size does not match its definition")
+        query_id = _stored_positive_integer(row["id"], "id")
+        display_text = _stored_text(row["display_text"], "display_text")
+        if not display_text.strip():
+            raise HistoryError("Stored recent-query display text is empty")
+        submitted_page = _stored_positive_integer(
+            row["last_submitted_page"],
+            "last_submitted_page",
+        )
+        committed_page = _stored_optional_positive_integer(
+            row["last_committed_page"],
+            "last_committed_page",
+        )
+        anchor_post_id = _stored_optional_positive_integer(
+            row["anchor_post_id"],
+            "anchor_post_id",
+        )
+        anchor_index = _stored_optional_nonnegative_integer(
+            row["anchor_index"],
+            "anchor_index",
+        )
+        anchor_offset = _stored_optional_finite_float(
+            row["anchor_offset"],
+            "anchor_offset",
+        )
+        anchor_values = (anchor_post_id, anchor_index, anchor_offset)
+        if any(value is None for value in anchor_values) and not all(
+            value is None for value in anchor_values
+        ):
+            raise HistoryError("Stored recent-query anchor fields are incomplete")
+        scroll_position = _stored_finite_float(
+            row["scroll_position"],
+            "scroll_position",
+        )
+        last_used_at = _stored_text(row["last_used_at"], "last_used_at")
+        if not last_used_at:
+            raise HistoryError("Stored recent-query timestamp is empty")
+        encoded_summary = row["result_summary_json"]
+        result_summary = (
+            None
+            if encoded_summary is None
+            else decode_result_summary(
+                _stored_text(encoded_summary, "result_summary_json")
+            )
+        )
+        return RecentQuery(
+            id=query_id,
+            display_text=display_text,
+            normalized_tags=tags,
+            rating=rating,
+            page_size=page_size,
+            last_submitted_page=submitted_page,
+            last_committed_page=committed_page,
+            anchor_post_id=anchor_post_id,
+            anchor_index=anchor_index,
+            anchor_offset=anchor_offset,
+            scroll_position=scroll_position,
+            last_used_at=last_used_at,
+            definition=definition,
+            result_summary=result_summary,
+        )
+    except HistoryError:
+        raise
+    except (
+        QuerySerializationError,
+        TypeError,
+        ValueError,
+        OverflowError,
+        KeyError,
+        IndexError,
+    ) as exc:
+        raise HistoryError(f"Stored recent-query data is invalid: {exc}") from exc
+
+
+def _stored_text(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise HistoryError(f"Stored {label} must be text")
+    return value
+
+
+def _stored_integer(value: object, label: str) -> int:
+    if type(value) is not int:
+        raise HistoryError(f"Stored {label} must be an integer")
+    return value
+
+
+def _stored_positive_integer(value: object, label: str) -> int:
+    parsed = _stored_integer(value, label)
+    if parsed < 1:
+        raise HistoryError(f"Stored {label} must be positive")
+    return parsed
+
+
+def _stored_optional_positive_integer(value: object, label: str) -> int | None:
+    return None if value is None else _stored_positive_integer(value, label)
+
+
+def _stored_optional_nonnegative_integer(
+    value: object,
+    label: str,
+) -> int | None:
+    if value is None:
+        return None
+    parsed = _stored_integer(value, label)
+    if parsed < 0:
+        raise HistoryError(f"Stored {label} cannot be negative")
+    return parsed
+
+
+def _stored_finite_float(value: object, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HistoryError(f"Stored {label} must be numeric")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise HistoryError(f"Stored {label} must be finite")
+    return parsed
+
+
+def _stored_optional_finite_float(value: object, label: str) -> float | None:
+    return None if value is None else _stored_finite_float(value, label)

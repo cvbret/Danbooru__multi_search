@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ class Migration:
     version: int
     name: str
     statements: tuple[str, ...]
+    apply: Callable[[sqlite3.Connection], None] | None = None
 
 
 MIGRATIONS = (
@@ -113,6 +115,12 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=3,
+        name="complex_query_definitions",
+        statements=(),
+        apply=lambda connection: _migrate_to_version_three(connection),
+    ),
 )
 
 
@@ -168,6 +176,8 @@ class Database:
                             continue
                         for statement in migration.statements:
                             connection.execute(statement)
+                        if migration.apply is not None:
+                            migration.apply(connection)
                         connection.execute(
                             """
                             INSERT INTO schema_migrations(version, name, applied_at)
@@ -183,7 +193,9 @@ class Database:
                 except Exception:
                     connection.rollback()
                     raise
-        except sqlite3.Error as exc:
+        except DatabaseError:
+            raise
+        except Exception as exc:
             raise DatabaseError(f"Unable to initialize database at {self.path}: {exc}") from exc
 
         return self.current_version()
@@ -198,3 +210,160 @@ class Database:
             raise DatabaseError(f"Unable to read database version: {exc}") from exc
         return int(row["version"])
 
+
+def _migrate_to_version_three(connection: sqlite3.Connection) -> None:
+    """Rebuild query and session tables while preserving all version-2 rows."""
+
+    from danbooru_multi_search.danbooru.query_definition import (
+        GalleryQueryDefinition,
+        QueryMode,
+    )
+    from danbooru_multi_search.danbooru.query_execution import QueryExecutionLimits
+    from danbooru_multi_search.danbooru.query_language import parse_query_expression
+    from danbooru_multi_search.danbooru.query_planning import QueryRating
+    from danbooru_multi_search.danbooru.result_processing import (
+        ResultFilterSpec,
+        ResultSortSpec,
+    )
+    from danbooru_multi_search.storage.query_serialization import (
+        QUERY_DEFINITION_VERSION,
+        decode_normalized_tags,
+        encode_normalized_tags,
+        encode_query_definition,
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE recent_queries_v3 (
+            id INTEGER PRIMARY KEY,
+            query_key TEXT NOT NULL UNIQUE,
+            definition_version INTEGER NOT NULL
+                CHECK (definition_version = 1),
+            query_mode TEXT NOT NULL
+                CHECK (query_mode IN ('standard', 'rank', 'latest')),
+            definition_json TEXT NOT NULL,
+            result_summary_json TEXT,
+            display_text TEXT NOT NULL,
+            normalized_tags TEXT NOT NULL,
+            rating TEXT NOT NULL
+                CHECK (rating IN (
+                    'all', 'general', 'sensitive', 'questionable', 'explicit'
+                )),
+            page_size INTEGER NOT NULL
+                CHECK (page_size BETWEEN 1 AND 200),
+            last_submitted_page INTEGER NOT NULL
+                CHECK (last_submitted_page >= 1),
+            last_committed_page INTEGER
+                CHECK (last_committed_page IS NULL OR last_committed_page >= 1),
+            anchor_post_id INTEGER
+                CHECK (anchor_post_id IS NULL OR anchor_post_id >= 1),
+            anchor_index INTEGER
+                CHECK (anchor_index IS NULL OR anchor_index >= 0),
+            anchor_offset REAL,
+            scroll_position REAL NOT NULL DEFAULT 0,
+            last_used_at TEXT NOT NULL,
+            CHECK (query_key = definition_json),
+            CHECK (
+                (anchor_post_id IS NULL AND anchor_index IS NULL
+                    AND anchor_offset IS NULL)
+                OR
+                (anchor_post_id IS NOT NULL AND anchor_index IS NOT NULL
+                    AND anchor_offset IS NOT NULL)
+            )
+        )
+        """
+    )
+    rows = connection.execute(
+        "SELECT * FROM recent_queries ORDER BY id"
+    ).fetchall()
+    for row in rows:
+        tags = decode_normalized_tags(
+            str(row["normalized_tags"]),
+            allow_empty=False,
+        )
+        parsed = parse_query_expression(" AND ".join(tags))
+        definition = GalleryQueryDefinition(
+            mode=QueryMode.STANDARD,
+            normalized_expression=parsed.normalized_text,
+            rating=QueryRating(str(row["rating"])),
+            filter_spec=ResultFilterSpec(),
+            sort_spec=ResultSortSpec(),
+            limits=QueryExecutionLimits(page_size=int(row["page_size"])),
+        )
+        definition_json = encode_query_definition(definition)
+        connection.execute(
+            """
+            INSERT INTO recent_queries_v3(
+                id, query_key, definition_version, query_mode,
+                definition_json, result_summary_json, display_text,
+                normalized_tags, rating, page_size, last_submitted_page,
+                last_committed_page, anchor_post_id, anchor_index,
+                anchor_offset, scroll_position, last_used_at
+            ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(row["id"]),
+                definition_json,
+                QUERY_DEFINITION_VERSION,
+                definition.mode.value,
+                definition_json,
+                str(row["display_text"]),
+                encode_normalized_tags(tags),
+                definition.rating.value,
+                definition.limits.page_size,
+                int(row["last_submitted_page"]),
+                row["last_committed_page"],
+                row["anchor_post_id"],
+                row["anchor_index"],
+                row["anchor_offset"],
+                row["scroll_position"],
+                str(row["last_used_at"]),
+            ),
+        )
+
+    connection.execute(
+        """
+        CREATE TABLE browser_session_v3 (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            window_x INTEGER,
+            window_y INTEGER,
+            window_width INTEGER
+                CHECK (window_width IS NULL OR window_width > 0),
+            window_height INTEGER
+                CHECK (window_height IS NULL OR window_height > 0),
+            is_maximized INTEGER NOT NULL DEFAULT 0
+                CHECK (is_maximized IN (0, 1)),
+            active_query_id INTEGER,
+            FOREIGN KEY (active_query_id)
+                REFERENCES recent_queries_v3(id) ON DELETE SET NULL,
+            CHECK (
+                (window_x IS NULL AND window_y IS NULL
+                    AND window_width IS NULL AND window_height IS NULL)
+                OR
+                (window_x IS NOT NULL AND window_y IS NOT NULL
+                    AND window_width IS NOT NULL AND window_height IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO browser_session_v3(
+            id, window_x, window_y, window_width, window_height,
+            is_maximized, active_query_id
+        )
+        SELECT id, window_x, window_y, window_width, window_height,
+               is_maximized, active_query_id
+        FROM browser_session
+        """
+    )
+    connection.execute("DROP TABLE browser_session")
+    connection.execute("DROP TABLE recent_queries")
+    connection.execute("ALTER TABLE recent_queries_v3 RENAME TO recent_queries")
+    connection.execute("ALTER TABLE browser_session_v3 RENAME TO browser_session")
+    connection.execute(
+        """
+        CREATE INDEX recent_queries_eviction_index
+        ON recent_queries(last_used_at ASC, id ASC)
+        """
+    )

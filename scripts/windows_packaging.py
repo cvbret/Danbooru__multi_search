@@ -20,6 +20,7 @@ from typing import Mapping, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_VERSION = "0.1.0"
+DATABASE_SCHEMA_VERSION = 3
 WINDOWS_RESOURCE_VERSION = "0.1.0.0"
 WINDOWS_RESOURCE_VERSION_TUPLE = (0, 1, 0, 0)
 PYINSTALLER_VERSION = "6.22.3"
@@ -760,7 +761,10 @@ def run_application_checks(
             environment=clean_application_environment(offscreen=offscreen),
         )
         payload = _load_check_result(result_path, fields)
-        if payload["version"] != PACKAGE_VERSION or payload["schema_version"] != 2:
+        if (
+            payload["version"] != PACKAGE_VERSION
+            or payload["schema_version"] != DATABASE_SCHEMA_VERSION
+        ):
             raise PackagingError(f"Check reported unexpected version data: {payload}")
         if normalize_windows_path(payload["data_directory"]) != normalize_windows_path(
             data_root / "data"

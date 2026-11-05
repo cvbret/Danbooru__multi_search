@@ -64,7 +64,7 @@ def test_headless_check_initializes_and_exits(tmp_path):
     assert output["mode"] == "headless"
     assert output["version"] == __version__
     assert output["platform_name"] in {"windows", "linux"}
-    assert output["schema_version"] == 2
+    assert output["schema_version"] == 3
     assert output["settings_created"] is True
 
 
@@ -217,7 +217,7 @@ def test_gui_smoke_writes_fixed_offscreen_result_and_closes(tmp_path):
     assert payload["status"] == "ok"
     assert payload["mode"] == "gui"
     assert payload["version"] == __version__
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["qml_loaded"] is True
     assert payload["shutdown_completed"] is True
     assert payload["platform_name"] == "offscreen"
@@ -481,4 +481,3 @@ def test_danbooru_download_smoke_failure_is_nonzero_and_leaves_no_file(
     assert list((tmp_path / "downloads").glob(".*.part")) == []
     assert len(post_server.requests) == 1
     assert len(image_server.requests) == 1
-
