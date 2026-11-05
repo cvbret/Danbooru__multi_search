@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence, TextIO
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QGuiApplication
 
 from danbooru_multi_search import __version__
 from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.core.check_output import (
+    CheckOutputError,
+    write_check_output,
+)
 from danbooru_multi_search.danbooru import (
     DEFAULT_TIMEOUT_MS,
     run_danbooru_download_smoke,
@@ -20,20 +25,40 @@ from danbooru_multi_search.danbooru import (
 )
 from danbooru_multi_search.integrations.eagle import EagleImportResult
 from danbooru_multi_search.platform import PlatformAdapter
-from danbooru_multi_search.ui.launcher import launch_gui
+from danbooru_multi_search.ui.launcher import launch_gui, run_gui_smoke_check
+
+if TYPE_CHECKING:
+    from danbooru_multi_search.core.bootstrap import RuntimeContext
 
 
 ORGANIZATION_NAME = "DanbooruMultiSearch"
 APPLICATION_NAME = "DanbooruMultiSearch"
 
 
+class _SafeArgumentParser(argparse.ArgumentParser):
+    """Keep argparse usable when a windowed executable has no console streams."""
+
+    def _print_message(self, message: str, file: TextIO | None = None) -> None:
+        if not message or file is None:
+            return
+        try:
+            file.write(message)
+        except (AttributeError, OSError, ValueError):
+            return
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="danbooru-multi-search")
+    parser = _SafeArgumentParser(prog="danbooru-multi-search")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--headless-check",
         action="store_true",
         help="Initialize settings and database, print a JSON result, then exit.",
+    )
+    mode.add_argument(
+        "--gui-smoke-check",
+        action="store_true",
+        help="Load the real QML shell, verify packaged capabilities, and exit.",
     )
     mode.add_argument(
         "--danbooru-smoke",
@@ -60,6 +85,14 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="FILE",
         help="Explicitly import one local file into the current Eagle library.",
+    )
+    parser.add_argument(
+        "--check-output",
+        type=Path,
+        help=(
+            "Write headless or GUI check JSON to a new result file instead "
+            "of using the console."
+        ),
     )
     parser.add_argument(
         "--danbooru-tags",
@@ -112,6 +145,99 @@ def _configure_application_identity() -> None:
     QCoreApplication.setOrganizationName(ORGANIZATION_NAME)
     QCoreApplication.setApplicationName(APPLICATION_NAME)
     QCoreApplication.setApplicationVersion(__version__)
+
+
+def _safe_write_line(stream: TextIO | None, text: str) -> None:
+    if stream is None:
+        return
+    try:
+        stream.write(text + "\n")
+        stream.flush()
+    except (AttributeError, OSError, ValueError):
+        return
+
+
+def _safe_write_json(payload: dict[str, object]) -> None:
+    _safe_write_line(
+        sys.stdout,
+        json.dumps(payload, ensure_ascii=False, sort_keys=True),
+    )
+
+
+def _validate_check_arguments(
+    args: argparse.Namespace,
+) -> str | None:
+    check_mode = args.headless_check or args.gui_smoke_check
+    if args.check_output is not None and not check_mode:
+        return "--check-output is only valid with a headless or GUI smoke check."
+    if args.gui_smoke_check and args.data_root is None:
+        return "--gui-smoke-check requires an explicit --data-root."
+    if args.gui_smoke_check and args.check_output is None:
+        return "--gui-smoke-check requires an explicit --check-output."
+    output_path = args.check_output
+    if output_path is not None and args.data_root is None:
+        return "File-based checks require an explicit --data-root."
+    if output_path is not None:
+        if not output_path.parent.is_dir():
+            return "The check output parent directory does not exist."
+        if os.path.lexists(output_path):
+            return "The check output path must not already exist."
+    return None
+
+
+def _emit_check_result(
+    payload: dict[str, object],
+    exit_code: int,
+    output_path: Path | None,
+) -> int:
+    if output_path is None:
+        _safe_write_json(payload)
+        return exit_code
+    try:
+        write_check_output(output_path, payload)
+    except CheckOutputError as exc:
+        _safe_write_line(sys.stderr, f"Check result write failed: {exc}")
+        return 1
+    return exit_code
+
+
+def _headless_result(runtime: RuntimeContext) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "mode": "headless",
+        "version": __version__,
+        "platform_name": runtime.platform.capabilities.os_name,
+        "schema_version": runtime.database_version,
+        "settings_created": runtime.settings_created,
+        "data_directory": str(runtime.paths.data_dir),
+    }
+
+
+def _failed_headless_result(data_root: Path) -> dict[str, object]:
+    return {
+        "status": "error",
+        "mode": "headless",
+        "version": __version__,
+        "platform_name": "windows" if os.name == "nt" else "linux",
+        "schema_version": 0,
+        "settings_created": False,
+        "data_directory": str(data_root / "data"),
+    }
+
+
+def _failed_gui_result(data_root: Path) -> dict[str, object]:
+    return {
+        "status": "error",
+        "mode": "gui",
+        "version": __version__,
+        "schema_version": 0,
+        "qml_loaded": False,
+        "shutdown_completed": False,
+        "platform_name": QGuiApplication.platformName().casefold(),
+        "tls_backends": [],
+        "supported_image_formats": [],
+        "data_directory": str(data_root / "data"),
+    }
 
 
 def wallpaper_probe_result(platform: PlatformAdapter) -> tuple[dict[str, object], int]:
@@ -244,7 +370,12 @@ def eagle_import_smoke_result(
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the desktop application or its headless initialization check."""
 
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    argument_error = _validate_check_arguments(args)
+    if argument_error is not None:
+        _safe_write_line(sys.stderr, argument_error)
+        return 2
     _configure_application_identity()
 
     headless_mode = (
@@ -261,19 +392,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         runtime = initialize_runtime(data_root=args.data_root)
     except Exception as exc:  # startup failures must be visible to CLI and GUI launches
-        print(f"Application initialization failed: {exc}", file=sys.stderr)
+        _safe_write_line(sys.stderr, f"Application initialization failed: {exc}")
+        if args.gui_smoke_check and args.data_root is not None:
+            return _emit_check_result(
+                _failed_gui_result(args.data_root),
+                1,
+                args.check_output,
+            )
+        if args.headless_check and args.data_root is not None:
+            return _emit_check_result(
+                _failed_headless_result(args.data_root),
+                1,
+                args.check_output,
+            )
         return 1
 
     if args.headless_check:
-        result = {
-            "status": "ok",
-            "platform": runtime.platform.capabilities.os_name,
-            "schema_version": runtime.database_version,
-            "settings_created": runtime.settings_created,
-            "data_directory": str(runtime.paths.data_dir),
-        }
-        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-        return 0
+        return _emit_check_result(_headless_result(runtime), 0, args.check_output)
+
+    if args.gui_smoke_check:
+        try:
+            result, exit_code = run_gui_smoke_check(
+                application,
+                danbooru_base_url=runtime.settings.danbooru_api_url,
+                runtime=runtime,
+            )
+        except Exception as exc:
+            _safe_write_line(sys.stderr, f"GUI smoke check failed: {exc}")
+            result = _failed_gui_result(args.data_root)
+            exit_code = 1
+        return _emit_check_result(result, exit_code, args.check_output)
 
     if args.danbooru_smoke:
         try:
@@ -289,9 +437,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "message": f"Danbooru smoke check failed: {exc}",
                 "tags": args.danbooru_tags.strip(),
             }
-            print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+            _safe_write_json(payload)
             return 1
-        print(json.dumps(result.payload, ensure_ascii=True, sort_keys=True))
+        _safe_write_json(result.payload)
         return result.exit_code
 
     if args.danbooru_download_smoke:
@@ -310,19 +458,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "message": f"Danbooru download smoke check failed: {exc}",
                 "tags": args.danbooru_tags.strip(),
             }
-            print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+            _safe_write_json(payload)
             return 1
-        print(json.dumps(result.payload, ensure_ascii=True, sort_keys=True))
+        _safe_write_json(result.payload)
         return result.exit_code
 
     if args.wallpaper_probe:
         payload, exit_code = wallpaper_probe_result(runtime.platform)
-        print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+        _safe_write_json(payload)
         return exit_code
 
     if args.eagle_probe:
         payload, exit_code = eagle_probe_result(runtime.platform)
-        print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+        _safe_write_json(payload)
         return exit_code
 
     if args.eagle_import_smoke is not None:
@@ -342,7 +490,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             folder_identifier=args.eagle_folder,
             metadata=metadata,
         )
-        print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+        _safe_write_json(payload)
         return exit_code
 
     return launch_gui(

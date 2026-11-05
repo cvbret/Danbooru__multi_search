@@ -16,6 +16,9 @@ dev = [
     "build>=1.2,<2",
     "pytest>=8,<10",
 ]
+windows-build = [
+    "PyInstaller==6.22.3",
+]
 
 [project.scripts]
 danbooru-multi-search = "danbooru_multi_search.__main__:main"

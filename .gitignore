@@ -15,4 +15,7 @@ dist/
 *.qmlc
 app-data/
 .build-validation-*/
+.tools/
+.windows-build/
+.windows-build-*/
 

@@ -8,7 +8,31 @@ from pathlib import Path
 
 import pytest
 
-from danbooru_multi_search.__main__ import _build_parser
+from danbooru_multi_search import __version__
+from danbooru_multi_search.__main__ import _build_parser, _safe_write_line
+
+
+HEADLESS_CHECK_FIELDS = {
+    "status",
+    "mode",
+    "version",
+    "platform_name",
+    "schema_version",
+    "settings_created",
+    "data_directory",
+}
+GUI_CHECK_FIELDS = {
+    "status",
+    "mode",
+    "version",
+    "schema_version",
+    "qml_loaded",
+    "shutdown_completed",
+    "platform_name",
+    "tls_backends",
+    "supported_image_formats",
+    "data_directory",
+}
 
 
 def test_headless_check_initializes_and_exits(tmp_path):
@@ -35,9 +59,176 @@ def test_headless_check_initializes_and_exits(tmp_path):
 
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)
+    assert set(output) == HEADLESS_CHECK_FIELDS
     assert output["status"] == "ok"
+    assert output["mode"] == "headless"
+    assert output["version"] == __version__
+    assert output["platform_name"] in {"windows", "linux"}
     assert output["schema_version"] == 2
     assert output["settings_created"] is True
+
+
+def _source_environment(*, offscreen: bool = False) -> dict[str, str]:
+    project_root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(project_root / "src")
+    if offscreen:
+        environment["QT_QPA_PLATFORM"] = "offscreen"
+        environment["QT_QUICK_BACKEND"] = "software"
+        environment["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    return environment
+
+
+def test_headless_check_writes_unique_atomic_result_file(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    root = tmp_path / "中文 数据"
+    output_directory = tmp_path / "中文 结果"
+    output_directory.mkdir()
+    output = output_directory / "无界面 检查.json"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "danbooru_multi_search",
+            "--headless-check",
+            "--data-root",
+            str(root),
+            "--check-output",
+            str(output),
+        ],
+        cwd=project_root,
+        env=_source_environment(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert set(payload) == HEADLESS_CHECK_FIELDS
+    assert payload["status"] == "ok"
+    assert payload["mode"] == "headless"
+    assert payload["data_directory"] == str(root / "data")
+
+
+def test_existing_check_output_is_rejected_before_data_initialization(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    root = tmp_path / "must-not-exist"
+    output = tmp_path / "result.json"
+    output.write_text("preserve", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "danbooru_multi_search",
+            "--headless-check",
+            "--data-root",
+            str(root),
+            "--check-output",
+            str(output),
+        ],
+        cwd=project_root,
+        env=_source_environment(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert output.read_text(encoding="utf-8") == "preserve"
+    assert not root.exists()
+
+
+def test_gui_smoke_requires_explicit_data_root_and_output(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    cases = (
+        ["--gui-smoke-check"],
+        ["--gui-smoke-check", "--data-root", str(tmp_path / "data")],
+    )
+
+    for arguments in cases:
+        result = subprocess.run(
+            [sys.executable, "-m", "danbooru_multi_search", *arguments],
+            cwd=project_root,
+            env=_source_environment(offscreen=True),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 2
+
+    headless_output = tmp_path / "headless.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "danbooru_multi_search",
+            "--headless-check",
+            "--check-output",
+            str(headless_output),
+        ],
+        cwd=project_root,
+        env=_source_environment(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert not headless_output.exists()
+
+
+def test_gui_smoke_writes_fixed_offscreen_result_and_closes(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    root = tmp_path / "中文 GUI 数据"
+    output_directory = tmp_path / "中文 GUI 结果"
+    output_directory.mkdir()
+    output = output_directory / "离屏 检查.json"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "danbooru_multi_search",
+            "--gui-smoke-check",
+            "--data-root",
+            str(root),
+            "--check-output",
+            str(output),
+        ],
+        cwd=project_root,
+        env=_source_environment(offscreen=True),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert set(payload) == GUI_CHECK_FIELDS
+    assert payload["status"] == "ok"
+    assert payload["mode"] == "gui"
+    assert payload["version"] == __version__
+    assert payload["schema_version"] == 2
+    assert payload["qml_loaded"] is True
+    assert payload["shutdown_completed"] is True
+    assert payload["platform_name"] == "offscreen"
+    assert "schannel" in payload["tls_backends"]
+    formats = set(payload["supported_image_formats"])
+    assert {"png", "gif", "webp"} <= formats
+    assert {"jpg", "jpeg"} & formats
+
+
+def test_safe_console_output_accepts_missing_stream():
+    _safe_write_line(None, "windowed executable has no console")
 
 
 def test_wallpaper_probe_is_mutually_exclusive_with_other_modes():

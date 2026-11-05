@@ -13,7 +13,50 @@ from PySide6.QtQuick import QQuickItem
 from danbooru_multi_search.danbooru import DanbooruPost, RequestState
 from danbooru_multi_search.core.bootstrap import initialize_runtime
 from danbooru_multi_search.storage import HistoryError
-from danbooru_multi_search.ui.launcher import create_qml_engine, launch_gui
+from danbooru_multi_search.ui.launcher import (
+    create_qml_engine,
+    gui_smoke_capabilities_succeed,
+    launch_gui,
+)
+
+
+@pytest.mark.parametrize(
+    ("change", "value"),
+    (
+        ("qml_loaded", False),
+        ("shutdown_completed", False),
+        ("platform_name", "minimal"),
+        ("tls_backends", ("openssl",)),
+        ("supported_image_formats", ("jpg", "gif", "webp")),
+        ("supported_image_formats", ("jpg", "png", "webp")),
+        ("supported_image_formats", ("jpg", "png", "gif")),
+        ("supported_image_formats", ("png", "gif", "webp")),
+    ),
+)
+def test_gui_smoke_capability_contract_rejects_missing_requirement(
+    change,
+    value,
+):
+    values = {
+        "qml_loaded": True,
+        "shutdown_completed": True,
+        "platform_name": "windows",
+        "tls_backends": ("schannel",),
+        "supported_image_formats": ("jpg", "png", "gif", "webp"),
+    }
+    values[change] = value
+
+    assert gui_smoke_capabilities_succeed(**values) is False
+
+
+def test_gui_smoke_capability_contract_accepts_jpeg_and_offscreen():
+    assert gui_smoke_capabilities_succeed(
+        qml_loaded=True,
+        shutdown_completed=True,
+        platform_name="offscreen",
+        tls_backends=("SCHANNEL", "openssl"),
+        supported_image_formats=("JPEG", "PNG", "GIF", "WEBP"),
+    ) is True
 
 
 def test_create_qml_engine_rejects_non_gui_application():
