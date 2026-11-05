@@ -48,6 +48,11 @@ from danbooru_multi_search.danbooru.tags import (
     build_tags_request,
     normalize_tag_fragment,
 )
+from danbooru_multi_search.danbooru.tag_syntax import (
+    QUERY_OPERATOR_NAMES,
+    TagSyntaxError,
+    normalize_tag_name,
+)
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 from danbooru_multi_search.tasks import (
     BoundedTaskQueue,
@@ -80,6 +85,28 @@ class ActiveTagFragment:
     @property
     def is_empty(self) -> bool:
         return not self.fragment
+
+
+@dataclass(frozen=True, slots=True)
+class QueryTagFragment:
+    """One tag-like token selected from an incomplete M2 expression."""
+
+    text: str
+    cursor: int
+    start: int
+    end: int
+    fragment: str
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.fragment
+
+
+@dataclass(frozen=True, slots=True)
+class _QueryLexeme:
+    kind: str
+    start: int
+    end: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +199,117 @@ def replace_active_tag_fragment(
     else:
         should_search = replaced.isascii()
     return TagReplacement(replaced, new_cursor, True, should_search)
+
+
+def locate_query_tag_fragment(text: str, cursor: int) -> QueryTagFragment:
+    """Locate a tag token without treating query operators as tag fragments.
+
+    The scanner intentionally accepts incomplete text. Parentheses at the start
+    of a token delimit query groups, while balanced parentheses after a tag
+    character remain part of a Danbooru tag such as ``touhou_(pc-98)``.
+    """
+
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    if not isinstance(cursor, int) or isinstance(cursor, bool):
+        raise TypeError("cursor must be an integer")
+    if not 0 <= cursor <= len(text):
+        raise ValueError("cursor must be within the text")
+
+    lexemes = _query_lexemes(text)
+    for lexeme in lexemes:
+        if lexeme.kind == "tag" and lexeme.start <= cursor < lexeme.end:
+            return _query_fragment(text, cursor, lexeme)
+
+    # Match the existing search field rule at the immediate right edge of a
+    # token. This keeps suggestions active after a tag and before whitespace or
+    # a closing query parenthesis, without turning operators into suggestions.
+    if cursor > 0 and not text[cursor - 1].isspace():
+        for lexeme in lexemes:
+            if lexeme.kind == "tag" and lexeme.end == cursor:
+                return _query_fragment(text, cursor, lexeme)
+
+    return QueryTagFragment(text, cursor, cursor, cursor, "")
+
+
+def replace_query_tag_fragment(
+    text: str,
+    cursor: int,
+    tag_name: str,
+) -> TagReplacement:
+    """Replace only the active M2 tag token and never execute the query."""
+
+    context = locate_query_tag_fragment(text, cursor)
+    if context.is_empty:
+        return TagReplacement(text, cursor, False, False)
+    try:
+        normalized_tag = normalize_tag_name(tag_name)
+    except (TagSyntaxError, TypeError):
+        return TagReplacement(text, cursor, False, False)
+
+    replaced = text[: context.start] + normalized_tag + text[context.end :]
+    new_cursor = context.start + len(normalized_tag)
+    return TagReplacement(replaced, new_cursor, True, False)
+
+
+def _query_fragment(
+    text: str,
+    cursor: int,
+    lexeme: _QueryLexeme,
+) -> QueryTagFragment:
+    return QueryTagFragment(
+        text=text,
+        cursor=cursor,
+        start=lexeme.start,
+        end=lexeme.end,
+        fragment=text[lexeme.start : lexeme.end],
+    )
+
+
+def _query_lexemes(text: str) -> tuple[_QueryLexeme, ...]:
+    lexemes: list[_QueryLexeme] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character.isspace():
+            index += 1
+            continue
+        if character in "()":
+            lexemes.append(_QueryLexeme("group", index, index + 1))
+            index += 1
+            continue
+
+        start = index
+        prefix_end = start
+        while (
+            prefix_end < len(text)
+            and not text[prefix_end].isspace()
+            and text[prefix_end] not in "()"
+        ):
+            prefix_end += 1
+        if text[start:prefix_end].casefold() in QUERY_OPERATOR_NAMES:
+            lexemes.append(_QueryLexeme("operator", start, prefix_end))
+            index = prefix_end
+            continue
+
+        internal_depth = 0
+        while index < len(text):
+            character = text[index]
+            if character.isspace():
+                break
+            if character == "(":
+                internal_depth += 1
+                index += 1
+                continue
+            if character == ")":
+                if internal_depth == 0:
+                    break
+                internal_depth -= 1
+                index += 1
+                continue
+            index += 1
+        lexemes.append(_QueryLexeme("tag", start, index))
+    return tuple(lexemes)
 
 
 def merge_tag_suggestions(
@@ -306,6 +444,7 @@ class TagSuggestionRole(IntEnum):
     CHINESE_NAME_TEXT = TAG_NAME + 1
     CATEGORY_TEXT = TAG_NAME + 2
     POST_COUNT_TEXT = TAG_NAME + 3
+    CATEGORY = TAG_NAME + 4
 
 
 class TagSuggestionListModel(QAbstractListModel):
@@ -316,6 +455,7 @@ class TagSuggestionListModel(QAbstractListModel):
         TagSuggestionRole.CHINESE_NAME_TEXT: QByteArray(b"chineseNameText"),
         TagSuggestionRole.CATEGORY_TEXT: QByteArray(b"categoryText"),
         TagSuggestionRole.POST_COUNT_TEXT: QByteArray(b"postCountText"),
+        TagSuggestionRole.CATEGORY: QByteArray(b"category"),
     }
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -349,6 +489,7 @@ class TagSuggestionListModel(QAbstractListModel):
             TagSuggestionRole.CHINESE_NAME_TEXT: suggestion.chinese_name_text,
             TagSuggestionRole.CATEGORY_TEXT: suggestion.category_text,
             TagSuggestionRole.POST_COUNT_TEXT: suggestion.post_count_text,
+            TagSuggestionRole.CATEGORY: suggestion.category,
         }[suggestion_role]
 
     def set_items(self, items: tuple[TagSuggestion, ...]) -> None:
@@ -451,7 +592,8 @@ class DanbooruTagSuggestionController(QObject):
         self._local_suggestions: tuple[TagSuggestion, ...] = ()
         self._current_text = ""
         self._current_cursor = 0
-        self._current_fragment: ActiveTagFragment | None = None
+        self._current_fragment: ActiveTagFragment | QueryTagFragment | None = None
+        self._current_query_input = False
         self._is_open = False
         self._remote_busy = False
         self._notice_text = ""
@@ -502,14 +644,34 @@ class DanbooruTagSuggestionController(QObject):
 
     @Slot(str, int)
     def updateInput(self, text: str, cursor: int) -> None:
+        self._update_suggestion_input(text, cursor, query_input=False)
+
+    @Slot(str, int)
+    def updateQueryInput(self, text: str, cursor: int) -> None:
+        """Update suggestions for an unrestricted M2 boolean expression."""
+
+        self._update_suggestion_input(text, cursor, query_input=True)
+
+    def _update_suggestion_input(
+        self,
+        text: str,
+        cursor: int,
+        *,
+        query_input: bool,
+    ) -> None:
         if self._closing or self._shutdown:
             return
         generation = self._invalidate_remote_request()
         self._current_text = text
         self._current_cursor = cursor
+        self._current_query_input = query_input
         self._notice_text = ""
         try:
-            context = locate_active_tag_fragment(text, cursor)
+            context = (
+                locate_query_tag_fragment(text, cursor)
+                if query_input
+                else locate_active_tag_fragment(text, cursor)
+            )
         except (TypeError, ValueError):
             context = None
         self._current_fragment = context
@@ -517,7 +679,11 @@ class DanbooruTagSuggestionController(QObject):
         if (
             context is None
             or context.is_empty
-            or context.token_count > 2
+            or (
+                not query_input
+                and isinstance(context, ActiveTagFragment)
+                and context.token_count > 2
+            )
         ):
             self._local_suggestions = ()
             self._is_open = False
@@ -573,6 +739,27 @@ class DanbooruTagSuggestionController(QObject):
         if not 0 <= index < len(self._model.items):
             return TagReplacement(text, cursor, False, False).to_mapping()
         replacement = replace_active_tag_fragment(
+            text,
+            cursor,
+            self._model.items[index].name,
+        )
+        self.closeSuggestions()
+        return replacement.to_mapping()
+
+    @Slot(str, int, int, result="QVariantMap")
+    def applyQuerySuggestion(
+        self,
+        text: str,
+        cursor: int,
+        index: int,
+    ) -> dict[str, object]:
+        """Apply one suggestion to M2 text without submitting a query."""
+
+        if self._closing or self._shutdown:
+            return TagReplacement(text, cursor, False, False).to_mapping()
+        if not 0 <= index < len(self._model.items):
+            return TagReplacement(text, cursor, False, False).to_mapping()
+        replacement = replace_query_tag_fragment(
             text,
             cursor,
             self._model.items[index].name,
@@ -693,7 +880,11 @@ class DanbooruTagSuggestionController(QObject):
             or self._requests_disabled
             or context is None
             or context.is_empty
-            or context.token_count > 2
+            or (
+                not self._current_query_input
+                and isinstance(context, ActiveTagFragment)
+                and context.token_count > 2
+            )
             or not context.fragment.isascii()
         ):
             return
@@ -937,7 +1128,10 @@ class DanbooruTagSuggestionController(QObject):
             or self._shutdown
         ):
             return
-        self.updateInput(self._current_text, self._current_cursor)
+        if self._current_query_input:
+            self.updateQueryInput(self._current_text, self._current_cursor)
+        else:
+            self.updateInput(self._current_text, self._current_cursor)
 
     def _set_import_error(self, code: str, message: str) -> None:
         generation = self._import_generation
