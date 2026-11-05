@@ -341,6 +341,7 @@ class BrowserSessionController(QObject):
         self._history_model = RecentQueryListModel(self)
         self._notice_text = ""
         self._closed = False
+        self._events_detached = False
         self._clearing_history = False
         self._state_generation = 0
         self._restore_generation = 0
@@ -852,6 +853,50 @@ class BrowserSessionController(QObject):
             self._invalidate_m2_restore(cancel=True)
         else:
             self._invalidate_restore()
+
+    def detach_events(self) -> None:
+        """Disconnect controller events after the final session save."""
+
+        if self._events_detached:
+            return
+        self._events_detached = True
+        if self._m2_mode:
+            assert self._m2_controller is not None
+            assert self._query_bridge is not None
+            connections = (
+                (self._query_bridge.draftEdited, self.controlsEdited),
+                (self._query_bridge.viewUpdatePreparing, self._m2_view_preparing),
+                (self._query_bridge.viewUpdateAborted, self._m2_view_aborted),
+                (self._m2_controller.queryAccepted, self._m2_query_accepted),
+                (
+                    self._m2_controller.viewDefinitionChanged,
+                    self._m2_view_changed,
+                ),
+                (
+                    self._m2_controller.resultSummaryChanged,
+                    self._m2_result_changed,
+                ),
+                (
+                    self._posts_model.revisionChanged,
+                    self._m2_model_revision_changed,
+                ),
+            )
+        else:
+            assert self._gallery is not None
+            connections = (
+                (self._gallery.requestAccepted, self._request_accepted),
+                (self._gallery.pageDisplayed, self._page_displayed),
+                (self._gallery.pageRequestCompleted, self._page_completed),
+            )
+        for signal, slot in connections:
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+
+    @property
+    def events_detached(self) -> bool:
+        return self._events_detached
 
     def _select_m2_history(self, row: int) -> None:
         if self._closed:

@@ -23,8 +23,13 @@ SOURCE_PACKAGE_ROOT = PROJECT_ROOT / "src"
 INSTALLED_CHECK_SCRIPT = PROJECT_ROOT / "scripts" / "check_installed_package.py"
 EXPECTED_QML_MEMBERS = (
     "danbooru_multi_search/ui/qml/Main.qml",
+    "danbooru_multi_search/ui/qml/M2Main.qml",
     "danbooru_multi_search/ui/qml/DetailPage.qml",
     "danbooru_multi_search/ui/qml/ImageViewer.qml",
+    "danbooru_multi_search/ui/qml/QueryEditorPanel.qml",
+    "danbooru_multi_search/ui/qml/QueryFilterPanel.qml",
+    "danbooru_multi_search/ui/qml/QueryStatusBar.qml",
+    "danbooru_multi_search/ui/qml/HistoryPanel.qml",
 )
 EXPECTED_CONSOLE_SCRIPT = "danbooru-multi-search"
 EXPECTED_CONSOLE_TARGET = "danbooru_multi_search.__main__:main"

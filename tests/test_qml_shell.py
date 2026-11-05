@@ -6,18 +6,104 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from PySide6.QtCore import QEventLoop, QObject, QTimer
+from PySide6.QtCore import (
+    QCoreApplication,
+    QEvent,
+    QEventLoop,
+    QObject,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 from PySide6.QtQuick import QQuickItem
+from PySide6.QtTest import QTest
 
-from danbooru_multi_search.danbooru import DanbooruPost, RequestState
+from danbooru_multi_search.danbooru import (
+    DanbooruPost,
+    QueryExecutionState,
+)
 from danbooru_multi_search.core.bootstrap import initialize_runtime
-from danbooru_multi_search.storage import HistoryError
+from danbooru_multi_search.storage import HistoryError, HistoryRepository
 from danbooru_multi_search.ui.launcher import (
     create_qml_engine,
     gui_smoke_capabilities_succeed,
     launch_gui,
 )
+
+
+class _PendingReply(QObject):
+    metaDataChanged = Signal()
+    readyRead = Signal()
+    finished = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.abort_count = 0
+
+    def abort(self) -> None:
+        self.abort_count += 1
+
+    def readAll(self) -> bytes:
+        return b""
+
+    def error(self):
+        return QNetworkReply.NetworkError.NoError
+
+    def errorString(self) -> str:
+        return ""
+
+    def attribute(self, attribute):
+        if attribute == QNetworkRequest.Attribute.HttpStatusCodeAttribute:
+            return 200
+        return None
+
+    def rawHeader(self, _name) -> bytes:
+        return b""
+
+    def deleteLater(self) -> None:
+        return
+
+
+class _RecordingNetworkManager:
+    def __init__(self) -> None:
+        self.requests: list[QNetworkRequest] = []
+        self.replies: list[_PendingReply] = []
+
+    def get(self, request: QNetworkRequest) -> _PendingReply:
+        reply = _PendingReply()
+        self.requests.append(request)
+        self.replies.append(reply)
+        return reply
+
+
+def _wait_until(predicate, timeout_ms: int = 2_000) -> bool:
+    elapsed = 0
+    while elapsed < timeout_ms:
+        QGuiApplication.processEvents()
+        if predicate():
+            return True
+        QTest.qWait(10)
+        elapsed += 10
+    return predicate()
+
+
+def _ui_session(engine):
+    session_controller = engine.rootContext().contextProperty(
+        "sessionController"
+    )
+    return session_controller.parent()
+
+
+def _close_engine(engine) -> None:
+    _ui_session(engine).shutdown()
+    for root in engine.rootObjects():
+        root.close()
+    engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    application = QGuiApplication.instance()
+    if application is not None:
+        application.processEvents()
 
 
 @pytest.mark.parametrize(
@@ -69,7 +155,7 @@ def test_create_qml_engine_rejects_non_gui_application():
 
 def test_minimal_qml_window_loads():
     application = QGuiApplication.instance() or QGuiApplication([])
-    engine, controller = create_qml_engine(
+    engine, bridge = create_qml_engine(
         application,
         danbooru_base_url="https://example.invalid",
     )
@@ -82,8 +168,11 @@ def test_minimal_qml_window_loads():
         "ratingFilter",
         "pageSizeInput",
         "galleryGrid",
-        "previousPageButton",
-        "nextPageButton",
+        "searchButton",
+        "globalRankButton",
+        "latestButton",
+        "queryStatusBar",
+        "historyList",
         "refreshButton",
         "retryButton",
         "detailPage",
@@ -93,24 +182,28 @@ def test_minimal_qml_window_loads():
     rating_filter = root.findChild(QObject, "ratingFilter")
     page_size_input = root.findChild(QObject, "pageSizeInput")
     assert rating_filter.property("currentValue") == "all"
-    assert page_size_input.property("value") == 40
-    assert page_size_input.property("from") == 1
-    assert page_size_input.property("to") == 200
+    assert page_size_input.property("text") == "200"
+    assert root.findChild(QObject, "previousPageButton") is None
+    assert root.findChild(QObject, "nextPageButton") is None
+    assert engine.rootContext().contextProperty("searchController") is bridge
+    controller = bridge.core_controller
+    assert bridge.postsModel is controller.posts_model
 
-    application.aboutToQuit.emit()
-    controller.shutdown()
-    controller.search("cat")
-    assert controller.state == RequestState.ERROR
-    assert "正在关闭" in controller.errorText
+    ui_session = _ui_session(engine)
+    ui_session.shutdown()
+    assert bridge.executeStandard() is False
+    assert controller.closed is True
+    _close_engine(engine)
 
 
 def test_thumbnail_error_stays_inside_its_gallery_card():
     application = QGuiApplication.instance() or QGuiApplication([])
-    engine, controller = create_qml_engine(
+    engine, bridge = create_qml_engine(
         application,
         danbooru_base_url="https://example.invalid",
     )
-    controller.postsModel.set_posts(
+    controller = bridge.core_controller
+    bridge.postsModel.set_posts(
         (
             DanbooruPost(
                 id=123,
@@ -143,10 +236,10 @@ def test_thumbnail_error_stays_inside_its_gallery_card():
     error_overlay = card.findChild(QObject, "thumbnailError_123")
     assert error_overlay is not None
     assert error_overlay.property("visible") is True
-    assert controller.postsModel.count == 1
-    assert controller.state == RequestState.IDLE
+    assert bridge.postsModel.count == 1
+    assert controller.executor.snapshot.state == QueryExecutionState.IDLE
 
-    controller.postsModel.set_posts(
+    bridge.postsModel.set_posts(
         (
             DanbooruPost(
                 id=124,
@@ -180,9 +273,9 @@ def test_thumbnail_error_stays_inside_its_gallery_card():
     )
     assert replacement_error is not None
     assert replacement_error.property("visible") is False
-    assert controller.postsModel.count == 1
-    assert controller.state == RequestState.IDLE
-    controller.shutdown()
+    assert bridge.postsModel.count == 1
+    assert controller.executor.snapshot.state == QueryExecutionState.IDLE
+    _close_engine(engine)
 
 
 def test_gui_event_loop_starts_and_closes_cleanly():
@@ -197,31 +290,79 @@ def test_gui_event_loop_starts_and_closes_cleanly():
     assert exit_code == 0
 
 
+def test_m2_startup_loads_saved_draft_without_network(tmp_path):
+    application = QGuiApplication.instance() or QGuiApplication([])
+    runtime = initialize_runtime(tmp_path)
+    repository = HistoryRepository(runtime.database)
+    saved = repository.record_accepted_query(
+        display_text="cat",
+        normalized_tags=("cat",),
+        rating="general",
+        page_size=40,
+        page=1,
+        count_tag_usage=True,
+    )
+    assert saved is not None
+    network_manager = _RecordingNetworkManager()
+
+    engine, bridge = create_qml_engine(
+        application,
+        danbooru_base_url="https://example.invalid",
+        network_manager=network_manager,
+        runtime=runtime,
+    )
+    assert engine.rootContext().contextProperty("searchController") is bridge
+    session_controller = engine.rootContext().contextProperty(
+        "sessionController"
+    )
+
+    QTest.qWait(350)
+    application.processEvents()
+    assert bridge.advancedText == "cat"
+    assert session_controller.canRestoreSelected is True
+    assert session_controller.historyModel.count == 1
+    assert network_manager.requests == []
+
+    _close_engine(engine)
+
+
 def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
     application = QGuiApplication.instance() or QGuiApplication([])
-    engine, gallery_controller = create_qml_engine(
+    engine, bridge = create_qml_engine(
         application,
         danbooru_base_url="https://example.invalid",
     )
+    query_controller = bridge.core_controller
     tag_controller = engine.rootContext().contextProperty(
         "tagSuggestionController"
     )
     detail_controller = engine.rootContext().contextProperty("detailController")
-    shared_queue = gallery_controller._task_queue
+    session_controller = engine.rootContext().contextProperty("sessionController")
+    ui_session = session_controller.parent()
+    executor = query_controller.executor
+    shared_queue = executor._task_queue
 
     assert tag_controller._task_queue is shared_queue
-    assert gallery_controller._owns_queue is False
+    assert executor.owns_queue is False
     assert tag_controller._owns_queue is False
+    assert executor._network_manager is ui_session.network_manager
+    assert tag_controller._network_manager is ui_session.network_manager
+    assert bridge.core_controller is query_controller
+    assert bridge.postsModel is query_controller.posts_model
+    assert detail_controller._gallery_model is query_controller.posts_model
+    assert session_controller._posts_model is query_controller.posts_model
     assert detail_controller.translation_store is tag_controller.translation_store
+    assert query_controller._tag_store is tag_controller.translation_store
 
-    tag_controller.shutdown()
-    assert shared_queue.is_shutdown is False
-
-    application.aboutToQuit.emit()
-    application.aboutToQuit.emit()
+    ui_session.shutdown()
+    ui_session.shutdown()
+    session_controller.detach_events()
+    bridge.detach()
 
     assert shared_queue.is_shutdown is True
     assert shared_queue.has_work is False
+    assert ui_session.shutdown_completed is True
+    _close_engine(engine)
 
 
 def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
@@ -230,9 +371,11 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
 ):
     application = QGuiApplication.instance() or QGuiApplication([])
     runtime = initialize_runtime(tmp_path)
-    engine, gallery = create_qml_engine(
+    network_manager = _RecordingNetworkManager()
+    engine, bridge = create_qml_engine(
         application,
         danbooru_base_url="https://example.invalid",
+        network_manager=network_manager,
         runtime=runtime,
     )
     session_controller = engine.rootContext().contextProperty(
@@ -243,9 +386,20 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
     tags = ui_session.tag_controller
     images = ui_session.image_cache_controller
     queue = ui_session.task_queue
+    query_controller = bridge.core_controller
+    assert bridge is ui_session.query_bridge
     events: list[str] = []
-    accepted_requests = []
-    gallery.requestAccepted.connect(accepted_requests.append)
+    accepted_queries = []
+    result_events = []
+    query_controller.queryAccepted.connect(accepted_queries.append)
+    query_controller.resultSummaryChanged.connect(result_events.append)
+
+    assert bridge.applyAdvancedText("cat") is True
+    assert bridge.executeStandard() is True
+    assert _wait_until(
+        lambda: len(network_manager.requests) == 1
+        and len(accepted_queries) == 1
+    )
 
     def fail_final_save(**_kwargs):
         raise HistoryError("simulated final save failure")
@@ -256,9 +410,13 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         fail_final_save,
     )
     for name, owner, attribute in (
+        ("bridge-closing", bridge, "beginClosing"),
+        ("query", query_controller, "shutdown"),
         ("session", session_controller, "begin_shutdown"),
+        ("session-detach", session_controller, "detach_events"),
+        ("bridge-detach", bridge, "detach"),
         ("detail", detail, "shutdown"),
-        ("gallery", gallery, "shutdown"),
+        ("tags-closing", tags, "begin_shutdown"),
         ("tags", tags, "shutdown"),
         ("images", images, "shutdown"),
         ("queue", queue, "shutdown"),
@@ -277,27 +435,48 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         nonlocal reentry_count
         reentry_count += 1
         ui_session.shutdown()
-        gallery.search("reentrant")
+        assert bridge.executeLatest() is False
         tags.updateInput("cat", 3)
 
     session_controller.noticeTextChanged.connect(reenter_shutdown_and_request)
-    gallery.search("waiting")
     assert queue.has_work is True
-    assert len(accepted_requests) == 1
 
     ui_session.shutdown()
 
     assert reentry_count == 1
-    assert events == ["session", "detail", "gallery", "tags", "images", "queue"]
+    assert events == [
+        "bridge-closing",
+        "query",
+        "session",
+        "session-detach",
+        "bridge-detach",
+        "detail",
+        "tags-closing",
+        "tags",
+        "images",
+        "queue",
+    ]
     assert "simulated final save failure" in session_controller.noticeText
     assert detail._shutdown is True
-    assert gallery._shutdown is True
+    assert query_controller.closed is True
+    assert query_controller.executor.closed is True
+    assert bridge.closing is True
+    assert bridge.detached is True
+    assert bridge.queryState == QueryExecutionState.PARTIAL_CANCELLED.value
+    assert session_controller.events_detached is True
     assert tags._shutdown is True
     assert images.closed is True
     assert queue.is_shutdown is True
     assert queue.has_work is False
-    assert len(accepted_requests) == 1
+    assert len(accepted_queries) == 1
+    assert sum(
+        event.summary.state == QueryExecutionState.PARTIAL_CANCELLED
+        for event in result_events
+    ) == 1
+    assert network_manager.replies[0].abort_count == 1
+    stored = ui_session.history_repository.latest_query()
+    assert stored is not None
+    assert stored.result_summary is not None
+    assert stored.result_summary.state == QueryExecutionState.PARTIAL_CANCELLED
 
-    for root in engine.rootObjects():
-        root.close()
-    engine.deleteLater()
+    _close_engine(engine)

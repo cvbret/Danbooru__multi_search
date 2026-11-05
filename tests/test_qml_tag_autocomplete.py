@@ -17,7 +17,10 @@ from danbooru_multi_search.danbooru import (
     TagIndexSnapshot,
     TagSuggestion,
 )
-from danbooru_multi_search.ui.launcher import create_qml_engine
+from tests.m1_qml_harness import (
+    close_m1_qml_test_engine,
+    create_m1_qml_test_engine,
+)
 
 
 APPLICATION = QGuiApplication.instance() or QGuiApplication([])
@@ -81,7 +84,7 @@ def _wait_until(predicate, timeout_ms: int = 1_500) -> bool:
 
 def _create_window():
     manager = FakeNetworkManager()
-    engine, gallery_controller = create_qml_engine(
+    engine, gallery_controller = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=manager,
@@ -119,9 +122,7 @@ def _show_suggestions(tags_input, suggestion_popup, text: str, cursor: int):
 
 
 def _close_window(engine) -> None:
-    APPLICATION.aboutToQuit.emit()
-    engine.deleteLater()
-    APPLICATION.processEvents()
+    close_m1_qml_test_engine(engine)
 
 
 def test_suggestion_popup_keeps_input_focus_and_keyboard_navigation_cycles():

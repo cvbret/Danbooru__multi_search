@@ -75,7 +75,16 @@ GUI_RESULT_FIELDS = frozenset(
     }
 )
 
-QML_FILES = ("Main.qml", "DetailPage.qml", "ImageViewer.qml")
+QML_FILES = (
+    "Main.qml",
+    "M2Main.qml",
+    "DetailPage.qml",
+    "ImageViewer.qml",
+    "QueryEditorPanel.qml",
+    "QueryFilterPanel.qml",
+    "QueryStatusBar.qml",
+    "HistoryPanel.qml",
+)
 REQUIRED_PLUGIN_FILES = (
     ("platforms", "qwindows.dll"),
     ("platforms", "qoffscreen.dll"),

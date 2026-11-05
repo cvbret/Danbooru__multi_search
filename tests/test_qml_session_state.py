@@ -7,8 +7,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
 from PySide6.QtCore import (
-    QCoreApplication,
-    QEvent,
     QMetaObject,
     QObject,
     Qt,
@@ -21,11 +19,14 @@ from PySide6.QtTest import QTest
 from danbooru_multi_search.core.bootstrap import initialize_runtime
 from danbooru_multi_search.danbooru import DanbooruPost
 from danbooru_multi_search.storage import GalleryPosition, HistoryRepository
-from danbooru_multi_search.ui.launcher import create_qml_engine
 from danbooru_multi_search.ui.window_state import (
     ScreenGeometry,
     WindowGeometry,
     restore_window_geometry,
+)
+from tests.m1_qml_harness import (
+    close_m1_qml_test_engine,
+    create_m1_qml_test_engine,
 )
 
 
@@ -89,12 +90,7 @@ def _wait_until(predicate, timeout_ms: int = 2000) -> bool:
 
 
 def _close(engine) -> None:
-    APPLICATION.aboutToQuit.emit()
-    for root in engine.rootObjects():
-        root.close()
-    engine.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    APPLICATION.processEvents()
+    close_m1_qml_test_engine(engine)
 
 
 def test_startup_and_history_selection_stay_offline_then_restore_saved_page(
@@ -112,7 +108,7 @@ def test_startup_and_history_selection_stay_offline_then_restore_saved_page(
     )
     assert repository.mark_query_committed(saved.id, 2)
     manager = _RecordingNetworkManager()
-    engine, gallery = create_qml_engine(
+    engine, gallery = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=manager,
@@ -150,7 +146,7 @@ def test_startup_and_history_selection_stay_offline_then_restore_saved_page(
 
 
 def test_hidden_window_does_not_replace_last_normal_geometry():
-    engine, _gallery = create_qml_engine(
+    engine, _gallery = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -183,7 +179,7 @@ def test_hidden_window_does_not_replace_last_normal_geometry():
 
 def test_maximized_state_is_persisted_and_applied_on_actual_restart(tmp_path):
     runtime = initialize_runtime(tmp_path)
-    first_engine, _gallery = create_qml_engine(
+    first_engine, _gallery = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -231,7 +227,7 @@ def test_maximized_state_is_persisted_and_applied_on_actual_restart(tmp_path):
         current_screens,
     )
 
-    second_engine, _gallery = create_qml_engine(
+    second_engine, _gallery = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -254,7 +250,7 @@ def test_maximized_state_is_persisted_and_applied_on_actual_restart(tmp_path):
 
 def test_closing_reports_same_event_cycle_geometry_before_final_save(tmp_path):
     runtime = initialize_runtime(tmp_path)
-    engine, _gallery = create_qml_engine(
+    engine, _gallery = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -268,7 +264,7 @@ def test_closing_reports_same_event_cycle_geometry_before_final_save(tmp_path):
     expected = WindowGeometry(root.x(), root.y(), root.width(), root.height())
 
     root.close()
-    APPLICATION.aboutToQuit.emit()
+    close_m1_qml_test_engine(engine)
 
     persisted = HistoryRepository(runtime.database).load_session()
     assert persisted.geometry is not None
@@ -278,13 +274,10 @@ def test_closing_reports_same_event_cycle_geometry_before_final_save(tmp_path):
         persisted.geometry.width,
         persisted.geometry.height,
     ) == (expected.x, expected.y, expected.width, expected.height)
-    engine.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    APPLICATION.processEvents()
 
 
 def test_small_screen_qml_minimum_does_not_force_window_off_screen():
-    engine, _gallery = create_qml_engine(
+    engine, _gallery = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -329,7 +322,7 @@ def test_first_visible_card_and_position_are_saved_after_500ms(tmp_path):
         count_tag_usage=True,
     )
     assert repository.mark_query_committed(query.id, 1)
-    engine, gallery = create_qml_engine(
+    engine, gallery = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -382,7 +375,7 @@ def test_delayed_restore_callback_cannot_move_gallery_after_edit(tmp_path):
     assert repository.update_gallery_position(
         GalleryPosition(query.id, 6, 5, 0.0, 340.0)
     )
-    engine, gallery = create_qml_engine(
+    engine, gallery = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),

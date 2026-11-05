@@ -11,8 +11,13 @@ version_file = Path(SPECPATH).resolve() / "version_info.txt"
 
 project_qml = [
     (str(qml_root / "Main.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "M2Main.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "DetailPage.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "ImageViewer.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "QueryEditorPanel.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "QueryFilterPanel.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "QueryStatusBar.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "HistoryPanel.qml"), "danbooru_multi_search/ui/qml"),
 ]
 
 # These modules are imported conditionally by the platform adapter or loaded by

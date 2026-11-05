@@ -58,15 +58,19 @@ def main() -> int:
         )
 
     application = QGuiApplication.instance() or QGuiApplication([])
-    engine, controller = create_qml_engine(
+    engine, _controller = create_qml_engine(
         application,
         danbooru_base_url="https://example.invalid",
     )
+    session_controller = engine.rootContext().contextProperty(
+        "sessionController"
+    )
+    ui_session = session_controller.parent()
     try:
         if not engine.rootObjects():
             raise RuntimeError("Installed QML resource did not create a root object.")
     finally:
-        controller.shutdown()
+        ui_session.shutdown()
 
     print(
         json.dumps(

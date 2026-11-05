@@ -1363,6 +1363,32 @@ class M2QueryBridgeController(QObject):
         self._closing = True
         self._emit_all()
 
+    @Slot()
+    def detach(self) -> None:
+        """Disconnect core events after the coordinated final state save."""
+
+        if self._detached:
+            return
+        self._detached = True
+        for signal, slot in (
+            (self._controller.queryAccepted, self._query_accepted),
+            (self._controller.viewDefinitionChanged, self._view_changed),
+            (self._controller.resultSummaryChanged, self._result_changed),
+            (self._controller.executor.snapshotChanged, self._snapshot_changed),
+        ):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+
+    @property
+    def closing(self) -> bool:
+        return self._closing
+
+    @property
+    def detached(self) -> bool:
+        return self._detached
+
     def _edit_tree(self, operation, *args, **kwargs) -> bool:
         if self._closing:
             return False

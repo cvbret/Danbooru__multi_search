@@ -114,12 +114,9 @@ def _write_test_sdist(
 
 @pytest.mark.parametrize(
     "missing_member",
-    (
-        "src/danbooru_multi_search/ui/qml/DetailPage.qml",
-        "src/danbooru_multi_search/ui/qml/ImageViewer.qml",
-    ),
+    tuple(f"src/{member}" for member in verify_build.EXPECTED_QML_MEMBERS),
 )
-def test_source_distribution_validation_requires_new_qml_files(
+def test_source_distribution_validation_requires_every_qml_file(
     tmp_path: Path,
     missing_member: str,
 ) -> None:
@@ -135,3 +132,12 @@ def test_source_distribution_validation_requires_new_qml_files(
             source_distribution,
             verify_build.PROJECT_ROOT,
         )
+
+
+def test_installed_package_check_closes_the_complete_ui_session() -> None:
+    source = verify_build.INSTALLED_CHECK_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'contextProperty(\n        "sessionController"\n    )' in source
+    assert "ui_session = session_controller.parent()" in source
+    assert "ui_session.shutdown()" in source
+    assert "controller.shutdown()" not in source

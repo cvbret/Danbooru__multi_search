@@ -142,7 +142,7 @@ def test_pyinstaller_spec_is_onedir_windowed_amd64_with_project_resources() -> N
     assert 'name="DanbooruMultiSearch"' in source
     assert 'package_root / "__main__.py"' in source
     assert "version=str(version_file)" in source
-    for qml_name in ("Main.qml", "DetailPage.qml", "ImageViewer.qml"):
+    for qml_name in windows_packaging.QML_FILES:
         assert f'qml_root / "{qml_name}"' in source
     for hidden_import in (
         "ctypes.wintypes",
@@ -397,6 +397,36 @@ def test_verify_onedir_requires_qml_runtime_and_plugins_in_exact_directories(
     misplaced.parent.mkdir()
     plugin.replace(misplaced)
     with pytest.raises(windows_packaging.PackagingError, match="platforms"):
+        windows_packaging.verify_onedir(bundle)
+
+
+@pytest.mark.parametrize(
+    "qml_name",
+    (
+        "M2Main.qml",
+        "QueryEditorPanel.qml",
+        "QueryFilterPanel.qml",
+        "QueryStatusBar.qml",
+        "HistoryPanel.qml",
+    ),
+)
+def test_verify_onedir_requires_each_m2_qml_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    qml_name: str,
+) -> None:
+    bundle = _make_onedir_bundle(tmp_path)
+    missing = next(
+        path
+        for path in bundle.rglob(qml_name)
+        if "danbooru_multi_search" in {
+            part.casefold() for part in path.parts
+        }
+    )
+    missing.unlink()
+    monkeypatch.setattr(windows_packaging, "verify_executable", lambda _path: None)
+
+    with pytest.raises(windows_packaging.PackagingError, match=qml_name):
         windows_packaging.verify_onedir(bundle)
 
 

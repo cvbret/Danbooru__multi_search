@@ -8,8 +8,6 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
 from PySide6.QtCore import (
     Q_ARG,
-    QCoreApplication,
-    QEvent,
     QObject,
     QMetaObject,
     QPoint,
@@ -29,7 +27,10 @@ from danbooru_multi_search.danbooru import (
     TagSuggestion,
     build_gallery_request_spec,
 )
-from danbooru_multi_search.ui.launcher import create_qml_engine
+from tests.m1_qml_harness import (
+    close_m1_qml_test_engine,
+    create_m1_qml_test_engine,
+)
 
 
 APPLICATION = QGuiApplication.instance() or QGuiApplication([])
@@ -116,7 +117,7 @@ def _post(
 
 def _create_window(posts: tuple[DanbooruPost, ...]):
     manager = FakeNetworkManager()
-    engine, gallery_controller = create_qml_engine(
+    engine, gallery_controller = create_m1_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=manager,
@@ -162,14 +163,7 @@ def _open_post_details(root, row: int) -> None:
 
 
 def _close(engine) -> None:
-    roots = tuple(engine.rootObjects())
-    APPLICATION.aboutToQuit.emit()
-    for root in roots:
-        root.close()
-    assert _wait_until(lambda: all(not root.isVisible() for root in roots))
-    engine.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    APPLICATION.processEvents()
+    close_m1_qml_test_engine(engine)
 
 
 def test_opening_detail_loads_local_image_without_metadata_request():

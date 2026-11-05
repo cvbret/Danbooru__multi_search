@@ -1,4 +1,4 @@
-"""Load and run the minimal QML application shell."""
+"""Assemble and run the M2 QML application."""
 
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from danbooru_multi_search.core.settings import (
 )
 from danbooru_multi_search.danbooru import (
     DanbooruDetailController,
-    DanbooruGalleryController,
+    DanbooruM2QueryController,
+    DanbooruMultiBranchExecutor,
     DanbooruTagSuggestionController,
     TagTranslationStore,
 )
@@ -33,6 +34,7 @@ from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
 )
+from danbooru_multi_search.ui.query_state import M2QueryBridgeController
 from danbooru_multi_search.ui.session_state import BrowserSessionController
 from danbooru_multi_search.ui.window_state import ScreenGeometry, WindowGeometry
 
@@ -41,7 +43,7 @@ if TYPE_CHECKING:
 
 
 def main_qml_path() -> Path:
-    return Path(__file__).resolve().parent / "qml" / "Main.qml"
+    return Path(__file__).resolve().parent / "qml" / "M2Main.qml"
 
 
 class _UiSession(QObject):
@@ -95,16 +97,25 @@ class _UiSession(QObject):
         )
         self.network_manager = network_manager or QNetworkAccessManager(self)
         self.translation_store = TagTranslationStore(parent=self)
-        self.gallery_controller = DanbooruGalleryController(
+        self.query_executor = DanbooruMultiBranchExecutor(
             danbooru_base_url,
             network_manager=self.network_manager,
             task_queue=self.task_queue,
-            connect_application_quit=False,
+            parent=self,
+        )
+        self.query_controller = DanbooruM2QueryController(
+            danbooru_base_url,
+            executor=self.query_executor,
+            tag_store=self.translation_store,
+            parent=self,
+        )
+        self.query_bridge = M2QueryBridgeController(
+            self.query_controller,
             parent=self,
         )
         self.detail_controller = DanbooruDetailController(
             danbooru_base_url,
-            self.gallery_controller.postsModel,
+            self.query_controller.posts_model,
             self.translation_store,
             parent=self,
         )
@@ -134,27 +145,44 @@ class _UiSession(QObject):
             resolved_screen_geometries = tuple(screen_geometries)
         self.session_controller = BrowserSessionController(
             self.history_repository,
-            self.gallery_controller,
+            None,
             settings,
             resolved_screen_geometries,
             self,
+            m2_controller=self.query_controller,
+            query_bridge=self.query_bridge,
         )
         self._closed = False
+        self._closing = False
+        self._shutdown_errors: list[Exception] = []
         application.aboutToQuit.connect(self.shutdown)
 
     @Slot()
     def shutdown(self) -> None:
-        if self._closed:
+        if self._closed or self._closing:
             return
-        self._closed = True
-        self.gallery_controller.begin_shutdown()
-        self.tag_controller.begin_shutdown()
-        self.session_controller.begin_shutdown()
-        self.detail_controller.shutdown()
-        self.gallery_controller.shutdown()
-        self.tag_controller.shutdown()
-        self.image_cache_controller.shutdown()
-        self.task_queue.shutdown()
+        self._closing = True
+        steps = (
+            self.query_bridge.beginClosing,
+            self.query_controller.shutdown,
+            self.session_controller.begin_shutdown,
+            self.session_controller.detach_events,
+            self.query_bridge.detach,
+            self.detail_controller.shutdown,
+            self.tag_controller.begin_shutdown,
+            self.tag_controller.shutdown,
+            self.image_cache_controller.shutdown,
+            self.task_queue.shutdown,
+        )
+        try:
+            for step in steps:
+                try:
+                    step()
+                except Exception as exc:
+                    self._shutdown_errors.append(exc)
+        finally:
+            self._closed = True
+            self._closing = False
 
     @property
     def shutdown_completed(self) -> bool:
@@ -163,8 +191,12 @@ class _UiSession(QObject):
         return (
             self._closed
             and self.session_controller._closed
+            and self.session_controller.events_detached
             and self.detail_controller._shutdown
-            and self.gallery_controller._shutdown
+            and self.query_controller.closed
+            and self.query_executor.closed
+            and self.query_bridge.closing
+            and self.query_bridge.detached
             and self.tag_controller._shutdown
             and self.image_cache_controller.closed
             and self.task_queue.is_shutdown
@@ -198,7 +230,7 @@ def _create_qml_session(
     engine.setNetworkAccessManagerFactory(session.image_network_factory)
     engine.rootContext().setContextProperty(
         "searchController",
-        session.gallery_controller,
+        session.query_bridge,
     )
     engine.rootContext().setContextProperty(
         "tagSuggestionController",
@@ -231,7 +263,7 @@ def create_qml_engine(
     network_manager: QNetworkAccessManager | None = None,
     runtime: RuntimeContext | None = None,
     screen_geometries: Sequence[ScreenGeometry] | None = None,
-) -> tuple[QQmlApplicationEngine, DanbooruGalleryController]:
+) -> tuple[QQmlApplicationEngine, M2QueryBridgeController]:
     engine, session = _create_qml_session(
         application,
         danbooru_base_url=danbooru_base_url,
@@ -239,7 +271,7 @@ def create_qml_engine(
         runtime=runtime,
         screen_geometries=screen_geometries,
     )
-    return engine, session.gallery_controller
+    return engine, session.query_bridge
 
 
 def _normalized_image_formats() -> list[str]:
