@@ -256,11 +256,22 @@ def test_nsis_first_install_requires_empty_target_and_absent_both_registry_keys(
 
 def test_nsis_lifecycle_uses_marker_and_both_current_user_registry_keys() -> None:
     source = NSIS_PATH.read_text(encoding="utf-8")
+    write_marker = _function_body(source, "WriteInstallMarker")
     install = _section_body(source, "Install")
     uninstall_init = _function_body(source, "un.onInit")
     uninstall = _section_body(source, "Uninstall")
 
-    assert 'FileWrite $0 "${MARKER_VALUE}"' in install
+    assert write_marker.index("ClearErrors") < write_marker.index(
+        'FileOpen $0 "$INSTDIR\\${MARKER_FILE}" w'
+    )
+    assert write_marker.index('FileOpen $0 "$INSTDIR\\${MARKER_FILE}" w') < (
+        write_marker.index('FileWrite $0 "${MARKER_VALUE}"')
+    )
+    assert "ClearErrors" in write_marker[
+        write_marker.index('FileOpen $0 "$INSTDIR\\${MARKER_FILE}" w') :
+        write_marker.index('FileWrite $0 "${MARKER_VALUE}"')
+    ]
+    assert "Call WriteInstallMarker" in install
     assert 'WriteRegStr HKCU "${PRODUCT_KEY}" "InstallLocation" "$INSTDIR"' in install
     assert 'WriteRegStr HKCU "${PRODUCT_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"' in install
     for value in (

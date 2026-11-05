@@ -24,7 +24,7 @@ from danbooru_multi_search.danbooru import (
     run_danbooru_smoke,
 )
 from danbooru_multi_search.integrations.eagle import EagleImportResult
-from danbooru_multi_search.platform import PlatformAdapter
+from danbooru_multi_search.platform import PlatformAdapter, create_platform_adapter
 from danbooru_multi_search.ui.launcher import launch_gui, run_gui_smoke_check
 
 if TYPE_CHECKING:
@@ -214,11 +214,12 @@ def _headless_result(runtime: RuntimeContext) -> dict[str, object]:
 
 
 def _failed_headless_result(data_root: Path) -> dict[str, object]:
+    platform = create_platform_adapter(override_root=data_root)
     return {
         "status": "error",
         "mode": "headless",
         "version": __version__,
-        "platform_name": "windows" if os.name == "nt" else "linux",
+        "platform_name": platform.capabilities.os_name,
         "schema_version": 0,
         "settings_created": False,
         "data_directory": str(data_root / "data"),
