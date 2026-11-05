@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.danbooru.tag_syntax import normalize_tag_name
 
 
 class DanbooruParseError(ValueError):
@@ -124,9 +125,6 @@ def _source(raw: Mapping[str, Any], index: int) -> str | None:
 
 
 def _tag_groups(raw: Mapping[str, Any], index: int) -> dict[str, tuple[str, ...]]:
-    # Imported lazily to avoid a parsing -> tags -> gallery -> client cycle.
-    from danbooru_multi_search.danbooru.tags import normalize_tag_name
-
     parsed_groups: dict[str, tuple[str, ...]] = {}
     seen: set[str] = set()
     for field_name, model_name in _TAG_FIELDS:

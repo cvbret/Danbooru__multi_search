@@ -29,6 +29,11 @@ from danbooru_multi_search.danbooru.client import (
     select_preferred_tls_backend,
 )
 from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.danbooru.tag_syntax import (
+    QUERY_OPERATOR_NAMES,
+    TagSyntaxError,
+    normalize_tag_name,
+)
 from danbooru_multi_search.tasks import (
     BoundedTaskQueue,
     QtScheduler,
@@ -46,126 +51,7 @@ from danbooru_multi_search.tasks import (
 
 DEFAULT_GALLERY_PAGE_SIZE = 40
 MAX_GALLERY_PAGE_SIZE = 200
-_COMPLEX_OPERATORS = frozenset({"and", "or", "not"})
-_BASE_METATAG_NAMES = frozenset(
-    {
-        "age",
-        "ai",
-        "appealer",
-        "approver",
-        "artcomm",
-        "child",
-        "comm",
-        "comment",
-        "commentary",
-        "commentaryupdater",
-        "commenter",
-        "date",
-        "disapproved",
-        "downvote",
-        "downvotes",
-        "duration",
-        "embedded",
-        "exif",
-        "fav",
-        "favcount",
-        "favgroup",
-        "filetype",
-        "filesize",
-        "flagger",
-        "height",
-        "has",
-        "id",
-        "is",
-        "limit",
-        "md5",
-        "mpixels",
-        "note",
-        "noter",
-        "noteupdater",
-        "order",
-        "ordfav",
-        "ordfavgroup",
-        "ordpool",
-        "ordvote",
-        "parent",
-        "pixelhash",
-        "pixiv_id",
-        "pixiv",
-        "pool",
-        "random",
-        "rating",
-        "reacted",
-        "ratio",
-        "score",
-        "search",
-        "source",
-        "status",
-        "tagcount",
-        "unaliased",
-        "upvote",
-        "upvotes",
-        "user",
-        "width",
-    }
-)
-_COUNT_METATAG_NAMES = frozenset(
-    {
-        "comment_count",
-        "deleted_comment_count",
-        "active_comment_count",
-        "note_count",
-        "deleted_note_count",
-        "active_note_count",
-        "flag_count",
-        "child_count",
-        "deleted_child_count",
-        "active_child_count",
-        "pool_count",
-        "deleted_pool_count",
-        "active_pool_count",
-        "series_pool_count",
-        "collection_pool_count",
-        "appeal_count",
-        "approval_count",
-        "replacement_count",
-        "disapproval_count",
-    }
-)
-_COUNT_METATAG_SYNONYMS = frozenset(
-    {
-        "comments",
-        "deleted_comments",
-        "active_comments",
-        "notes",
-        "deleted_notes",
-        "active_notes",
-        "flags",
-        "children",
-        "deleted_children",
-        "active_children",
-        "pools",
-        "deleted_pools",
-        "active_pools",
-        "series_pools",
-        "collection_pools",
-        "appeals",
-        "approvals",
-        "replacements",
-        "disapprovals",
-    }
-)
-_CATEGORY_COUNT_METATAG_NAMES = frozenset(
-    {"gentags", "arttags", "copytags", "chartags", "metatags"}
-)
-# Mirrors PostQueryBuilder::METATAGS. Rails-derived groups are expanded here
-# so the desktop client does not need ActiveSupport inflection rules.
-_METATAG_NAMES = (
-    _BASE_METATAG_NAMES
-    | _COUNT_METATAG_NAMES
-    | _COUNT_METATAG_SYNONYMS
-    | _CATEGORY_COUNT_METATAG_NAMES
-)
+_COMPLEX_OPERATORS = QUERY_OPERATOR_NAMES
 
 
 class ContentRating(StrEnum):
@@ -291,21 +177,10 @@ def build_gallery_request_spec(
 
     normalized_tags: list[str] = []
     for token in tokens:
-        normalized = token.casefold()
-        if token.startswith(("-", "~")):
-            raise GalleryQueryError(
-                "当前阶段不支持排除标签或 OR 前缀。"
-            )
-        if "*" in token:
-            raise GalleryQueryError("当前阶段不支持通配符查询。")
-        if any(ord(character) < 33 or ord(character) > 126 for character in token):
-            raise GalleryQueryError("标签包含不支持的控制字符。")
-        if not _has_valid_tag_parentheses(token):
-            raise GalleryQueryError("当前阶段不支持括号查询表达式。")
-        metatag_name, separator, _value = normalized.partition(":")
-        if separator and metatag_name in _METATAG_NAMES:
-            raise GalleryQueryError(f"当前阶段不支持元标签 {metatag_name}:。")
-        normalized_tags.append(normalized)
+        try:
+            normalized_tags.append(normalize_tag_name(token))
+        except TagSyntaxError as exc:
+            raise GalleryQueryError(str(exc)) from exc
 
     if not isinstance(rating, str):
         raise GalleryQueryError("内容分级必须是文本。")
@@ -329,26 +204,6 @@ def build_gallery_request_spec(
         page=page,
         limit=limit,
     )
-
-
-def _has_valid_tag_parentheses(token: str) -> bool:
-    if token.startswith("("):
-        return False
-    depth = 0
-    content_at_depth = 0
-    for character in token:
-        if character == "(":
-            depth += 1
-            if depth > 1:
-                return False
-            content_at_depth = 0
-        elif character == ")":
-            if depth != 1 or content_at_depth == 0:
-                return False
-            depth = 0
-        elif depth == 1:
-            content_at_depth += 1
-    return depth == 0
 
 
 class PostRole(IntEnum):

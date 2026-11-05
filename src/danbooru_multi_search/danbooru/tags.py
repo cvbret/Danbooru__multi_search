@@ -15,9 +15,9 @@ from danbooru_multi_search.danbooru.client import (
     USER_AGENT,
     RequestErrorKind,
 )
-from danbooru_multi_search.danbooru.gallery import (
-    GalleryQueryError,
-    build_gallery_request_spec,
+from danbooru_multi_search.danbooru.tag_syntax import (
+    QUERY_OPERATOR_NAMES,
+    normalize_tag_name,
 )
 from danbooru_multi_search.tasks import TaskAttemptResult
 
@@ -85,23 +85,6 @@ class TagSuggestion:
         )
 
 
-def normalize_tag_name(value: str) -> str:
-    """Normalize one complete tag using the M1-001 gallery rules."""
-
-    if not isinstance(value, str):
-        raise ValueError("Tag name must be text.")
-    stripped = value.strip()
-    if not stripped or any(character.isspace() for character in stripped):
-        raise ValueError("Tag name must contain exactly one tag.")
-    try:
-        spec = build_gallery_request_spec(stripped)
-    except GalleryQueryError as exc:
-        raise ValueError(str(exc)) from exc
-    if len(spec.tags) != 1:
-        raise ValueError("Tag name must contain exactly one tag.")
-    return spec.tags[0]
-
-
 def normalize_tag_fragment(value: str) -> str:
     """Normalize an incomplete ASCII fragment without damaging punctuation."""
 
@@ -118,7 +101,7 @@ def normalize_tag_fragment(value: str) -> str:
         raise ValueError("Tag fragment contains unsupported control characters.")
     if stripped.startswith(("-", "~")) or "*" in stripped:
         raise ValueError("Tag fragment contains unsupported search syntax.")
-    if stripped.casefold() in {"and", "or", "not"}:
+    if stripped.casefold() in QUERY_OPERATOR_NAMES:
         raise ValueError("Tag fragment contains an unsupported query operator.")
     return stripped.casefold()
 
