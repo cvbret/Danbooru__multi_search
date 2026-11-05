@@ -499,6 +499,77 @@ def build_draft_definition(
     )
 
 
+def query_form_values_from_definition(
+    definition: GalleryQueryDefinition,
+    *,
+    time_zone: QTimeZone,
+) -> dict[str, object]:
+    """Convert a stored definition back to the strict QML form shape."""
+
+    if not isinstance(definition, GalleryQueryDefinition):
+        raise TypeError("definition must be a GalleryQueryDefinition")
+    if not isinstance(time_zone, QTimeZone) or not time_zone.isValid():
+        _input_fail("invalid_time_zone", "Windows 当前时区无效。", "timeZone")
+    spec = definition.filter_spec
+    values = default_query_form_values()
+    values.update(
+        {
+            "rating": definition.rating.value,
+            "minimumScore": _optional_number_text(spec.minimum_score),
+            "minimumFavCount": _optional_number_text(spec.minimum_fav_count),
+            "publishedFrom": _utc_datetime_text(
+                spec.published_from_utc,
+                time_zone,
+                "publishedFrom",
+            ),
+            "publishedUntil": _utc_datetime_text(
+                spec.published_until_utc,
+                time_zone,
+                "publishedUntil",
+            ),
+            "minimumAgeDays": _timedelta_days_text(
+                spec.minimum_age,
+                "minimumAgeDays",
+            ),
+            "maximumAgeDays": _timedelta_days_text(
+                spec.maximum_age,
+                "maximumAgeDays",
+            ),
+            "fileCategories": (
+                []
+                if spec.file_categories is None
+                else sorted(item.value for item in spec.file_categories)
+            ),
+            "minimumWidth": _optional_number_text(spec.minimum_width),
+            "minimumHeight": _optional_number_text(spec.minimum_height),
+            "minimumAspectRatio": _optional_fraction_text(
+                spec.minimum_aspect_ratio
+            ),
+            "maximumAspectRatio": _optional_fraction_text(
+                spec.maximum_aspect_ratio
+            ),
+            "orientations": (
+                []
+                if spec.orientations is None
+                else sorted(item.value for item in spec.orientations)
+            ),
+            "blockedTags": "\n".join(sorted(spec.blocked_tags)),
+            "sortField": definition.sort_spec.field.value,
+            "sortDirection": definition.sort_spec.direction.value,
+            "pageSize": str(definition.limits.page_size),
+            "candidateLimit": str(definition.limits.candidate_limit),
+            "branchPageLimit": str(definition.limits.branch_page_limit),
+            "activeTimeLimitSeconds": (
+                f"{definition.limits.active_time_limit_seconds:g}"
+            ),
+        }
+    )
+    # Reuse the forward converter so a stored definition cannot produce a form
+    # that the selected query mode would reject.
+    parse_query_form(values, mode=definition.mode, time_zone=time_zone)
+    return values
+
+
 _STATE_TEXT = {
     QueryExecutionState.IDLE: "尚未开始查询",
     QueryExecutionState.WAITING: "正在等待任务队列",
@@ -535,6 +606,9 @@ class M2QueryBridgeController(QObject):
     availabilityChanged = Signal()
     countsChanged = Signal()
     galleryChanged = Signal()
+    draftEdited = Signal()
+    viewUpdatePreparing = Signal(int, int, int)
+    viewUpdateAborted = Signal(int, int, int)
 
     def __init__(
         self,
@@ -564,6 +638,8 @@ class M2QueryBridgeController(QObject):
         self._gallery_range = ""
         self._visible_count = 0
         self._last_result_operation_id: int | None = None
+        self._loaded_history_definition: GalleryQueryDefinition | None = None
+        self._history_load_generation = 0
         self._closing = False
         self._detached = False
         self._parse_current_form()
@@ -592,6 +668,12 @@ class M2QueryBridgeController(QObject):
     @property
     def gallery_definition(self) -> GalleryQueryDefinition | None:
         return self._gallery_definition
+
+    @property
+    def loaded_history_definition(self) -> GalleryQueryDefinition | None:
+        """Return the exact stored definition until the draft is edited."""
+
+        return self._loaded_history_definition
 
     @Property(QObject, constant=True)
     def postsModel(self) -> QObject:
@@ -875,6 +957,8 @@ class M2QueryBridgeController(QObject):
     def updateDraftForm(self, values: Mapping[str, object]) -> bool:
         if self._closing:
             return False
+        if not self._begin_draft_edit() or self._closing:
+            return False
         if not isinstance(values, Mapping):
             self._form_error = QueryInputDiagnostic(
                 "invalid_form",
@@ -892,6 +976,8 @@ class M2QueryBridgeController(QObject):
     @Slot(str, bool, result=bool)
     def setDraftMode(self, mode: str, rank_uses_expression: bool = False) -> bool:
         if self._closing:
+            return False
+        if not self._begin_draft_edit() or self._closing:
             return False
         try:
             parsed_mode = QueryMode(mode)
@@ -920,9 +1006,92 @@ class M2QueryBridgeController(QObject):
         self._emit_all()
         return self._form is not None
 
+    @Slot(object, result=bool)
+    def loadDraftDefinition(self, definition: object) -> bool:
+        """Load history into the draft without starting a query."""
+
+        if self._closing:
+            return False
+        self._history_load_generation += 1
+        self._loaded_history_definition = None
+        if not isinstance(definition, GalleryQueryDefinition):
+            self._set_exception_error(
+                TypeError("definition must be a GalleryQueryDefinition")
+            )
+            return False
+        try:
+            values = query_form_values_from_definition(
+                definition,
+                time_zone=self._time_zone,
+            )
+            parsed_form = parse_query_form(
+                values,
+                mode=definition.mode,
+                time_zone=self._time_zone,
+            )
+            if definition.normalized_expression is not None:
+                accepted = self._editor.apply_advanced_text(
+                    definition.normalized_expression
+                )
+                if not accepted:
+                    diagnostic = self._editor_diagnostic()
+                    assert diagnostic is not None
+                    raise QueryInputError(diagnostic)
+        except Exception as exc:
+            self._set_exception_error(exc)
+            return False
+        self._raw_form = deepcopy(values)
+        self._form = parsed_form
+        self._form_error = None
+        self._draft_mode = definition.mode
+        self._rank_uses_expression = (
+            definition.mode == QueryMode.RANK
+            and definition.normalized_expression is not None
+        )
+        self._loaded_history_definition = definition
+        self._command_error = None
+        self._emit_all()
+        return True
+
+    @Slot(str, result=bool)
+    def reexecuteLoadedHistory(self, display_text: str) -> bool:
+        """Execute the untouched stored definition without a form round trip."""
+
+        if self._closing or self._loaded_history_definition is None:
+            return False
+        try:
+            self.reexecute_loaded_history(display_text)
+        except Exception as exc:
+            self._set_exception_error(exc)
+            return False
+        self._reset_new_operation_state()
+        self._snapshot = self._controller.executor.snapshot
+        self._command_error = None
+        self._emit_all()
+        return True
+
+    def reexecute_loaded_history(self, display_text: str) -> int:
+        """Python boundary that returns the operation identity to the session."""
+
+        definition = self._loaded_history_definition
+        if self._closing or definition is None:
+            raise RuntimeError("There is no untouched history definition to execute.")
+        return self._controller.reexecute_history(
+            definition,
+            display_text=display_text,
+        )
+
+    def clear_loaded_history_definition(self) -> None:
+        """Forget the exact history payload without changing the visible draft."""
+
+        self._history_load_generation += 1
+        self._loaded_history_definition = None
+
     @Slot(str, result=bool)
     def applyAdvancedText(self, text: str) -> bool:
         if self._closing:
+            return False
+        if not self._begin_draft_edit() or self._closing:
             return False
         try:
             accepted = self._editor.apply_advanced_text(text)
@@ -936,6 +1105,8 @@ class M2QueryBridgeController(QObject):
     @Slot(result=bool)
     def discardInvalidText(self) -> bool:
         if self._closing:
+            return False
+        if not self._begin_draft_edit() or self._closing:
             return False
         changed = self._editor.discard_invalid_text()
         if changed:
@@ -1086,15 +1257,50 @@ class M2QueryBridgeController(QObject):
         definition = self._try_draft_definition()
         if definition is None:
             return False
+        operation_id = self._controller.operation_id
+        execution_id = self._controller.execution_id
+        view_generation = self._controller.view_generation
+        if operation_id is None or execution_id is None:
+            return False
+        self.viewUpdatePreparing.emit(
+            operation_id,
+            execution_id,
+            view_generation,
+        )
+        current_definition = self._try_draft_definition()
+        if (
+            self._closing
+            or self._controller.operation_id != operation_id
+            or self._controller.execution_id != execution_id
+            or self._controller.view_generation != view_generation
+            or not self.canApplyView
+            or current_definition != definition
+        ):
+            self.viewUpdateAborted.emit(
+                operation_id,
+                execution_id,
+                view_generation,
+            )
+            return False
         try:
             applied = self._controller.update_view(
                 filter_spec=definition.filter_spec,
                 sort_spec=definition.sort_spec,
             )
         except Exception as exc:
+            self.viewUpdateAborted.emit(
+                operation_id,
+                execution_id,
+                view_generation,
+            )
             self._set_exception_error(exc)
             return False
         if not applied:
+            self.viewUpdateAborted.emit(
+                operation_id,
+                execution_id,
+                view_generation,
+            )
             return False
         self._command_error = None
         self._emit_all()
@@ -1154,6 +1360,8 @@ class M2QueryBridgeController(QObject):
     def _edit_tree(self, operation, *args, **kwargs) -> bool:
         if self._closing:
             return False
+        if not self._begin_draft_edit() or self._closing:
+            return False
         try:
             operation(*args, **kwargs)
         except Exception as exc:
@@ -1161,6 +1369,15 @@ class M2QueryBridgeController(QObject):
             return False
         self._command_error = None
         self._emit_all()
+        return True
+
+    def _begin_draft_edit(self) -> bool:
+        generation = self._history_load_generation
+        self._loaded_history_definition = None
+        self.draftEdited.emit()
+        if generation != self._history_load_generation:
+            return False
+        self._loaded_history_definition = None
         return True
 
     def _execute(self, mode: QueryMode, with_expression: bool) -> bool:
@@ -1253,6 +1470,20 @@ class M2QueryBridgeController(QObject):
             return None
 
     def _draft_definition(self) -> GalleryQueryDefinition:
+        exact = self._loaded_history_definition
+        if exact is not None and exact.mode == self._draft_mode:
+            exact_uses_expression = (
+                exact.normalized_expression is not None
+                if exact.mode == QueryMode.RANK
+                else exact.mode == QueryMode.STANDARD
+            )
+            requested_uses_expression = (
+                self._rank_uses_expression
+                if self._draft_mode == QueryMode.RANK
+                else self._draft_mode == QueryMode.STANDARD
+            )
+            if exact_uses_expression == requested_uses_expression:
+                return exact
         form = self._form
         if form is None:
             diagnostic = self._form_error or QueryInputDiagnostic(
@@ -1656,6 +1887,67 @@ def _age_days(value: int, field: str) -> timedelta:
             "作品年龄天数超出可处理范围。",
             field,
         )
+
+
+def _optional_number_text(value: int | None) -> str:
+    return "" if value is None else str(value)
+
+
+def _optional_fraction_text(value) -> str:
+    if value is None:
+        return ""
+    try:
+        parsed = Fraction(value)
+    except (TypeError, ValueError, ZeroDivisionError) as exc:
+        _input_fail(
+            "invalid_aspect_ratio",
+            f"保存的长宽比无效：{exc}",
+            "aspectRatio",
+        )
+    return f"{parsed.numerator}:{parsed.denominator}"
+
+
+def _timedelta_days_text(value: timedelta | None, field: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, timedelta) or value < timedelta(0):
+        _input_fail(
+            "invalid_age_range",
+            "保存的作品年龄无效。",
+            field,
+        )
+    # The current form displays whole days.  The bridge separately retains the
+    # exact immutable definition, so an untouched history re-execution never
+    # uses this display-only truncation.
+    return str(value // timedelta(days=1))
+
+
+def _utc_datetime_text(
+    value: datetime | None,
+    time_zone: QTimeZone,
+    field: str,
+) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, datetime):
+        _input_fail("invalid_local_datetime", "保存的时间无效。", field)
+    try:
+        if value.utcoffset() is None:
+            raise ValueError("time zone is missing")
+        converted = QDateTime(value.astimezone(timezone.utc)).toTimeZone(time_zone)
+    except (OverflowError, OSError, TypeError, ValueError) as exc:
+        _input_fail(
+            "invalid_local_datetime",
+            f"保存的时间无法转换到 Windows 当前时区：{exc}",
+            field,
+        )
+    if not converted.isValid():
+        _input_fail(
+            "invalid_local_datetime",
+            "保存的时间无法转换到 Windows 当前时区。",
+            field,
+        )
+    return converted.toString("yyyy-MM-dd HH:mm")
 
 
 def _optional_local_datetime(

@@ -645,6 +645,12 @@ def test_visual_tree_slots_convert_invalid_qml_values_to_stable_errors():
 def test_bridge_distinguishes_execution_and_view_drafts_without_network():
     bridge, core, _ = _bridge()
     core.synchronous_accept = True
+    preparing: list[tuple[int, int, int]] = []
+    bridge.viewUpdatePreparing.connect(
+        lambda operation_id, execution_id, view_generation: preparing.append(
+            (operation_id, execution_id, view_generation)
+        )
+    )
 
     assert bridge.executeStandard() is True
     assert bridge.executionConditionsChanged is False
@@ -661,6 +667,7 @@ def test_bridge_distinguishes_execution_and_view_drafts_without_network():
 
     start_count = len(core.start_calls)
     assert bridge.applyView() is True
+    assert preparing == [(core.operation_id, core.execution_id, 0)]
     assert len(core.start_calls) == start_count
     assert core.update_view_calls == 1
     assert core.definition is not None
