@@ -32,7 +32,22 @@ _TAG_FIELDS = (
 
 
 def parse_posts_response(payload: bytes) -> tuple[DanbooruPost, ...]:
-    """Parse and validate a Danbooru ``posts.json`` response."""
+    """Parse a Danbooru page while retaining the M1 optional-tag behavior."""
+
+    return _parse_posts_response(payload, require_complete_tags=False)
+
+
+def parse_complete_posts_response(payload: bytes) -> tuple[DanbooruPost, ...]:
+    """Parse an M2 page whose five complete tag fields are all present."""
+
+    return _parse_posts_response(payload, require_complete_tags=True)
+
+
+def _parse_posts_response(
+    payload: bytes,
+    *,
+    require_complete_tags: bool,
+) -> tuple[DanbooruPost, ...]:
 
     try:
         raw = json.loads(payload, parse_constant=_reject_json_constant)
@@ -51,11 +66,22 @@ def parse_posts_response(payload: bytes) -> tuple[DanbooruPost, ...]:
     for index, item in enumerate(raw):
         if not isinstance(item, Mapping):
             raise DanbooruParseError(f"Post at index {index} must be a JSON object.")
-        posts.append(_parse_post(item, index))
+        posts.append(
+            _parse_post(
+                item,
+                index,
+                require_complete_tags=require_complete_tags,
+            )
+        )
     return tuple(posts)
 
 
-def _parse_post(raw: Mapping[str, Any], index: int) -> DanbooruPost:
+def _parse_post(
+    raw: Mapping[str, Any],
+    index: int,
+    *,
+    require_complete_tags: bool,
+) -> DanbooruPost:
     preview_url = _optional_string(raw, "preview_file_url", index)
     large_file_url = _optional_string(raw, "large_file_url", index)
     file_url = _optional_string(raw, "file_url", index)
@@ -64,7 +90,11 @@ def _parse_post(raw: Mapping[str, Any], index: int) -> DanbooruPost:
             f"Post at index {index} has no usable preview, large, or file URL."
         )
 
-    tag_groups = _tag_groups(raw, index)
+    tag_groups = _tag_groups(
+        raw,
+        index,
+        require_complete=require_complete_tags,
+    )
     return DanbooruPost(
         id=_required_integer(raw, "id", index, minimum=1),
         preview_url=preview_url,
@@ -124,17 +154,31 @@ def _source(raw: Mapping[str, Any], index: int) -> str | None:
     return value if value.strip() else None
 
 
-def _tag_groups(raw: Mapping[str, Any], index: int) -> dict[str, tuple[str, ...]]:
+def _tag_groups(
+    raw: Mapping[str, Any],
+    index: int,
+    *,
+    require_complete: bool,
+) -> dict[str, tuple[str, ...]]:
     parsed_groups: dict[str, tuple[str, ...]] = {}
     seen: set[str] = set()
     for field_name, model_name in _TAG_FIELDS:
-        value = raw.get(field_name)
-        if value is None:
+        if field_name not in raw:
+            if require_complete:
+                raise DanbooruParseError(
+                    f"Post at index {index} field '{field_name}' must be present "
+                    "and contain a string."
+                )
+            parsed_groups[model_name] = ()
+            continue
+        value = raw[field_name]
+        if value is None and not require_complete:
             parsed_groups[model_name] = ()
             continue
         if not isinstance(value, str):
+            expected = "a string" if require_complete else "a string or null"
             raise DanbooruParseError(
-                f"Post at index {index} field '{field_name}' must be a string or null."
+                f"Post at index {index} field '{field_name}' must be {expected}."
             )
         if any(ord(character) < 32 or ord(character) > 126 for character in value):
             raise DanbooruParseError(

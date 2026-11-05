@@ -38,6 +38,7 @@ USER_AGENT = (
     "(https://github.com/cvbret/Danbooru__multi_search)"
 )
 DEFAULT_TIMEOUT_MS = 10_000
+PostsResponseParser = Callable[[bytes], tuple[DanbooruPost, ...]]
 
 
 class RequestState:
@@ -133,9 +134,12 @@ class QtPostsRequestAttempt(QObject):
         request: QNetworkRequest,
         completion: Callable[[TaskAttemptResult], None],
         parent: QObject,
+        *,
+        parser: PostsResponseParser = parse_posts_response,
     ) -> None:
         super().__init__(parent)
         self._completion: Callable[[TaskAttemptResult], None] | None = completion
+        self._parser = parser
         self._reply: QNetworkReply | None = manager.get(request)
         self._reply.finished.connect(self._finished)
 
@@ -185,7 +189,7 @@ class QtPostsRequestAttempt(QObject):
             )
         else:
             try:
-                posts = parse_posts_response(payload)
+                posts = self._parser(payload)
             except DanbooruParseError as exc:
                 result = TaskAttemptResult.failure(
                     str(exc),

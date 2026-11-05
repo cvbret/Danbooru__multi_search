@@ -8,6 +8,7 @@ from danbooru_multi_search.danbooru import (
     DanbooruParseError,
     parse_posts_response,
 )
+from danbooru_multi_search.danbooru.parsing import parse_complete_posts_response
 
 
 def _post_mapping() -> dict[str, object]:
@@ -283,6 +284,64 @@ def test_parse_missing_null_and_blank_tag_groups_become_empty_tuples():
     assert post.copyright_tags == ()
     assert post.general_tags == ()
     assert post.meta_tags == ()
+
+
+def test_complete_parser_accepts_all_five_explicit_string_fields():
+    raw = _post_mapping()
+    raw.update(
+        {
+            "tag_string_artist": "sample_artist",
+            "tag_string_character": "",
+            "tag_string_copyright": "   ",
+            "tag_string_general": "cat blue_sky",
+            "tag_string_meta": "highres",
+        }
+    )
+
+    post = parse_complete_posts_response(json.dumps([raw]).encode("utf-8"))[0]
+
+    assert post.artist_tags == ("sample_artist",)
+    assert post.character_tags == ()
+    assert post.copyright_tags == ()
+    assert post.general_tags == ("cat", "blue_sky")
+    assert post.meta_tags == ("highres",)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "tag_string_artist",
+        "tag_string_character",
+        "tag_string_copyright",
+        "tag_string_general",
+        "tag_string_meta",
+    ],
+)
+@pytest.mark.parametrize(
+    "invalid_value",
+    [pytest.param("missing", id="missing"), pytest.param(None, id="null"), 7],
+)
+def test_complete_parser_rejects_missing_null_and_non_string_tag_fields(
+    field_name,
+    invalid_value,
+):
+    raw = _post_mapping()
+    raw.update(
+        {
+            "tag_string_artist": "",
+            "tag_string_character": "",
+            "tag_string_copyright": "",
+            "tag_string_general": "",
+            "tag_string_meta": "",
+        }
+    )
+    if invalid_value == "missing":
+        raw.pop(field_name)
+    else:
+        raw[field_name] = invalid_value
+
+    with pytest.raises(DanbooruParseError, match=field_name):
+        parse_complete_posts_response(json.dumps([raw]).encode("utf-8"))
 
 
 @pytest.mark.parametrize("constant", [b"NaN", b"Infinity", b"-Infinity"])

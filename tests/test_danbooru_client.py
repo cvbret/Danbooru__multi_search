@@ -19,6 +19,11 @@ from danbooru_multi_search.danbooru import (
     RequestErrorKind,
     RequestState,
 )
+from danbooru_multi_search.danbooru.client import (
+    QtPostsRequestAttempt,
+    build_posts_request,
+)
+from danbooru_multi_search.danbooru.parsing import DanbooruParseError
 from danbooru_multi_search.tasks import TaskQueueConfig
 
 
@@ -68,6 +73,54 @@ class FakeNetworkManager:
     def get(self, request):
         self.requests.append(request)
         return self.replies.pop(0)
+
+
+def test_posts_attempt_uses_injected_response_parser():
+    reply = FakeReply(b"custom payload")
+    manager = FakeNetworkManager([reply])
+    results = []
+    received_payloads = []
+
+    def parser(payload: bytes):
+        received_payloads.append(payload)
+        return ("parsed",)
+
+    QtPostsRequestAttempt(
+        manager,
+        build_posts_request("https://example.invalid", "cat"),
+        results.append,
+        APPLICATION,
+        parser=parser,
+    )
+    reply.finish()
+
+    assert received_payloads == [b"custom payload"]
+    assert len(results) == 1
+    assert results[0].succeeded is True
+    assert results[0].value == ("parsed",)
+
+
+def test_posts_attempt_maps_injected_parser_error_to_invalid_response():
+    reply = FakeReply(b"invalid strict page")
+    manager = FakeNetworkManager([reply])
+    results = []
+
+    def parser(payload: bytes):
+        raise DanbooruParseError("strict tag fields are missing")
+
+    QtPostsRequestAttempt(
+        manager,
+        build_posts_request("https://example.invalid", "cat"),
+        results.append,
+        APPLICATION,
+        parser=parser,
+    )
+    reply.finish()
+
+    assert len(results) == 1
+    assert results[0].succeeded is False
+    assert results[0].error_code == RequestErrorKind.INVALID_RESPONSE
+    assert results[0].error == "strict tag fields are missing"
 
 
 def _post_mapping() -> dict[str, object]:
