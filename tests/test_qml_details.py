@@ -139,8 +139,7 @@ def _wait_until(predicate, timeout_ms: int = 2_000) -> bool:
 
 
 def _find_visual_item(root, object_name: str):
-    content_item = root.findChild(QQuickItem, "ApplicationWindowContentControl")
-    pending = [content_item]
+    pending = [root.contentItem()]
     while pending:
         item = pending.pop()
         if item.objectName() == object_name:
@@ -309,7 +308,32 @@ def test_detail_tag_click_starts_exactly_one_gallery_request_from_top():
             lambda: _find_visual_item(root, "detailTag_sample_artist") is not None
         )
         tag_button = _find_visual_item(root, "detailTag_sample_artist")
-        tag_button.clicked.emit()
+        assert QMetaObject.invokeMethod(
+            tag_button,
+            "clicked",
+            Qt.ConnectionType.DirectConnection,
+        )
+        assert _wait_until(
+            lambda: _find_visual_item(
+                root,
+                "detailTagNewQuery_sample_artist",
+            ) is not None
+        )
+        new_query_action = _find_visual_item(
+            root,
+            "detailTagNewQuery_sample_artist",
+        )
+        add_query_action = _find_visual_item(
+            root,
+            "detailTagAddToQuery_sample_artist",
+        )
+        assert add_query_action is not None
+        assert add_query_action.property("visible") is False
+        assert QMetaObject.invokeMethod(
+            new_query_action,
+            "triggered",
+            Qt.ConnectionType.DirectConnection,
+        )
 
         assert _wait_until(lambda: len(manager.requests) == 1)
         assert detail.isOpen is False

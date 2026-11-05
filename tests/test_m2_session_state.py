@@ -35,7 +35,10 @@ from danbooru_multi_search.storage import (
     HistoryRepository,
 )
 from danbooru_multi_search.storage.database import Database
-from danbooru_multi_search.ui.session_state import BrowserSessionController
+from danbooru_multi_search.ui.session_state import (
+    BrowserSessionController,
+    RecentQueryRole,
+)
 from danbooru_multi_search.ui.query_editor import QueryTreeEditor
 from danbooru_multi_search.ui.query_state import (
     M2QueryBridgeController,
@@ -228,6 +231,7 @@ class _FakeBridge(QObject):
         self.loaded_definition: GalleryQueryDefinition | None = None
         self.load_calls = 0
         self.reexecute_calls = 0
+        self.cancel_calls = 0
         self.load_hook = None
 
     def loadDraftDefinition(self, definition: object) -> bool:
@@ -246,6 +250,10 @@ class _FakeBridge(QObject):
             self.loaded_definition,
             display_text=display_text,
         )
+
+    def cancel(self) -> bool:
+        self.cancel_calls += 1
+        return self.core.cancel()
 
 
 def _build(tmp_path):
@@ -310,6 +318,18 @@ def test_history_selection_loads_exact_definition_without_request(tmp_path):
     assert core.reexecute_calls == []
 
 
+def test_unified_m2_cancel_invalidates_restore_and_calls_bridge_once(tmp_path):
+    _repository, core, bridge, session = _build(tmp_path)
+    core.start(_definition())
+    generation = session._restore_generation
+
+    assert session.cancelM2Query() is True
+
+    assert session._restore_generation == generation + 1
+    assert bridge.cancel_calls == 1
+    assert core.cancel_calls == 1
+
+
 def test_real_bridge_reexecutes_exact_history_until_first_edit():
     definition = _definition(
         filters=ResultFilterSpec(
@@ -366,6 +386,24 @@ def test_accepted_and_result_use_exact_identity_and_page_one(tmp_path):
     assert repository.load_session().active_query_id == stored.id
     assert session._active_history_id == stored.id
     assert session._displayed_model_revision == core.posts_model.revision
+
+
+def test_m2_history_model_exposes_mode_status_reason_and_four_counts(tmp_path):
+    _repository, core, _bridge, session = _build(tmp_path)
+    definition = _definition()
+    core.start(definition)
+    core.accept()
+    core.result(commit_gallery=True)
+
+    model = session.historyModel
+    index = model.index(0)
+    assert model.data(index, int(RecentQueryRole.MODE_TEXT)) == "普通查询"
+    assert model.data(index, int(RecentQueryRole.EXPRESSION_TEXT)) == "cat AND dog"
+    assert model.data(index, int(RecentQueryRole.STATE_TEXT)) == "扫描完成"
+    assert model.data(index, int(RecentQueryRole.REMOTE_ROWS)) == 8
+    assert model.data(index, int(RecentQueryRole.UNIQUE_CANDIDATES)) == 7
+    assert model.data(index, int(RecentQueryRole.LOCAL_MATCHES)) == 6
+    assert model.data(index, int(RecentQueryRole.VISIBLE_COUNT)) == 5
 
 
 def test_applied_view_switches_history_without_model_revision_change(tmp_path):

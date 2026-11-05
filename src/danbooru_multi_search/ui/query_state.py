@@ -683,6 +683,12 @@ class M2QueryBridgeController(QObject):
     def queryTreeRows(self) -> list[dict[str, object]]:
         return _query_tree_rows(self._editor.root)
 
+    @Property("QVariantMap", notify=draftChanged)
+    def draftFormValues(self) -> dict[str, object]:
+        """Return one detached form snapshot for QML controls and history loads."""
+
+        return deepcopy(self._raw_form)
+
     @Property(str, notify=draftChanged)
     def advancedText(self) -> str:
         return self._editor.draft_text

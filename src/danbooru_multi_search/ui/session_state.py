@@ -79,6 +79,58 @@ class RecentQueryRole(IntEnum):
     PAGE_SIZE = IDENTIFIER + 3
     RESTORE_PAGE = IDENTIFIER + 4
     SUMMARY = IDENTIFIER + 5
+    MODE_VALUE = IDENTIFIER + 6
+    MODE_TEXT = IDENTIFIER + 7
+    EXPRESSION_TEXT = IDENTIFIER + 8
+    RATING_TEXT = IDENTIFIER + 9
+    STATE_VALUE = IDENTIFIER + 10
+    STATE_TEXT = IDENTIFIER + 11
+    REASON_TEXT = IDENTIFIER + 12
+    REMOTE_ROWS = IDENTIFIER + 13
+    UNIQUE_CANDIDATES = IDENTIFIER + 14
+    LOCAL_MATCHES = IDENTIFIER + 15
+    VISIBLE_COUNT = IDENTIFIER + 16
+    HAS_RESULT_SUMMARY = IDENTIFIER + 17
+
+
+_MODE_TEXT = {
+    "standard": "普通查询",
+    "rank": "近期热门",
+    "latest": "最新作品",
+}
+_RATING_TEXT = {
+    "all": "全部分级",
+    "general": "General",
+    "sensitive": "Sensitive",
+    "questionable": "Questionable",
+    "explicit": "Explicit",
+}
+_RESULT_STATE_TEXT = {
+    "idle": "尚无结果",
+    "waiting": "等待队列",
+    "running": "正在扫描",
+    "retry_wait": "等待自动重试",
+    "complete": "扫描完成",
+    "partial_cancelled": "已取消并保留部分结果",
+    "partial_limited": "有限扫描完成",
+    "partial_failed": "部分结果请求失败",
+    "failed": "查询失败",
+}
+_LIMIT_REASON_TEXT = {
+    "candidate_limit": "已经达到候选数量上限",
+    "page_limit": "已经达到分支页数上限",
+    "time_limit": "已经达到活动时间上限",
+}
+_FAILURE_REASON_TEXT = {
+    "authentication": "身份或访问权限失败",
+    "rate_limited": "请求过于频繁",
+    "http": "HTTP 请求失败",
+    "timeout": "请求超时",
+    "network": "网络连接失败",
+    "invalid_response": "响应数据无效",
+    "request_start": "请求无法启动",
+    "queue_rejected": "任务队列暂时无法接受请求",
+}
 
 
 class RecentQueryListModel(QAbstractListModel):
@@ -91,6 +143,18 @@ class RecentQueryListModel(QAbstractListModel):
         RecentQueryRole.PAGE_SIZE: QByteArray(b"pageSize"),
         RecentQueryRole.RESTORE_PAGE: QByteArray(b"restorePage"),
         RecentQueryRole.SUMMARY: QByteArray(b"summaryText"),
+        RecentQueryRole.MODE_VALUE: QByteArray(b"modeValue"),
+        RecentQueryRole.MODE_TEXT: QByteArray(b"modeText"),
+        RecentQueryRole.EXPRESSION_TEXT: QByteArray(b"expressionText"),
+        RecentQueryRole.RATING_TEXT: QByteArray(b"ratingText"),
+        RecentQueryRole.STATE_VALUE: QByteArray(b"stateValue"),
+        RecentQueryRole.STATE_TEXT: QByteArray(b"stateText"),
+        RecentQueryRole.REASON_TEXT: QByteArray(b"reasonText"),
+        RecentQueryRole.REMOTE_ROWS: QByteArray(b"remoteRows"),
+        RecentQueryRole.UNIQUE_CANDIDATES: QByteArray(b"uniqueCandidates"),
+        RecentQueryRole.LOCAL_MATCHES: QByteArray(b"localMatches"),
+        RecentQueryRole.VISIBLE_COUNT: QByteArray(b"visibleCount"),
+        RecentQueryRole.HAS_RESULT_SUMMARY: QByteArray(b"hasResultSummary"),
     }
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -124,6 +188,26 @@ class RecentQueryListModel(QAbstractListModel):
             query_role = RecentQueryRole(role)
         except ValueError:
             return None
+        definition = item.definition
+        summary = item.result_summary
+        mode_value = definition.mode.value
+        expression_text = definition.normalized_expression
+        if expression_text is None:
+            expression_text = "全部作品" if mode_value == "rank" else "最新作品"
+        state_value = summary.state.value if summary is not None else ""
+        limit_reason = (
+            summary.limit_reason.value
+            if summary is not None and summary.limit_reason is not None
+            else ""
+        )
+        failure_reason = (
+            summary.failure_error_code.value
+            if summary is not None and summary.failure_error_code is not None
+            else ""
+        )
+        reason_text = _LIMIT_REASON_TEXT.get(limit_reason, "")
+        if not reason_text:
+            reason_text = _FAILURE_REASON_TEXT.get(failure_reason, "")
         values = {
             RecentQueryRole.IDENTIFIER: item.id,
             RecentQueryRole.DISPLAY_TEXT: item.display_text,
@@ -134,6 +218,27 @@ class RecentQueryListModel(QAbstractListModel):
                 f"{item.display_text} · 第 {item.restore_page} 页 · "
                 f"每页 {item.page_size}"
             ),
+            RecentQueryRole.MODE_VALUE: mode_value,
+            RecentQueryRole.MODE_TEXT: _MODE_TEXT.get(mode_value, mode_value),
+            RecentQueryRole.EXPRESSION_TEXT: expression_text,
+            RecentQueryRole.RATING_TEXT: _RATING_TEXT.get(
+                definition.rating.value,
+                definition.rating.value,
+            ),
+            RecentQueryRole.STATE_VALUE: state_value,
+            RecentQueryRole.STATE_TEXT: (
+                _RESULT_STATE_TEXT.get(state_value, state_value)
+                if summary is not None
+                else "尚无结果"
+            ),
+            RecentQueryRole.REASON_TEXT: reason_text,
+            RecentQueryRole.REMOTE_ROWS: summary.remote_rows if summary else 0,
+            RecentQueryRole.UNIQUE_CANDIDATES: (
+                summary.unique_candidates if summary else 0
+            ),
+            RecentQueryRole.LOCAL_MATCHES: summary.local_matches if summary else 0,
+            RecentQueryRole.VISIBLE_COUNT: summary.visible_count if summary else 0,
+            RecentQueryRole.HAS_RESULT_SUMMARY: summary is not None,
         }
         return values[query_role]
 
@@ -514,6 +619,15 @@ class BrowserSessionController(QObject):
             self._invalidate_m2_restore(cancel=True)
         else:
             self._invalidate_restore()
+
+    @Slot(result=bool)
+    def cancelM2Query(self) -> bool:
+        """Invalidate a pending history restore and cancel the current M2 query."""
+
+        if self._closed or not self._m2_mode or self._query_bridge is None:
+            return False
+        self._invalidate_m2_restore(cancel=False)
+        return bool(self._query_bridge.cancel())
 
     @Slot()
     def clearHistory(self) -> None:

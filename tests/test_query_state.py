@@ -413,6 +413,22 @@ def test_parse_query_form_converts_all_supported_values_strictly():
     assert parsed.limits == QueryExecutionLimits(100, 500, 4, 12.5)
 
 
+def test_draft_form_values_is_a_detached_qml_snapshot():
+    bridge, _core, _editor = _bridge()
+
+    first = bridge.draftFormValues
+    first["rating"] = "explicit"
+    first["fileCategories"].append("gif")
+
+    assert bridge.draftFormValues["rating"] == "all"
+    assert bridge.draftFormValues["fileCategories"] == []
+
+    updated = default_query_form_values()
+    updated["minimumScore"] = "12"
+    assert bridge.updateDraftForm(updated) is True
+    assert bridge.draftFormValues["minimumScore"] == "12"
+
+
 @pytest.mark.parametrize(
     ("updates", "code"),
     [

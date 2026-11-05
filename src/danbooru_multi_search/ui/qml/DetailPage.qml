@@ -7,8 +7,10 @@ Item {
     objectName: "detailPage"
 
     required property var controller
+    property bool complexQueryActionsEnabled: false
     signal backRequested()
     signal importTagsRequested()
+    signal addTagToQueryRequested(string tagName)
 
     function syncMedia() {
         if (controller.mediaUrl.length === 0) {
@@ -362,6 +364,7 @@ Item {
                                         model: groupDelegate.tagItems.length
 
                                         delegate: Button {
+                                            id: tagButton
                                             required property int index
                                             readonly property var tagItem:
                                                 groupDelegate.tagItems[index]
@@ -370,7 +373,31 @@ Item {
                                                   ? tagItem.tagName
                                                   : tagItem.tagName + " · "
                                                     + tagItem.chineseNameText
-                                            onClicked: controller.activateTag(tagItem.tagName)
+                                            onClicked: tagMenu.open()
+
+                                            Menu {
+                                                id: tagMenu
+                                                y: tagButton.height
+
+                                                MenuItem {
+                                                    objectName: "detailTagNewQuery_"
+                                                                + tagButton.tagItem.tagName
+                                                    text: qsTr("以此标签新建查询")
+                                                    onTriggered: controller.activateTag(
+                                                        tagButton.tagItem.tagName
+                                                    )
+                                                }
+
+                                                MenuItem {
+                                                    objectName: "detailTagAddToQuery_"
+                                                                + tagButton.tagItem.tagName
+                                                    text: qsTr("加入当前复杂查询")
+                                                    visible: page.complexQueryActionsEnabled
+                                                    onTriggered: page.addTagToQueryRequested(
+                                                        tagButton.tagItem.tagName
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
