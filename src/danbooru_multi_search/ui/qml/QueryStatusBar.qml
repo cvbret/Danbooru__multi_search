@@ -137,8 +137,9 @@ Rectangle {
         }
 
         GridLayout {
+            id: countsGrid
             Layout.fillWidth: true
-            columns: width >= 660 ? 4 : 2
+            columns: statusBar.width >= 660 ? 4 : 2
             columnSpacing: 8
             rowSpacing: 8
 
@@ -156,7 +157,15 @@ Rectangle {
 
                 delegate: Rectangle {
                     required property var modelData
+                    objectName: modelData.objectName + "Card"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    Layout.preferredWidth: Math.max(
+                        0,
+                        (countsGrid.width
+                         - countsGrid.columnSpacing * (countsGrid.columns - 1))
+                        / countsGrid.columns
+                    )
                     Layout.preferredHeight: 52
                     radius: 7
                     color: "#252a34"

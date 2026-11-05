@@ -16,6 +16,7 @@ from PySide6.QtCore import (
     QEvent,
     QMetaObject,
     QObject,
+    QPointF,
     QTimeZone,
     QUrl,
     Qt,
@@ -385,6 +386,68 @@ def test_m2_root_loads_split_panels_and_has_no_pagination(tmp_path):
         APPLICATION.processEvents()
         assert root.property("compactLayout") is True
         assert _find(root, "openQueryDrawerButton").property("visible") is True
+    finally:
+        _close_window(values)
+
+
+@pytest.mark.parametrize(
+    ("window_width", "expected_compact"),
+    ((983, False), (651, True)),
+)
+def test_status_count_cards_use_two_rows_when_content_is_narrow(
+    tmp_path,
+    window_width,
+    expected_compact,
+):
+    values = _create_window(tmp_path)
+    try:
+        root = values["root"]
+        root.setWidth(window_width)
+        assert _wait_until(
+            lambda: root.width() == window_width
+            and root.property("compactLayout") is expected_compact
+        )
+
+        status_bar = _find(root, "queryStatusBar")
+        card_names = (
+            "remoteRowsCountCard",
+            "uniqueCandidatesCountCard",
+            "localMatchesCountCard",
+            "visibleCountCard",
+        )
+        cards = tuple(_find_visual_item(root, name) for name in card_names)
+        assert all(card is not None for card in cards)
+        assert _wait_until(
+            lambda: all(card.width() > 0 and card.height() > 0 for card in cards)
+        )
+
+        positions = tuple(
+            card.mapToItem(status_bar, QPointF(0, 0)) for card in cards
+        )
+        tolerance = 1.5
+        assert abs(positions[0].y() - positions[1].y()) <= tolerance
+        assert abs(positions[2].y() - positions[3].y()) <= tolerance
+        assert positions[2].y() > positions[0].y()
+        assert abs(positions[0].x() - positions[2].x()) <= tolerance
+        assert abs(positions[1].x() - positions[3].x()) <= tolerance
+        assert positions[1].x() > positions[0].x()
+        assert all(
+            position.x() >= -tolerance
+            and position.x() + card.width() <= status_bar.width() + tolerance
+            for card, position in zip(cards, positions, strict=True)
+        )
+        assert abs(cards[0].width() - cards[1].width()) <= tolerance
+        assert abs(cards[2].width() - cards[3].width()) <= tolerance
+
+        visible_card = cards[3]
+        visible_position = visible_card.mapToItem(
+            root.contentItem(), QPointF(0, 0)
+        )
+        assert visible_position.x() >= -tolerance
+        assert (
+            visible_position.x() + visible_card.width()
+            <= root.width() + tolerance
+        )
     finally:
         _close_window(values)
 
