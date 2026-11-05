@@ -213,6 +213,23 @@ class QueryPlan:
     def is_rank(self) -> bool:
         return self.remote_order == RemoteOrder.RANK
 
+    @property
+    def is_latest(self) -> bool:
+        if (
+            self.expression is not None
+            or self.dnf_branches
+            or self.remote_order is not None
+            or len(self.remote_branches) != 1
+        ):
+            return False
+        branch = self.remote_branches[0]
+        return (
+            not branch.candidate_tags
+            and branch.rating == self.rating
+            and branch.remote_order is None
+            and branch.local_branch is None
+        )
+
 
 def expand_query_to_dnf(
     expression: QueryNode | ParsedQuery,
@@ -411,6 +428,26 @@ def build_rank_query_plan(
         post_counts=post_counts,
         rating=rating,
         remote_order=RemoteOrder.RANK.value,
+    )
+
+
+def build_latest_query_plan(*, rating: str = "all") -> QueryPlan:
+    """Build the sole untagged plan using Danbooru's default newest order."""
+
+    normalized_rating = normalize_plan_rating(rating)
+    return QueryPlan(
+        expression=None,
+        dnf_branches=(),
+        remote_branches=(
+            RemoteQueryBranch(
+                candidate_tags=(),
+                rating=normalized_rating,
+                remote_order=None,
+                local_branch=None,
+            ),
+        ),
+        rating=normalized_rating,
+        remote_order=None,
     )
 
 

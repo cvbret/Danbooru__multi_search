@@ -14,12 +14,16 @@ from danbooru_multi_search.danbooru import (
     DanbooruMultiBranchExecutor,
     DanbooruPost,
     QueryExecutionErrorCode,
+    QueryExecutionAccepted,
+    QueryExecutionBound,
+    QueryBranchPosition,
     QueryExecutionLimits,
     QueryExecutionState,
     QueryLimitReason,
     QueryPlan,
     RemoteOrder,
     build_rank_query_plan,
+    build_latest_query_plan,
     build_standard_query_plan,
     parse_query_expression,
 )
@@ -134,7 +138,10 @@ class ControlledPageFactory:
     def __call__(self, request, attempt_number, completion):
         if self.raise_error is not None:
             raise self.raise_error
-        query = parse_qs(urlsplit(request.url().toString()).query)
+        query = parse_qs(
+            urlsplit(request.url().toString()).query,
+            keep_blank_values=True,
+        )
         abortable = FakeAbortable()
         attempt = PageAttempt(
             tags=query["tags"][0],
@@ -1080,6 +1087,8 @@ def test_first_page_queue_rejection_is_retryable_at_exact_position():
 
 def test_already_closed_shared_queue_rejects_first_page_at_exact_position():
     harness = _harness(_plan("cat"), auto_start=False)
+    accepted: list[QueryExecutionAccepted] = []
+    harness.executor.firstPageAccepted.connect(accepted.append)
     harness.queue.shutdown()
 
     harness.executor.start(_plan("cat"))
@@ -1090,6 +1099,7 @@ def test_already_closed_shared_queue_rejects_first_page_at_exact_position():
     assert snapshot.failure.position.branch_index == 0
     assert snapshot.failure.position.page == 1
     assert snapshot.counts.remote_rows == 0
+    assert accepted == []
 
 
 def test_external_shared_queue_cancel_is_visible_queue_rejection():
@@ -1291,6 +1301,8 @@ def test_public_snapshots_and_limits_are_immutable():
 def test_invalid_start_arguments_preserve_current_snapshot():
     harness = _harness(_plan("cat"))
     before = harness.executor.snapshot
+    bound: list[QueryExecutionBound] = []
+    harness.executor.executionBound.connect(bound.append)
 
     with pytest.raises(TypeError):
         harness.executor.start("not a plan")
@@ -1309,6 +1321,7 @@ def test_invalid_start_arguments_preserve_current_snapshot():
         harness.executor.start(inconsistent)
 
     assert harness.executor.snapshot == before
+    assert bound == []
 
 
 def test_synchronous_deadline_does_not_restore_a_stale_timer_handle():
@@ -1344,3 +1357,174 @@ def test_synchronous_deadline_does_not_restore_a_stale_timer_handle():
 def test_active_time_limit_requires_finite_positive_value_within_maximum(value):
     with pytest.raises(ValueError):
         QueryExecutionLimits(active_time_limit_seconds=value)
+
+
+def test_binding_and_acceptance_precede_every_page_snapshot():
+    harness = _harness(_plan("cat"), auto_start=False)
+    events: list[tuple[str, object]] = []
+    harness.executor.executionBound.connect(
+        lambda event: events.append(("bound", event))
+    )
+    harness.executor.firstPageAccepted.connect(
+        lambda event: events.append(("accepted", event))
+    )
+    harness.executor.snapshotChanged.connect(
+        lambda snapshot: events.append(("snapshot", snapshot.state))
+    )
+
+    execution_id = harness.executor.start(_plan("cat"))
+
+    assert events[0] == ("bound", QueryExecutionBound(execution_id))
+    assert events[1][0] == "accepted"
+    accepted = events[1][1]
+    assert isinstance(accepted, QueryExecutionAccepted)
+    assert accepted.execution_id == execution_id
+    assert accepted.position == QueryBranchPosition(0, 1)
+    assert accepted.task_id in harness.queue._entries
+    assert events[2] == ("snapshot", QueryExecutionState.WAITING)
+
+
+@pytest.mark.parametrize("action", ["cancel", "shutdown"])
+def test_acceptance_listener_stops_page_without_emitting_snapshot(action):
+    harness = _harness(_plan("cat"), auto_start=False)
+    accepted: list[QueryExecutionAccepted] = []
+
+    def stop(event: QueryExecutionAccepted) -> None:
+        accepted.append(event)
+        getattr(harness.executor, action)()
+
+    harness.executor.firstPageAccepted.connect(stop)
+    harness.executor.start(_plan("cat"))
+    harness.dispatch()
+
+    assert len(accepted) == 1
+    assert harness.snapshots == []
+    assert harness.factory.attempts == []
+    assert harness.queue.has_work is False
+
+
+def test_binding_listener_replacement_prevents_old_page_submission():
+    harness = _harness(_plan("old"), auto_start=False)
+    bindings: list[int] = []
+
+    def replace(event: QueryExecutionBound) -> None:
+        bindings.append(event.execution_id)
+        if len(bindings) == 1:
+            harness.executor.start(_plan("new"))
+
+    harness.executor.executionBound.connect(replace)
+    harness.executor.start(_plan("old"))
+    harness.dispatch()
+
+    assert bindings == [1, 2]
+    assert _request_positions(harness) == [("new", 1)]
+
+
+@pytest.mark.parametrize("action", ["cancel", "shutdown"])
+def test_binding_listener_stop_prevents_page_submission(action):
+    harness = _harness(_plan("cat"), auto_start=False)
+    accepted: list[QueryExecutionAccepted] = []
+    harness.executor.firstPageAccepted.connect(accepted.append)
+    harness.executor.executionBound.connect(
+        lambda event: getattr(harness.executor, action)()
+    )
+
+    harness.executor.start(_plan("cat"))
+    harness.dispatch()
+
+    assert accepted == []
+    assert harness.factory.attempts == []
+    assert len(harness.snapshots) == 1
+    assert harness.snapshots[0].state == QueryExecutionState.PARTIAL_CANCELLED
+
+
+def test_acceptance_listener_replacement_emits_no_old_page_snapshot():
+    harness = _harness(_plan("old"), auto_start=False)
+    accepted: list[QueryExecutionAccepted] = []
+
+    def replace(event: QueryExecutionAccepted) -> None:
+        accepted.append(event)
+        if event.execution_id == 1:
+            harness.executor.start(_plan("new"))
+
+    harness.executor.firstPageAccepted.connect(replace)
+    harness.executor.start(_plan("old"))
+    harness.dispatch()
+
+    assert [event.execution_id for event in accepted] == [1, 2]
+    assert _request_positions(harness) == [("new", 1)]
+    assert harness.snapshots
+    assert {snapshot.execution_id for snapshot in harness.snapshots} == {2}
+
+
+def test_queue_rejection_does_not_emit_acceptance_and_retry_emits_once():
+    clock = ManualClock()
+    scheduler = ManualScheduler(clock)
+    queue = BoundedTaskQueue(
+        TaskQueueConfig(capacity=1, minimum_interval_seconds=0),
+        clock=clock,
+        scheduler=scheduler,
+    )
+    blocker = queue.submit(
+        TaskKind.METADATA,
+        lambda attempt, completion: FakeAbortable(),
+        lambda result: None,
+    )
+    factory = ControlledPageFactory()
+    executor = DanbooruMultiBranchExecutor(
+        "https://example.invalid",
+        task_queue=queue,
+        clock=clock,
+        scheduler=scheduler,
+        attempt_factory=factory,
+    )
+    accepted: list[QueryExecutionAccepted] = []
+    executor.firstPageAccepted.connect(accepted.append)
+
+    executor.start(_plan("cat"))
+    assert accepted == []
+    queue.cancel(blocker.identifier)
+    assert executor.retry_failed_page() is True
+    assert len(accepted) == 1
+    scheduler.run_ready()
+    factory.attempts[-1].completion(TaskAttemptResult.success(()))
+
+    assert len(accepted) == 1
+    assert executor.snapshot.state == QueryExecutionState.COMPLETE
+
+
+def test_latest_plan_executes_an_empty_tag_request():
+    harness = _harness(build_latest_query_plan(), auto_start=False)
+
+    harness.executor.start(build_latest_query_plan())
+    harness.dispatch()
+
+    assert _request_positions(harness) == [("", 1)]
+
+
+def test_request_construction_failure_binds_but_never_accepts_page():
+    clock = ManualClock()
+    scheduler = ManualScheduler(clock)
+    queue = BoundedTaskQueue(
+        TaskQueueConfig(minimum_interval_seconds=0),
+        clock=clock,
+        scheduler=scheduler,
+    )
+    executor = DanbooruMultiBranchExecutor(
+        "not a valid base URL",
+        task_queue=queue,
+        clock=clock,
+        scheduler=scheduler,
+        attempt_factory=ControlledPageFactory(),
+    )
+    bound: list[QueryExecutionBound] = []
+    accepted: list[QueryExecutionAccepted] = []
+    executor.executionBound.connect(bound.append)
+    executor.firstPageAccepted.connect(accepted.append)
+
+    execution_id = executor.start(_plan("cat"))
+
+    assert bound == [QueryExecutionBound(execution_id)]
+    assert accepted == []
+    assert executor.snapshot.state == QueryExecutionState.FAILED
+    assert executor.snapshot.failure.error_code == QueryExecutionErrorCode.REQUEST_START

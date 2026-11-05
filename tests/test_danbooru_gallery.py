@@ -21,6 +21,7 @@ from danbooru_multi_search.danbooru import (
     GalleryQueryError,
     GalleryRequestOrigin,
     PostRole,
+    ProcessedPost,
     RequestErrorKind,
     RequestState,
     build_gallery_request_spec,
@@ -1096,3 +1097,44 @@ def test_closed_shared_queue_disables_all_request_entry_points():
     controller.search("dog", "all", 1)
     _dispatch()
     assert len(manager.requests) == request_count
+
+
+def test_m2_model_skips_only_same_operation_same_objects_and_ranks():
+    model = DanbooruPostListModel()
+    first = _post_model(1, score=1, fav_count=2)
+    items = (ProcessedPost(first, 1),)
+
+    assert model.set_processed_posts(7, items) is True
+    revision = model.revision
+    assert model.set_processed_posts(7, (ProcessedPost(first, 1),)) is False
+    assert model.revision == revision
+
+    assert model.set_processed_posts(7, (ProcessedPost(first, 2),)) is True
+    assert model.revision == revision + 1
+
+
+def test_m2_model_switches_operation_and_equal_valued_post_object():
+    model = DanbooruPostListModel()
+    first = _post_model(1, score=1, fav_count=2)
+    equal_but_new = _post_model(1, score=1, fav_count=2)
+    model.set_processed_posts(1, (ProcessedPost(first, None),))
+    revision = model.revision
+
+    assert model.set_processed_posts(2, (ProcessedPost(first, None),)) is True
+    assert model.revision == revision + 1
+    assert model.set_processed_posts(
+        2,
+        (ProcessedPost(equal_but_new, None),),
+    ) is True
+    assert model.post_at(0) is equal_but_new
+
+
+def test_clear_removes_empty_m2_gallery_operation_identity():
+    model = DanbooruPostListModel()
+    model.set_processed_posts(3, ())
+    revision = model.revision
+
+    model.clear()
+
+    assert model.display_operation_id is None
+    assert model.revision == revision + 1

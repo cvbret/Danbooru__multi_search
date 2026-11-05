@@ -7,6 +7,7 @@ import pytest
 from danbooru_multi_search.danbooru import (
     MAX_QUERY_BRANCHES,
     QueryBranch,
+    QueryPlan,
     QueryPlanError,
     QueryRating,
     RemoteOrder,
@@ -14,6 +15,7 @@ from danbooru_multi_search.danbooru import (
     SearchItem,
     SearchItemKind,
     build_query_plan,
+    build_latest_query_plan,
     build_rank_query_plan,
     build_standard_query_plan,
     expand_query_to_dnf,
@@ -515,3 +517,45 @@ def test_invalid_post_count_precedes_rank_common_tag_validation():
         )
         == "invalid_post_count"
     )
+
+
+@pytest.mark.parametrize(
+    ("rating", "api_tags"),
+    [
+        ("all", ""),
+        ("general", "rating:g"),
+        ("sensitive", "rating:s"),
+        ("questionable", "rating:q"),
+        ("explicit", "rating:e"),
+    ],
+)
+def test_latest_plan_has_one_empty_default_order_branch(rating, api_tags):
+    plan = build_latest_query_plan(rating=rating)
+
+    assert plan.expression is None
+    assert plan.dnf_branches == ()
+    assert plan.remote_order is None
+    assert plan.is_latest is True
+    assert len(plan.remote_branches) == 1
+    branch = plan.remote_branches[0]
+    assert branch.candidate_tags == ()
+    assert branch.local_branch is None
+    assert branch.remote_order is None
+    assert branch.api_tags == api_tags
+
+
+def test_build_query_plan_none_remains_missing_expression():
+    assert _error_code(build_query_plan, None) == "missing_expression"
+
+
+def test_latest_detection_rejects_a_malformed_tagless_plan():
+    rank = build_rank_query_plan(None)
+    malformed = QueryPlan(
+        expression=None,
+        dnf_branches=(),
+        remote_branches=rank.remote_branches,
+        rating=rank.rating,
+        remote_order=None,
+    )
+
+    assert malformed.is_latest is False

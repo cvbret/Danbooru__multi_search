@@ -24,11 +24,13 @@ from danbooru_multi_search.danbooru import (
     ResultSortDirection,
     ResultSortField,
     ResultSortSpec,
+    ValidatedResultConfiguration,
     build_query_result_session,
     build_rank_query_plan,
     build_standard_query_plan,
     parse_query_expression,
     process_query_snapshot,
+    validate_result_configuration,
 )
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.danbooru.query_execution import QueryBranchPosition
@@ -925,3 +927,45 @@ def test_processing_is_deterministic_and_does_not_modify_inputs():
         ResultSortField.SCORE,
         ResultSortDirection.DESCENDING,
     )
+
+
+def test_public_configuration_validation_returns_normalized_immutable_values():
+    configuration = validate_result_configuration(
+        ResultFilterSpec(
+            blocked_tags=frozenset({"CAT", "dog"}),
+            minimum_aspect_ratio=Fraction(2, 4),
+        ),
+        ResultSortSpec(),
+        remote_order=None,
+    )
+
+    assert isinstance(configuration, ValidatedResultConfiguration)
+    assert configuration.filter_spec.blocked_tags == frozenset({"cat", "dog"})
+    assert configuration.filter_spec.minimum_aspect_ratio == Fraction(1, 2)
+    assert configuration.sort_spec == ResultSortSpec()
+
+
+def test_public_configuration_validation_uses_filter_sort_rank_error_order():
+    with pytest.raises(ResultProcessingError) as filter_error:
+        validate_result_configuration(
+            ResultFilterSpec(minimum_fav_count=-1),
+            ResultSortSpec("bad", "bad"),
+            remote_order=None,
+        )
+    assert filter_error.value.code == "invalid_filter"
+
+    with pytest.raises(ResultProcessingError) as sort_error:
+        validate_result_configuration(
+            ResultFilterSpec(),
+            ResultSortSpec("bad", "bad"),
+            remote_order=None,
+        )
+    assert sort_error.value.code == "invalid_sort"
+
+    with pytest.raises(ResultProcessingError) as rank_error:
+        validate_result_configuration(
+            ResultFilterSpec(),
+            ResultSortSpec(ResultSortField.RANK),
+            remote_order=None,
+        )
+    assert rank_error.value.code == "rank_unavailable"

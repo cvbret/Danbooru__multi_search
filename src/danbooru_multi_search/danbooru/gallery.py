@@ -29,6 +29,7 @@ from danbooru_multi_search.danbooru.client import (
     select_preferred_tls_backend,
 )
 from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.danbooru.result_processing import ProcessedPost
 from danbooru_multi_search.danbooru.tag_syntax import (
     QUERY_OPERATOR_NAMES,
     TagSyntaxError,
@@ -245,6 +246,8 @@ class DanbooruPostListModel(QAbstractListModel):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._posts: tuple[DanbooruPost, ...] = ()
+        self._processed_posts: tuple[ProcessedPost, ...] = ()
+        self._display_operation_id: int | None = None
         self._revision = 0
 
     @Property(int, notify=countChanged)
@@ -258,6 +261,14 @@ class DanbooruPostListModel(QAbstractListModel):
     @property
     def posts(self) -> tuple[DanbooruPost, ...]:
         return self._posts
+
+    @property
+    def processed_posts(self) -> tuple[ProcessedPost, ...]:
+        return self._processed_posts
+
+    @property
+    def display_operation_id(self) -> int | None:
+        return self._display_operation_id
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._posts)
@@ -301,8 +312,51 @@ class DanbooruPostListModel(QAbstractListModel):
         return values[post_role]
 
     def set_posts(self, posts: tuple[DanbooruPost, ...]) -> None:
+        """Keep the M1 contract: every call replaces and resets the model."""
+
+        processed = tuple(ProcessedPost(post, None) for post in posts)
+        self._replace_posts(processed, display_operation_id=None)
+
+    def set_processed_posts(
+        self,
+        display_operation_id: int,
+        items: tuple[ProcessedPost, ...],
+    ) -> bool:
+        """Commit one M2 view, skipping only an identical same-operation view."""
+
+        if (
+            not isinstance(display_operation_id, int)
+            or isinstance(display_operation_id, bool)
+            or display_operation_id < 1
+        ):
+            raise ValueError("display_operation_id must be a positive integer")
+        if not isinstance(items, tuple) or not all(
+            isinstance(item, ProcessedPost) for item in items
+        ):
+            raise TypeError("items must be a tuple of ProcessedPost values")
+        if (
+            self._display_operation_id == display_operation_id
+            and len(self._processed_posts) == len(items)
+            and all(
+                old.post is new.post
+                and old.session_rank == new.session_rank
+                for old, new in zip(self._processed_posts, items, strict=True)
+            )
+        ):
+            return False
+        self._replace_posts(items, display_operation_id=display_operation_id)
+        return True
+
+    def _replace_posts(
+        self,
+        items: tuple[ProcessedPost, ...],
+        *,
+        display_operation_id: int | None,
+    ) -> None:
         self.beginResetModel()
-        self._posts = posts
+        self._processed_posts = items
+        self._posts = tuple(item.post for item in items)
+        self._display_operation_id = display_operation_id
         self._revision += 1
         self.endResetModel()
         self.countChanged.emit()
@@ -337,7 +391,7 @@ class DanbooruPostListModel(QAbstractListModel):
         return post.id if post is not None else -1
 
     def clear(self) -> None:
-        if self._posts:
+        if self._posts or self._display_operation_id is not None:
             self.set_posts(())
 
 

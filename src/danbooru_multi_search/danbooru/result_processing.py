@@ -116,6 +116,14 @@ class ResultSortSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class ValidatedResultConfiguration:
+    """Normalized public configuration ready for one execution or view."""
+
+    filter_spec: ResultFilterSpec
+    sort_spec: ResultSortSpec
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessedPost:
     post: DanbooruPost
     session_rank: int | None
@@ -208,20 +216,13 @@ def process_query_snapshot(
     """Validate, locally filter, and deterministically sort one full snapshot."""
 
     _validate_session_and_snapshot(session, snapshot)
-    validated_filter = _validate_filter_spec(
-        ResultFilterSpec() if filter_spec is None else filter_spec
+    configuration = validate_result_configuration(
+        filter_spec,
+        sort_spec,
+        remote_order=session.remote_order,
     )
-    validated_sort = _validate_sort_spec(
-        ResultSortSpec() if sort_spec is None else sort_spec
-    )
-    if (
-        validated_sort.field == ResultSortField.RANK
-        and session.remote_order != RemoteOrder.RANK
-    ):
-        _fail(
-            "rank_unavailable",
-            "当前查询会话没有 Danbooru 近期热门顺序。",
-        )
+    validated_filter = _validate_filter_spec(configuration.filter_spec)
+    validated_sort = configuration.sort_spec
 
     validated_posts = _validate_posts(snapshot.posts)
     ranked_session = session.remote_order == RemoteOrder.RANK
@@ -252,6 +253,34 @@ def process_query_snapshot(
             ranked_session=ranked_session,
             sort_field=validated_sort.field,
         ),
+    )
+
+
+def validate_result_configuration(
+    filter_spec: ResultFilterSpec | None = None,
+    sort_spec: ResultSortSpec | None = None,
+    *,
+    remote_order: RemoteOrder | None,
+) -> ValidatedResultConfiguration:
+    """Validate in the fixed filter, sort, then rank-applicability order."""
+
+    validated_filter = _validate_filter_spec(
+        ResultFilterSpec() if filter_spec is None else filter_spec
+    )
+    validated_sort = _validate_sort_spec(
+        ResultSortSpec() if sort_spec is None else sort_spec
+    )
+    if (
+        validated_sort.field == ResultSortField.RANK
+        and remote_order != RemoteOrder.RANK
+    ):
+        _fail(
+            "rank_unavailable",
+            "当前查询会话没有 Danbooru 近期热门顺序。",
+        )
+    return ValidatedResultConfiguration(
+        filter_spec=_public_filter_spec(validated_filter),
+        sort_spec=validated_sort,
     )
 
 
@@ -378,6 +407,25 @@ def _validate_filter_spec(spec: ResultFilterSpec) -> _ValidatedFilter:
         maximum_aspect_ratio=maximum_aspect,
         orientations=orientations,
         blocked_tags=blocked_tags,
+    )
+
+
+def _public_filter_spec(value: _ValidatedFilter) -> ResultFilterSpec:
+    return ResultFilterSpec(
+        minimum_score=value.minimum_score,
+        minimum_fav_count=value.minimum_fav_count,
+        published_from_utc=value.published_from_utc,
+        published_until_utc=value.published_until_utc,
+        minimum_age=value.minimum_age,
+        maximum_age=value.maximum_age,
+        age_reference_time=value.age_reference_time,
+        file_categories=value.file_categories,
+        minimum_width=value.minimum_width,
+        minimum_height=value.minimum_height,
+        minimum_aspect_ratio=value.minimum_aspect_ratio,
+        maximum_aspect_ratio=value.maximum_aspect_ratio,
+        orientations=value.orientations,
+        blocked_tags=value.blocked_tags,
     )
 
 

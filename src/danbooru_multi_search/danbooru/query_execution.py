@@ -182,6 +182,19 @@ class QueryExecutionSnapshot:
     failure: QueryExecutionFailure | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class QueryExecutionBound:
+    execution_id: int
+    binding_token: object | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class QueryExecutionAccepted:
+    execution_id: int
+    position: QueryBranchPosition
+    task_id: str
+
+
 class Abortable(Protocol):
     def abort(self) -> None: ...
 
@@ -215,6 +228,7 @@ class _ExecutionSession:
     limits: QueryExecutionLimits
     branches: list[_BranchState]
     pending_branches: deque[int]
+    binding_token: object | None = None
     state: QueryExecutionState = QueryExecutionState.RUNNING
     counts: QueryExecutionCounts = QueryExecutionCounts()
     candidates: dict[int, DanbooruPost] | None = None
@@ -233,6 +247,8 @@ class _ExecutionSession:
     continue_call: ScheduledCall | None = None
     continue_generation: int = 0
     continue_pending: bool = False
+    first_page_accepted: bool = False
+    acceptance_in_progress: bool = False
 
     def __post_init__(self) -> None:
         if self.candidates is None:
@@ -244,6 +260,8 @@ class _ExecutionSession:
 class DanbooruMultiBranchExecutor(QObject):
     """Execute one query plan at a time with deterministic page rotation."""
 
+    executionBound = Signal(object)
+    firstPageAccepted = Signal(object)
     snapshotChanged = Signal(object)
 
     def __init__(
@@ -306,10 +324,25 @@ class DanbooruMultiBranchExecutor(QObject):
     def owns_queue(self) -> bool:
         return self._owns_queue
 
+    @property
+    def current_execution_id(self) -> int | None:
+        session = self._session
+        return session.execution_id if session is not None else None
+
+    def is_execution_active(self, execution_id: int) -> bool:
+        session = self._session
+        return (
+            session is not None
+            and session.execution_id == execution_id
+            and self._is_active_session(session)
+        )
+
     def start(
         self,
         plan: QueryPlan,
         limits: QueryExecutionLimits | None = None,
+        *,
+        binding_token: object | None = None,
     ) -> int:
         """Start a fresh execution after validating all synchronous inputs."""
 
@@ -328,11 +361,17 @@ class DanbooruMultiBranchExecutor(QObject):
             limits=resolved_limits,
             branches=[_BranchState() for _ in plan.remote_branches],
             pending_branches=deque(range(len(plan.remote_branches))),
+            binding_token=binding_token,
         )
         self._session = session
         if old_session is not None:
             self._abandon_session(old_session)
 
+        self.executionBound.emit(
+            QueryExecutionBound(session.execution_id, session.binding_token)
+        )
+        if not self._is_active_session(session):
+            return session.execution_id
         self._resume_active_time(session)
         if self._is_current_session(session):
             self._submit_next_page(session)
@@ -353,7 +392,8 @@ class DanbooruMultiBranchExecutor(QObject):
         session.failure = None
         if task_id is not None:
             self._task_queue.cancel(task_id, "用户取消了复杂查询。")
-        self._publish(session)
+        if not session.acceptance_in_progress:
+            self._publish(session)
         return True
 
     def retry_failed_page(self) -> bool:
@@ -403,7 +443,8 @@ class DanbooruMultiBranchExecutor(QObject):
                     task_id,
                     "Application is shutting down.",
                 )
-            self._publish(session, allow_closed=True)
+            if not session.acceptance_in_progress:
+                self._publish(session, allow_closed=True)
         elif session is not None:
             self._cancel_continue(session)
             self._cancel_deadline(session)
@@ -467,10 +508,10 @@ class DanbooruMultiBranchExecutor(QObject):
                     raise ValueError(
                         "A rank candidate must be common to every DNF branch."
                     )
-        elif (
-            plan.expression is None
-            or len(plan.remote_branches) != len(plan.dnf_branches)
-        ):
+        elif plan.expression is None:
+            if not plan.is_latest:
+                raise ValueError("A latest plan must use one empty remote branch.")
+        elif len(plan.remote_branches) != len(plan.dnf_branches):
             raise ValueError(
                 "An ordinary plan must contain one remote branch per DNF branch."
             )
@@ -606,6 +647,26 @@ class DanbooruMultiBranchExecutor(QObject):
                 current,
             )
         )
+        if not session.first_page_accepted:
+            session.first_page_accepted = True
+            session.acceptance_in_progress = True
+            try:
+                self.firstPageAccepted.emit(
+                    QueryExecutionAccepted(
+                        execution_id=session.execution_id,
+                        position=identity.position,
+                        task_id=record.identifier,
+                    )
+                )
+            finally:
+                session.acceptance_in_progress = False
+            if not self._is_identity_current(session, identity):
+                if not record.terminal:
+                    self._task_queue.cancel(
+                        record.identifier,
+                        "The execution changed during its acceptance event.",
+                    )
+                return
         completion_is_live = True
 
         if record.terminal:
