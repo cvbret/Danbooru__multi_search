@@ -1,6 +1,24 @@
 """Persistent storage and database migrations."""
 
 from danbooru_multi_search.storage.database import Database, DatabaseError
+from danbooru_multi_search.storage.favorites import (
+    FAVORITE_SUMMARY_VERSION,
+    FavoriteCandidate,
+    FavoriteError,
+    FavoriteFilter,
+    FavoriteFolder,
+    FavoriteFolderScope,
+    FavoriteIdentity,
+    FavoriteItem,
+    FavoriteObjectType,
+    FavoritePoolCategory,
+    FavoriteRepository,
+    FavoriteSort,
+    FavoriteSortDirection,
+    FavoriteSortField,
+    FavoriteTagCategory,
+    FolderDeleteMode,
+)
 from danbooru_multi_search.storage.history import (
     BrowserSession,
     GalleryPosition,
@@ -22,14 +40,38 @@ from danbooru_multi_search.storage.query_serialization import (
     query_definition_key,
     query_definition_tags,
 )
+from danbooru_multi_search.storage.post_snapshot import (
+    POST_SNAPSHOT_VERSION,
+    PostSnapshotError,
+    decode_post_snapshot,
+    encode_post_snapshot,
+)
 
 __all__ = [
     "BrowserSession",
     "Database",
     "DatabaseError",
+    "FAVORITE_SUMMARY_VERSION",
+    "FavoriteCandidate",
+    "FavoriteError",
+    "FavoriteFilter",
+    "FavoriteFolder",
+    "FavoriteFolderScope",
+    "FavoriteIdentity",
+    "FavoriteItem",
+    "FavoriteObjectType",
+    "FavoritePoolCategory",
+    "FavoriteRepository",
+    "FavoriteSort",
+    "FavoriteSortDirection",
+    "FavoriteSortField",
+    "FavoriteTagCategory",
+    "FolderDeleteMode",
     "GalleryPosition",
     "HistoryError",
     "HistoryRepository",
+    "POST_SNAPSHOT_VERSION",
+    "PostSnapshotError",
     "QUERY_DEFINITION_VERSION",
     "RESULT_SUMMARY_VERSION",
     "QuerySerializationError",
@@ -39,8 +81,10 @@ __all__ = [
     "canonicalize_query_tags",
     "decode_query_definition",
     "decode_result_summary",
+    "decode_post_snapshot",
     "encode_query_definition",
     "encode_result_summary",
+    "encode_post_snapshot",
     "query_definition_key",
     "query_definition_tags",
 ]

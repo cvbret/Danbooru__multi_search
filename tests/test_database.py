@@ -6,15 +6,15 @@ import pytest
 
 import danbooru_multi_search.storage.database as database_module
 from danbooru_multi_search.danbooru import QueryMode
-from danbooru_multi_search.storage import HistoryRepository
+from danbooru_multi_search.storage import HistoryRepository, WindowGeometry
 from danbooru_multi_search.storage.database import Database, DatabaseError, Migration
 
 
 def test_database_applies_migrations_once(tmp_path):
     database = Database(tmp_path / "application.sqlite3")
 
-    assert database.initialize() == 3
-    assert database.initialize() == 3
+    assert database.initialize() == 4
+    assert database.initialize() == 4
 
     with database.connect() as connection:
         migrations = connection.execute(
@@ -34,12 +34,16 @@ def test_database_applies_migrations_once(tmp_path):
         (1, "initial_application_metadata"),
         (2, "recent_queries_tags_and_browser_session"),
         (3, "complex_query_definitions"),
+        (4, "local_favorites"),
     ]
     assert {
         "app_metadata",
         "recent_queries",
         "recent_tags",
         "browser_session",
+        "favorite_folders",
+        "favorite_items",
+        "favorite_post_tags",
     }.issubset(tables)
     assert tuple(session) == (1, 0, None)
 
@@ -66,18 +70,18 @@ def test_database_upgrades_version_one_without_losing_existing_data(tmp_path):
 
     database = Database(path)
 
-    assert database.initialize() == 3
-    assert database.initialize() == 3
+    assert database.initialize() == 4
+    assert database.initialize() == 4
     with database.connect() as connection:
         preserved = connection.execute(
             "SELECT value FROM app_metadata WHERE key = 'preserved'"
         ).fetchone()
         migration_count = connection.execute(
-            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3)"
+            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4)"
         ).fetchone()["count"]
 
     assert preserved["value"] == "yes"
-    assert migration_count == 2
+    assert migration_count == 3
 
 
 def test_version_three_schema_enforces_single_session_and_query_constraints(tmp_path):
@@ -184,8 +188,8 @@ def test_version_two_rows_migrate_to_standard_definitions_without_data_loss(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 3
-    assert database.initialize() == 3
+    assert database.initialize() == 4
+    assert database.initialize() == 4
 
     repository = HistoryRepository(database)
     query = repository.get_query(query_id)
@@ -233,6 +237,159 @@ def test_version_two_rows_migrate_to_standard_definitions_without_data_loss(
         count_tag_usage=False,
     )
     assert compatible.id == query_id
+
+
+def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
+    tmp_path,
+    monkeypatch,
+):
+    original_migrations = database_module.MIGRATIONS
+    monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations[:3])
+    database = Database(tmp_path / "application.sqlite3")
+    assert database.initialize() == 3
+
+    repository = HistoryRepository(database)
+    query = repository.record_accepted_query(
+        display_text="cat",
+        normalized_tags=("cat",),
+        rating="general",
+        page_size=40,
+        page=2,
+        count_tag_usage=True,
+    )
+    assert query is not None
+    assert repository.mark_query_committed(query.id, 2)
+    assert repository.save_browser_state(
+        geometry=WindowGeometry(10, 20, 900, 700),
+        is_maximized=True,
+        active_query_id=query.id,
+        gallery_position=None,
+    )
+    with database.connect() as connection:
+        with connection:
+            connection.execute(
+                "INSERT INTO app_metadata(key, value) VALUES ('preserved', 'yes')"
+            )
+
+    monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
+    assert database.initialize() == 4
+    assert database.initialize() == 4
+
+    preserved_query = repository.get_query(query.id)
+    session = repository.load_session()
+    tags = repository.list_tags()
+    with database.connect() as connection:
+        metadata = connection.execute(
+            "SELECT value FROM app_metadata WHERE key = 'preserved'"
+        ).fetchone()
+        favorite_counts = tuple(
+            connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in (
+                "favorite_folders",
+                "favorite_items",
+                "favorite_post_tags",
+            )
+        )
+        versions = tuple(
+            row["version"]
+            for row in connection.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        )
+        foreign_key_errors = connection.execute(
+            "PRAGMA foreign_key_check"
+        ).fetchall()
+
+    assert preserved_query is not None
+    assert preserved_query.id == query.id
+    assert preserved_query.display_text == "cat"
+    assert preserved_query.last_submitted_page == 2
+    assert preserved_query.last_committed_page == 2
+    assert session.geometry == WindowGeometry(10, 20, 900, 700)
+    assert session.is_maximized is True
+    assert session.active_query_id == query.id
+    assert [(tag.normalized_tag, tag.use_count) for tag in tags] == [("cat", 1)]
+    assert metadata["value"] == "yes"
+    assert favorite_counts == (0, 0, 0)
+    assert versions == (1, 2, 3, 4)
+    assert foreign_key_errors == []
+
+
+def test_version_four_schema_enforces_favorite_identity_and_foreign_keys(tmp_path):
+    database = Database(tmp_path / "application.sqlite3")
+    database.initialize()
+
+    with database.connect() as connection:
+        with connection:
+            folder_id = connection.execute(
+                """
+                INSERT INTO favorite_folders(
+                    name, normalized_name, created_at, updated_at
+                ) VALUES ('Artists', 'artists', 'created', 'updated')
+                """
+            ).lastrowid
+            post_id = connection.execute(
+                """
+                INSERT INTO favorite_items(
+                    object_type, object_key, tag_category, folder_id,
+                    display_name, summary_version, summary_json,
+                    post_id, pool_id, score, fav_count, rating,
+                    favorited_at, updated_at
+                ) VALUES (
+                    'post', '42', NULL, ?, 'Post 42', 1, '{}',
+                    42, NULL, -5, 0, 'g', 'created', 'updated'
+                )
+                """,
+                (folder_id,),
+            ).lastrowid
+            connection.execute(
+                """
+                INSERT INTO favorite_post_tags(
+                    favorite_id, tag_category, tag_name
+                ) VALUES (?, 'artist', 'sample_artist')
+                """,
+                (post_id,),
+            )
+
+        invalid_statements = (
+            """
+            INSERT INTO favorite_items(
+                object_type, object_key, tag_category, display_name,
+                summary_version, summary_json, post_id, pool_id,
+                score, fav_count, rating, favorited_at, updated_at
+            ) VALUES (
+                'tag', 'sample_artist', NULL, 'Artist', 1, '{}',
+                NULL, NULL, NULL, NULL, NULL, 'created', 'updated'
+            )
+            """,
+            """
+            INSERT INTO favorite_items(
+                object_type, object_key, tag_category, display_name,
+                summary_version, summary_json, post_id, pool_id,
+                score, fav_count, rating, favorited_at, updated_at
+            ) VALUES (
+                'pool', '7', NULL, 'Pool 7', 1, '{}',
+                NULL, 7, NULL, NULL, 'g', 'created', 'updated'
+            )
+            """,
+            """
+            INSERT INTO favorite_post_tags(
+                favorite_id, tag_category, tag_name
+            ) VALUES (9999, 'artist', 'missing_parent')
+            """,
+        )
+        for statement in invalid_statements:
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(statement)
+
+        with connection:
+            connection.execute("DELETE FROM favorite_folders WHERE id = ?", (folder_id,))
+        favorite = connection.execute(
+            "SELECT folder_id FROM favorite_items WHERE id = ?",
+            (post_id,),
+        ).fetchone()
+
+    assert favorite["folder_id"] is None
 
 
 def test_invalid_version_two_query_rolls_back_python_version_three_migration(

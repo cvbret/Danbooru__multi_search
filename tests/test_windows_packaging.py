@@ -587,7 +587,7 @@ def test_application_checks_use_unique_results_fixed_fields_and_data_directories
                 "mode": "headless",
                 "version": "0.1.0",
                 "platform_name": "windows",
-                "schema_version": 3,
+                "schema_version": 4,
                 "settings_created": True,
                 "data_directory": str(data_root / "data"),
             }
@@ -597,7 +597,7 @@ def test_application_checks_use_unique_results_fixed_fields_and_data_directories
                 "status": "ok",
                 "mode": "gui",
                 "version": "0.1.0",
-                "schema_version": 3,
+                "schema_version": 4,
                 "qml_loaded": True,
                 "shutdown_completed": True,
                 "platform_name": "offscreen" if is_offscreen else "windows",

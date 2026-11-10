@@ -121,6 +121,126 @@ MIGRATIONS = (
         statements=(),
         apply=lambda connection: _migrate_to_version_three(connection),
     ),
+    Migration(
+        version=4,
+        name="local_favorites",
+        statements=(
+            """
+            CREATE TABLE favorite_folders (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL CHECK (length(name) > 0),
+                normalized_name TEXT NOT NULL UNIQUE
+                    CHECK (length(normalized_name) > 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE favorite_items (
+                id INTEGER PRIMARY KEY,
+                object_type TEXT NOT NULL
+                    CHECK (object_type IN ('post', 'tag', 'pool')),
+                object_key TEXT NOT NULL CHECK (length(object_key) > 0),
+                tag_category TEXT
+                    CHECK (
+                        tag_category IS NULL
+                        OR tag_category IN (
+                            'artist', 'character', 'copyright', 'general'
+                        )
+                    ),
+                folder_id INTEGER
+                    REFERENCES favorite_folders(id) ON DELETE SET NULL,
+                display_name TEXT NOT NULL CHECK (length(display_name) > 0),
+                summary_version INTEGER NOT NULL
+                    CHECK (summary_version = 1),
+                summary_json TEXT NOT NULL CHECK (length(summary_json) > 0),
+                post_id INTEGER
+                    CHECK (post_id IS NULL OR post_id > 0),
+                pool_id INTEGER
+                    CHECK (pool_id IS NULL OR pool_id > 0),
+                score INTEGER,
+                fav_count INTEGER
+                    CHECK (fav_count IS NULL OR fav_count >= 0),
+                rating TEXT
+                    CHECK (rating IS NULL OR rating IN ('g', 's', 'q', 'e')),
+                favorited_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (object_type, object_key),
+                CHECK (
+                    (
+                        object_type = 'post'
+                        AND post_id IS NOT NULL
+                        AND typeof(post_id) = 'integer'
+                        AND pool_id IS NULL
+                        AND tag_category IS NULL
+                        AND object_key = CAST(post_id AS TEXT)
+                        AND rating IS NOT NULL
+                    )
+                    OR (
+                        object_type = 'pool'
+                        AND pool_id IS NOT NULL
+                        AND typeof(pool_id) = 'integer'
+                        AND post_id IS NULL
+                        AND tag_category IS NULL
+                        AND object_key = CAST(pool_id AS TEXT)
+                        AND score IS NULL
+                        AND fav_count IS NULL
+                        AND rating IS NULL
+                    )
+                    OR (
+                        object_type = 'tag'
+                        AND post_id IS NULL
+                        AND pool_id IS NULL
+                        AND tag_category IS NOT NULL
+                        AND score IS NULL
+                        AND fav_count IS NULL
+                        AND rating IS NULL
+                    )
+                )
+            )
+            """,
+            """
+            CREATE TABLE favorite_post_tags (
+                favorite_id INTEGER NOT NULL
+                    REFERENCES favorite_items(id) ON DELETE CASCADE,
+                tag_category TEXT NOT NULL
+                    CHECK (tag_category IN (
+                        'artist', 'character', 'copyright', 'general', 'meta'
+                    )),
+                tag_name TEXT NOT NULL CHECK (length(tag_name) > 0),
+                PRIMARY KEY (favorite_id, tag_category, tag_name)
+            )
+            """,
+            """
+            CREATE INDEX favorite_items_folder_type_index
+            ON favorite_items(folder_id, object_type, id)
+            """,
+            """
+            CREATE INDEX favorite_items_favorited_at_index
+            ON favorite_items(favorited_at, id)
+            """,
+            """
+            CREATE INDEX favorite_items_score_index
+            ON favorite_items(score, id)
+            """,
+            """
+            CREATE INDEX favorite_items_fav_count_index
+            ON favorite_items(fav_count, id)
+            """,
+            """
+            CREATE INDEX favorite_items_rating_index
+            ON favorite_items(rating, id)
+            """,
+            """
+            CREATE INDEX favorite_post_tags_name_index
+            ON favorite_post_tags(tag_name, favorite_id)
+            """,
+            """
+            CREATE INDEX favorite_post_tags_category_name_index
+            ON favorite_post_tags(tag_category, tag_name, favorite_id)
+            """,
+        ),
+    ),
 )
 
 
