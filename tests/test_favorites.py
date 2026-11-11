@@ -63,7 +63,7 @@ def _post(
 @pytest.fixture
 def database(tmp_path) -> Database:
     value = Database(tmp_path / "application.sqlite3")
-    assert value.initialize() == 4
+    assert value.initialize() == 5
     return value
 
 
@@ -730,3 +730,36 @@ def test_list_pagination_rejects_values_outside_sqlite_integer_range(
         repository.list_favorites(**keyword)
 
     assert error.value.code == "invalid_pagination"
+
+
+def test_collection_revision_changes_once_per_actual_repository_mutation(repository):
+    assert repository.capture_collection().revision == 0
+    folder = repository.create_folder("One")
+    assert repository.capture_collection().revision == 1
+    repository.rename_folder(folder.id, "One")
+    assert repository.capture_collection().revision == 1
+    folder = repository.rename_folder(folder.id, "Renamed")
+    assert repository.capture_collection().revision == 2
+
+    candidate = FavoriteCandidate.for_post(_post(120))
+    item = repository.add_favorite(candidate, folder_id=folder.id)
+    assert repository.capture_collection().revision == 3
+    repository.add_favorite(candidate)
+    repository.refresh_metadata(candidate)
+    repository.move_favorites((item.id,), folder.id)
+    assert repository.capture_collection().revision == 3
+
+    changed = FavoriteCandidate.for_post(replace(_post(120), score=50))
+    repository.refresh_metadata(changed)
+    assert repository.capture_collection().revision == 4
+    target = repository.create_folder("Target")
+    assert repository.capture_collection().revision == 5
+    assert repository.move_favorites((item.id,), target.id) == 1
+    assert repository.capture_collection().revision == 6
+    assert repository.delete_favorites(()) == 0
+    assert repository.delete_favorite(9999) is False
+    assert repository.capture_collection().revision == 6
+    assert repository.delete_favorites((item.id,)) == 1
+    assert repository.capture_collection().revision == 7
+    repository.delete_folder(target.id, FolderDeleteMode.DELETE_FAVORITES)
+    assert repository.capture_collection().revision == 8

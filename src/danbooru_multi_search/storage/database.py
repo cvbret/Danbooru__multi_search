@@ -241,6 +241,23 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=5,
+        name="favorite_collection_revision",
+        statements=(
+            """
+            CREATE TABLE favorite_collection_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                revision INTEGER NOT NULL
+                    CHECK (revision >= 0 AND typeof(revision) = 'integer')
+            )
+            """,
+            """
+            INSERT INTO favorite_collection_state(id, revision)
+            VALUES (1, 0)
+            """,
+        ),
+    ),
 )
 
 

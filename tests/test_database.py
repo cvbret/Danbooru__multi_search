@@ -13,8 +13,8 @@ from danbooru_multi_search.storage.database import Database, DatabaseError, Migr
 def test_database_applies_migrations_once(tmp_path):
     database = Database(tmp_path / "application.sqlite3")
 
-    assert database.initialize() == 4
-    assert database.initialize() == 4
+    assert database.initialize() == 5
+    assert database.initialize() == 5
 
     with database.connect() as connection:
         migrations = connection.execute(
@@ -35,6 +35,7 @@ def test_database_applies_migrations_once(tmp_path):
         (2, "recent_queries_tags_and_browser_session"),
         (3, "complex_query_definitions"),
         (4, "local_favorites"),
+        (5, "favorite_collection_revision"),
     ]
     assert {
         "app_metadata",
@@ -44,6 +45,7 @@ def test_database_applies_migrations_once(tmp_path):
         "favorite_folders",
         "favorite_items",
         "favorite_post_tags",
+        "favorite_collection_state",
     }.issubset(tables)
     assert tuple(session) == (1, 0, None)
 
@@ -70,18 +72,18 @@ def test_database_upgrades_version_one_without_losing_existing_data(tmp_path):
 
     database = Database(path)
 
-    assert database.initialize() == 4
-    assert database.initialize() == 4
+    assert database.initialize() == 5
+    assert database.initialize() == 5
     with database.connect() as connection:
         preserved = connection.execute(
             "SELECT value FROM app_metadata WHERE key = 'preserved'"
         ).fetchone()
         migration_count = connection.execute(
-            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4)"
+            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4, 5)"
         ).fetchone()["count"]
 
     assert preserved["value"] == "yes"
-    assert migration_count == 3
+    assert migration_count == 4
 
 
 def test_version_three_schema_enforces_single_session_and_query_constraints(tmp_path):
@@ -188,8 +190,8 @@ def test_version_two_rows_migrate_to_standard_definitions_without_data_loss(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 4
-    assert database.initialize() == 4
+    assert database.initialize() == 5
+    assert database.initialize() == 5
 
     repository = HistoryRepository(database)
     query = repository.get_query(query_id)
@@ -272,8 +274,8 @@ def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 4
-    assert database.initialize() == 4
+    assert database.initialize() == 5
+    assert database.initialize() == 5
 
     preserved_query = repository.get_query(query.id)
     session = repository.load_session()
@@ -311,7 +313,7 @@ def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
     assert [(tag.normalized_tag, tag.use_count) for tag in tags] == [("cat", 1)]
     assert metadata["value"] == "yes"
     assert favorite_counts == (0, 0, 0)
-    assert versions == (1, 2, 3, 4)
+    assert versions == (1, 2, 3, 4, 5)
     assert foreign_key_errors == []
 
 
@@ -390,6 +392,50 @@ def test_version_four_schema_enforces_favorite_identity_and_foreign_keys(tmp_pat
         ).fetchone()
 
     assert favorite["folder_id"] is None
+
+
+def test_version_four_upgrades_revision_state_without_losing_favorites(
+    tmp_path,
+    monkeypatch,
+):
+    original_migrations = database_module.MIGRATIONS
+    monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations[:4])
+    database = Database(tmp_path / "application.sqlite3")
+    assert database.initialize() == 4
+    summary = (
+        '{"display_name":"Tag","object_key":"sample_tag",'
+        '"object_type":"tag","tag_category":"general","version":1}'
+    )
+    with database.connect() as connection:
+        with connection:
+            connection.execute(
+                """INSERT INTO favorite_items(
+                       object_type, object_key, tag_category, display_name,
+                       summary_version, summary_json, post_id, pool_id,
+                       score, fav_count, rating, favorited_at, updated_at
+                   ) VALUES (
+                       'tag', 'sample_tag', 'general', 'Tag',
+                       1, ?, NULL, NULL, NULL, NULL, NULL,
+                       '2026-11-10T01:02:03.000000Z',
+                       '2026-11-10T01:02:03.000000Z'
+                   )""",
+                (summary,),
+            )
+
+    monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
+    assert database.initialize() == 5
+    assert database.initialize() == 5
+
+    with database.connect() as connection:
+        favorite_count = connection.execute(
+            "SELECT COUNT(*) FROM favorite_items"
+        ).fetchone()[0]
+        revision = connection.execute(
+            "SELECT revision FROM favorite_collection_state WHERE id = 1"
+        ).fetchone()[0]
+
+    assert favorite_count == 1
+    assert revision == 0
 
 
 def test_invalid_version_two_query_rolls_back_python_version_three_migration(

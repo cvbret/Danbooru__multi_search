@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import threading
 import unicodedata
@@ -192,6 +193,59 @@ class FavoriteItem:
 
 
 @dataclass(frozen=True, slots=True)
+class FavoriteFolderDraft:
+    """One validated folder supplied by a trusted persistence service."""
+
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        _normalize_folder_name(self.name)
+        _canonical_timestamp(self.created_at)
+        _canonical_timestamp(self.updated_at)
+        if self.updated_at < self.created_at:
+            raise FavoriteError(
+                "invalid_time_order",
+                "收藏文件夹修改时间不能早于创建时间。",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class FavoriteItemDraft:
+    """One validated favorite with a document-local folder index."""
+
+    candidate: FavoriteCandidate
+    folder_index: int | None
+    favorited_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        _validate_candidate(self.candidate)
+        if self.folder_index is not None and (
+            type(self.folder_index) is not int or self.folder_index < 0
+        ):
+            raise FavoriteError("invalid_folder_reference", "收藏文件夹引用无效。")
+        _canonical_timestamp(self.favorited_at)
+        _canonical_timestamp(self.updated_at)
+        if self.updated_at < self.favorited_at:
+            raise FavoriteError(
+                "invalid_time_order",
+                "收藏修改时间不能早于首次收藏时间。",
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class FavoriteCollectionSnapshot:
+    """One immutable and signature-bound view of all local favorites."""
+
+    revision: int
+    signature: str
+    folders: tuple[FavoriteFolder, ...]
+    favorites: tuple[FavoriteItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class FavoriteFilter:
     folder_scope: FavoriteFolderScope = FavoriteFolderScope.ALL
     folder_id: int | None = None
@@ -266,12 +320,14 @@ class FavoriteRepository:
                 if _folder_name_exists(connection, normalized_name):
                     raise FavoriteError("duplicate_folder", "已经存在同名收藏文件夹。") from exc
                 raise
-            return _row_to_folder(
+            result = _row_to_folder(
                 connection.execute(
                     "SELECT * FROM favorite_folders WHERE id = ?",
                     (int(cursor.lastrowid),),
                 ).fetchone()
             )
+            _bump_collection_revision(connection)
+            return result
 
     def rename_folder(
         self,
@@ -284,7 +340,9 @@ class FavoriteRepository:
         display_name, normalized_name = _normalize_folder_name(name)
         timestamp = _canonical_timestamp(updated_at or self._clock())
         with self._write_connection() as connection:
-            _require_folder(connection, identifier)
+            current = _row_to_folder(_require_folder(connection, identifier))
+            if current.name == display_name:
+                return current
             try:
                 connection.execute(
                     """UPDATE favorite_folders
@@ -296,11 +354,13 @@ class FavoriteRepository:
                 if _folder_name_exists(connection, normalized_name, excluding=identifier):
                     raise FavoriteError("duplicate_folder", "已经存在同名收藏文件夹。") from exc
                 raise
-            return _row_to_folder(
+            result = _row_to_folder(
                 connection.execute(
                     "SELECT * FROM favorite_folders WHERE id = ?", (identifier,)
                 ).fetchone()
             )
+            _bump_collection_revision(connection)
+            return result
 
     def get_folder(self, folder_id: int) -> FavoriteFolder:
         identifier = _positive_identifier(folder_id, "文件夹编号")
@@ -340,6 +400,7 @@ class FavoriteRepository:
                     "DELETE FROM favorite_items WHERE folder_id = ?", (identifier,)
                 )
             connection.execute("DELETE FROM favorite_folders WHERE id = ?", (identifier,))
+            _bump_collection_revision(connection)
             return count
 
     def add_favorite(
@@ -358,44 +419,21 @@ class FavoriteRepository:
             if folder_identifier is not None:
                 _require_folder(connection, folder_identifier)
             timestamp = _canonical_timestamp(favorited_at or self._clock())
-            encoded, score, fav_count, rating = _encode_candidate(validated)
-            cursor = connection.execute(
-                """INSERT INTO favorite_items(
-                       object_type, object_key, tag_category, folder_id,
-                       display_name, summary_version, summary_json,
-                       post_id, pool_id, score, fav_count, rating,
-                       favorited_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    validated.identity.object_type.value,
-                    validated.identity.object_key,
-                    validated.tag_category.value if validated.tag_category else None,
-                    folder_identifier,
-                    validated.display_name,
-                    FAVORITE_SUMMARY_VERSION,
-                    encoded,
-                    int(validated.identity.object_key)
-                    if validated.identity.object_type is FavoriteObjectType.POST
-                    else None,
-                    int(validated.identity.object_key)
-                    if validated.identity.object_type is FavoriteObjectType.POOL
-                    else None,
-                    score,
-                    fav_count,
-                    rating,
-                    timestamp,
-                    timestamp,
-                ),
+            favorite_id = _insert_favorite(
+                connection,
+                validated,
+                folder_identifier,
+                timestamp,
+                timestamp,
             )
-            favorite_id = int(cursor.lastrowid)
-            if validated.post is not None:
-                _replace_post_tags(connection, favorite_id, validated.post)
-            return _row_to_item(
+            result = _row_to_item(
                 connection,
                 connection.execute(
                     "SELECT * FROM favorite_items WHERE id = ?", (favorite_id,)
                 ).fetchone(),
             )
+            _bump_collection_revision(connection)
+            return result
 
     def refresh_metadata(
         self,
@@ -409,7 +447,11 @@ class FavoriteRepository:
             row = _select_identity(connection, validated.identity)
             if row is None:
                 raise FavoriteError("unknown_favorite", "找不到需要更新的收藏。")
-            _row_to_item(connection, row)
+            current = _row_to_item(connection, row)
+            if encode_favorite_summary(_candidate_from_item(current)) == (
+                encode_favorite_summary(validated)
+            ):
+                return current
             encoded, score, fav_count, rating = _encode_candidate(validated)
             connection.execute(
                 """UPDATE favorite_items SET
@@ -436,12 +478,14 @@ class FavoriteRepository:
                     "DELETE FROM favorite_post_tags WHERE favorite_id = ?",
                     (int(row["id"]),),
                 )
-            return _row_to_item(
+            result = _row_to_item(
                 connection,
                 connection.execute(
                     "SELECT * FROM favorite_items WHERE id = ?", (int(row["id"]),)
                 ).fetchone(),
             )
+            _bump_collection_revision(connection)
+            return result
 
     def get_favorite(self, favorite_id: int) -> FavoriteItem:
         identifier = _positive_identifier(favorite_id, "收藏编号")
@@ -470,6 +514,7 @@ class FavoriteRepository:
                 return False
             _row_to_item(connection, row)
             connection.execute("DELETE FROM favorite_items WHERE id = ?", (identifier,))
+            _bump_collection_revision(connection)
             return True
 
     def move_favorites(
@@ -480,16 +525,22 @@ class FavoriteRepository:
         with self._write_connection() as connection:
             if folder_identifier is not None:
                 _require_folder(connection, folder_identifier)
-            _require_favorites(connection, identifiers)
+            items = _require_favorites(connection, identifiers)
+            changed_ids = tuple(
+                item.id for item in items if item.folder_id != folder_identifier
+            )
+            if not changed_ids:
+                return 0
             timestamp = _canonical_timestamp(self._clock())
-            placeholders = ",".join("?" for _ in identifiers)
+            placeholders = ",".join("?" for _ in changed_ids)
             connection.execute(
                 f"""UPDATE favorite_items
                     SET folder_id = ?, updated_at = ?
                     WHERE id IN ({placeholders})""",
-                (folder_identifier, timestamp, *identifiers),
+                (folder_identifier, timestamp, *changed_ids),
             )
-            return len(identifiers)
+            _bump_collection_revision(connection)
+            return len(changed_ids)
 
     def delete_favorites(self, favorite_ids: Iterable[int]) -> int:
         identifiers = _batch_identifiers(favorite_ids, allow_empty=True)
@@ -501,6 +552,7 @@ class FavoriteRepository:
             connection.execute(
                 f"DELETE FROM favorite_items WHERE id IN ({placeholders})", identifiers
             )
+            _bump_collection_revision(connection)
             return len(identifiers)
 
     def list_favorites(
@@ -581,6 +633,105 @@ class FavoriteRepository:
             ).fetchall()
             return tuple(_row_to_item(connection, row) for row in rows)
 
+    def capture_collection(self) -> FavoriteCollectionSnapshot:
+        """Read every folder and favorite from one consistent transaction."""
+
+        with self._read_connection() as connection:
+            return _collection_snapshot(connection)
+
+    def apply_collection_import(
+        self,
+        *,
+        expected_revision: int,
+        expected_document_digest: str,
+        actual_document_digest: str,
+        expected_binding_digest: str,
+        actual_binding_digest: str,
+        folders: tuple[FavoriteFolderDraft, ...],
+        favorites: tuple[FavoriteItemDraft, ...],
+        replace: bool,
+    ) -> FavoriteCollectionSnapshot:
+        """Apply one validated transfer after rechecking the preview signature."""
+
+        _validate_collection_import(
+            expected_revision,
+            expected_document_digest,
+            actual_document_digest,
+            expected_binding_digest,
+            actual_binding_digest,
+            folders,
+            favorites,
+            replace,
+        )
+        with self._write_connection() as connection:
+            if (
+                expected_document_digest != actual_document_digest
+                or expected_binding_digest != actual_binding_digest
+            ):
+                raise FavoriteError("invalid_preview", "收藏导入预览已被修改。")
+            current = _collection_snapshot(connection)
+            if current.revision != expected_revision:
+                raise FavoriteError(
+                    "stale_preview",
+                    "收藏数据已经变化，请重新预览导入影响。",
+                )
+            changed = bool(
+                replace
+                and (current.folders or current.favorites or folders or favorites)
+            )
+            if replace:
+                connection.execute("DELETE FROM favorite_items")
+                connection.execute("DELETE FROM favorite_folders")
+
+            folder_ids: list[int] = []
+            existing_folders = {
+                _normalize_folder_name(folder.name)[1]: folder.id
+                for folder in current.folders
+            }
+            for folder in folders:
+                display_name, normalized_name = _normalize_folder_name(folder.name)
+                folder_id = None if replace else existing_folders.get(normalized_name)
+                if folder_id is None:
+                    cursor = connection.execute(
+                        """INSERT INTO favorite_folders(
+                               name, normalized_name, created_at, updated_at
+                           ) VALUES (?, ?, ?, ?)""",
+                        (
+                            display_name,
+                            normalized_name,
+                            _canonical_timestamp(folder.created_at),
+                            _canonical_timestamp(folder.updated_at),
+                        ),
+                    )
+                    folder_id = int(cursor.lastrowid)
+                    existing_folders[normalized_name] = folder_id
+                    changed = True
+                folder_ids.append(folder_id)
+
+            existing_identities = {
+                item.identity for item in current.favorites
+            } if not replace else set()
+            for favorite in favorites:
+                if favorite.candidate.identity in existing_identities:
+                    continue
+                folder_id = (
+                    None
+                    if favorite.folder_index is None
+                    else folder_ids[favorite.folder_index]
+                )
+                _insert_favorite(
+                    connection,
+                    favorite.candidate,
+                    folder_id,
+                    _canonical_timestamp(favorite.favorited_at),
+                    _canonical_timestamp(favorite.updated_at),
+                )
+                existing_identities.add(favorite.candidate.identity)
+                changed = True
+            if changed:
+                _bump_collection_revision(connection)
+            return _collection_snapshot(connection)
+
     @contextmanager
     def _write_connection(self) -> Iterator[sqlite3.Connection]:
         with self._lock, closing(self._database.connect()) as connection:
@@ -623,6 +774,85 @@ def _validate_candidate(candidate: FavoriteCandidate) -> FavoriteCandidate:
     return candidate
 
 
+def encode_favorite_summary(candidate: FavoriteCandidate) -> str:
+    """Return the canonical persisted overview for one favorite candidate."""
+
+    return _encode_candidate(_validate_candidate(candidate))[0]
+
+
+def decode_favorite_summary(
+    identity: FavoriteIdentity,
+    display_name: str,
+    encoded: str,
+) -> FavoriteCandidate:
+    """Decode an overview while checking its redundant identity and display data."""
+
+    if not isinstance(identity, FavoriteIdentity):
+        raise FavoriteError("invalid_identity", "收藏身份无效。")
+    _validate_display_name(display_name)
+    if identity.object_type is FavoriteObjectType.POST:
+        try:
+            post = decode_post_snapshot(encoded)
+        except (PostSnapshotError, TypeError, ValueError) as exc:
+            raise FavoriteError("invalid_summary", f"作品概要损坏：{exc}") from exc
+        candidate = FavoriteCandidate(identity, display_name, post=post)
+    elif identity.object_type is FavoriteObjectType.TAG:
+        payload = _load_canonical(encoded, "标签概要")
+        _expect_exact_fields(
+            payload,
+            {"display_name", "object_key", "object_type", "tag_category", "version"},
+            "标签概要",
+        )
+        try:
+            category = FavoriteTagCategory(payload["tag_category"])
+        except (TypeError, ValueError) as exc:
+            raise FavoriteError("invalid_summary", "标签概要分类无效。") from exc
+        candidate = FavoriteCandidate(identity, display_name, tag_category=category)
+    else:
+        payload = _load_canonical(encoded, "作品池概要")
+        _expect_exact_fields(
+            payload,
+            {"display_name", "object_key", "object_type", "pool_category", "version"},
+            "作品池概要",
+        )
+        if payload["pool_category"] != FavoritePoolCategory.SERIES.value:
+            raise FavoriteError("invalid_summary", "作品池概要分类无效。")
+        candidate = FavoriteCandidate(
+            identity,
+            display_name,
+            pool_category=FavoritePoolCategory.SERIES,
+        )
+    if encode_favorite_summary(candidate) != encoded:
+        raise FavoriteError("summary_mismatch", "收藏概要与身份或显示名称不一致。")
+    return candidate
+
+
+def encode_favorite_timestamp(value: datetime) -> str:
+    """Encode a timezone-aware time using the favorite storage format."""
+
+    return _canonical_timestamp(value)
+
+
+def decode_favorite_timestamp(value: str) -> datetime:
+    """Decode the sole canonical favorite storage timestamp."""
+
+    return _parse_timestamp(value)
+
+
+def favorite_folder_key(name: str) -> str:
+    """Return the Unicode-normalized, case-insensitive folder identity."""
+
+    return _normalize_folder_name(name)[1]
+
+
+def candidate_from_favorite_item(item: FavoriteItem) -> FavoriteCandidate:
+    """Recreate the validated overview input represented by a stored favorite."""
+
+    if not isinstance(item, FavoriteItem):
+        raise FavoriteError("invalid_favorite", "收藏记录无效。")
+    return _candidate_from_item(item)
+
+
 def _encode_candidate(
     candidate: FavoriteCandidate,
 ) -> tuple[str, int | None, int | None, str | None]:
@@ -651,6 +881,183 @@ def _encode_candidate(
     return _dump_canonical(payload), None, None, None
 
 
+def _insert_favorite(
+    connection: sqlite3.Connection,
+    candidate: FavoriteCandidate,
+    folder_id: int | None,
+    favorited_at: str,
+    updated_at: str,
+) -> int:
+    encoded, score, fav_count, rating = _encode_candidate(candidate)
+    cursor = connection.execute(
+        """INSERT INTO favorite_items(
+               object_type, object_key, tag_category, folder_id,
+               display_name, summary_version, summary_json,
+               post_id, pool_id, score, fav_count, rating,
+               favorited_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            candidate.identity.object_type.value,
+            candidate.identity.object_key,
+            candidate.tag_category.value if candidate.tag_category else None,
+            folder_id,
+            candidate.display_name,
+            FAVORITE_SUMMARY_VERSION,
+            encoded,
+            int(candidate.identity.object_key)
+            if candidate.identity.object_type is FavoriteObjectType.POST
+            else None,
+            int(candidate.identity.object_key)
+            if candidate.identity.object_type is FavoriteObjectType.POOL
+            else None,
+            score,
+            fav_count,
+            rating,
+            favorited_at,
+            updated_at,
+        ),
+    )
+    favorite_id = int(cursor.lastrowid)
+    if candidate.post is not None:
+        _replace_post_tags(connection, favorite_id, candidate.post)
+    return favorite_id
+
+
+def _candidate_from_item(item: FavoriteItem) -> FavoriteCandidate:
+    if item.identity.object_type is FavoriteObjectType.POST:
+        return FavoriteCandidate(item.identity, item.display_name, post=item.post)
+    if item.identity.object_type is FavoriteObjectType.TAG:
+        return FavoriteCandidate(
+            item.identity,
+            item.display_name,
+            tag_category=item.tag_category,
+        )
+    return FavoriteCandidate(
+        item.identity,
+        item.display_name,
+        pool_category=item.pool_category,
+    )
+
+
+def _collection_snapshot(connection: sqlite3.Connection) -> FavoriteCollectionSnapshot:
+    folders = tuple(
+        _row_to_folder(row)
+        for row in connection.execute(
+            "SELECT * FROM favorite_folders ORDER BY id"
+        ).fetchall()
+    )
+    favorites = tuple(
+        _row_to_item(connection, row)
+        for row in connection.execute(
+            "SELECT * FROM favorite_items ORDER BY id"
+        ).fetchall()
+    )
+    payload = {
+        "favorites": [
+            {
+                "display_name": item.display_name,
+                "favorited_at": _canonical_timestamp(item.favorited_at),
+                "folder_id": item.folder_id,
+                "id": item.id,
+                "object_key": item.identity.object_key,
+                "object_type": item.identity.object_type.value,
+                "summary_json": encode_favorite_summary(_candidate_from_item(item)),
+                "updated_at": _canonical_timestamp(item.updated_at),
+            }
+            for item in favorites
+        ],
+        "folders": [
+            {
+                "created_at": _canonical_timestamp(folder.created_at),
+                "id": folder.id,
+                "name": folder.name,
+                "updated_at": _canonical_timestamp(folder.updated_at),
+            }
+            for folder in folders
+        ],
+    }
+    encoded = _dump_canonical(payload).encode("utf-8")
+    return FavoriteCollectionSnapshot(
+        revision=_collection_revision(connection),
+        signature=hashlib.sha256(encoded).hexdigest(),
+        folders=folders,
+        favorites=favorites,
+    )
+
+
+def _collection_revision(connection: sqlite3.Connection) -> int:
+    row = connection.execute(
+        "SELECT revision FROM favorite_collection_state WHERE id = 1"
+    ).fetchone()
+    if row is None or type(row["revision"]) is not int or row["revision"] < 0:
+        raise FavoriteError("corrupt_revision", "收藏修订号记录损坏。")
+    return int(row["revision"])
+
+
+def _bump_collection_revision(connection: sqlite3.Connection) -> int:
+    current = _collection_revision(connection)
+    if current >= _SQLITE_INTEGER_MAX:
+        raise FavoriteError("revision_exhausted", "收藏修订号已经达到上限。")
+    updated = current + 1
+    connection.execute(
+        "UPDATE favorite_collection_state SET revision = ? WHERE id = 1",
+        (updated,),
+    )
+    return updated
+
+
+def _validate_collection_import(
+    expected_revision: int,
+    expected_document_digest: str,
+    actual_document_digest: str,
+    expected_binding_digest: str,
+    actual_binding_digest: str,
+    folders: tuple[FavoriteFolderDraft, ...],
+    favorites: tuple[FavoriteItemDraft, ...],
+    replace: bool,
+) -> None:
+    if (
+        type(expected_revision) is not int
+        or expected_revision < 0
+        or expected_revision > _SQLITE_INTEGER_MAX
+    ):
+        raise FavoriteError("invalid_revision", "收藏修订号无效。")
+    for value in (
+        expected_document_digest,
+        actual_document_digest,
+        expected_binding_digest,
+        actual_binding_digest,
+    ):
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise FavoriteError("invalid_preview", "收藏导入预览摘要无效。")
+    if type(replace) is not bool:
+        raise FavoriteError("invalid_import_mode", "收藏导入方式无效。")
+    if not isinstance(folders, tuple) or not all(
+        isinstance(folder, FavoriteFolderDraft) for folder in folders
+    ):
+        raise FavoriteError("invalid_import", "收藏文件夹导入数据无效。")
+    if not isinstance(favorites, tuple) or not all(
+        isinstance(favorite, FavoriteItemDraft) for favorite in favorites
+    ):
+        raise FavoriteError("invalid_import", "收藏记录导入数据无效。")
+    normalized_names = [_normalize_folder_name(folder.name)[1] for folder in folders]
+    if len(set(normalized_names)) != len(normalized_names):
+        raise FavoriteError("duplicate_folder", "导入数据包含重复收藏文件夹。")
+    identities = [favorite.candidate.identity for favorite in favorites]
+    if len(set(identities)) != len(identities):
+        raise FavoriteError("duplicate_favorite", "导入数据包含重复收藏身份。")
+    if any(
+        favorite.folder_index is not None
+        and favorite.folder_index >= len(folders)
+        for favorite in favorites
+    ):
+        raise FavoriteError("invalid_folder_reference", "收藏文件夹引用无效。")
+
+
 def _row_to_item(connection: sqlite3.Connection, row: sqlite3.Row) -> FavoriteItem:
     try:
         favorite_id = _positive_identifier(row["id"], "收藏编号")
@@ -669,6 +1076,11 @@ def _row_to_item(connection: sqlite3.Connection, row: sqlite3.Row) -> FavoriteIt
             raise FavoriteError("invalid_summary", "收藏概要必须是 JSON 文本。")
         favorited_at = _parse_timestamp(row["favorited_at"])
         updated_at = _parse_timestamp(row["updated_at"])
+        if updated_at < favorited_at:
+            raise FavoriteError(
+                "invalid_time_order",
+                "收藏修改时间不能早于首次收藏时间。",
+            )
         post: DanbooruPost | None = None
         tag_category: FavoriteTagCategory | None = None
         pool_category: FavoritePoolCategory | None = None
@@ -848,7 +1260,7 @@ def _select_identity(
 
 def _require_favorites(
     connection: sqlite3.Connection, identifiers: tuple[int, ...]
-) -> None:
+) -> tuple[FavoriteItem, ...]:
     placeholders = ",".join("?" for _ in identifiers)
     rows = connection.execute(
         f"SELECT * FROM favorite_items WHERE id IN ({placeholders}) ORDER BY id",
@@ -856,8 +1268,7 @@ def _require_favorites(
     ).fetchall()
     if len(rows) != len(identifiers):
         raise FavoriteError("unknown_favorite", "批量操作包含未知收藏。")
-    for row in rows:
-        _row_to_item(connection, row)
+    return tuple(_row_to_item(connection, row) for row in rows)
 
 
 def _require_folder(connection: sqlite3.Connection, folder_id: int) -> sqlite3.Row:
@@ -878,11 +1289,18 @@ def _row_to_folder(row: sqlite3.Row | None) -> FavoriteFolder:
         name, normalized = _normalize_folder_name(row["name"])
         if normalized != row["normalized_name"]:
             raise FavoriteError("corrupt_folder", "收藏文件夹规范名称不一致。")
+        created_at = _parse_timestamp(row["created_at"])
+        updated_at = _parse_timestamp(row["updated_at"])
+        if updated_at < created_at:
+            raise FavoriteError(
+                "invalid_time_order",
+                "收藏文件夹修改时间不能早于创建时间。",
+            )
         return FavoriteFolder(
             id=identifier,
             name=name,
-            created_at=_parse_timestamp(row["created_at"]),
-            updated_at=_parse_timestamp(row["updated_at"]),
+            created_at=created_at,
+            updated_at=updated_at,
         )
     except FavoriteError:
         raise
