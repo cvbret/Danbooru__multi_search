@@ -142,7 +142,7 @@ ApplicationWindow {
     function openPostDetails(row) {
         galleryGrid.currentIndex = row
         tagSuggestionController.closeSuggestions()
-        detailController.openPost(
+        detailNavigation.openBrowsePost(
             row,
             galleryGrid.contentY,
             galleryGrid.currentIndex,
@@ -154,14 +154,15 @@ ApplicationWindow {
     }
 
     function returnToGallery() {
-        if (!detailController.closeDetail())
+        if (!detailNavigation.closeDetail())
             return
-        Qt.callLater(root.restoreGallerySnapshot)
+        if (detailNavigation.sourcePage === "browse")
+            Qt.callLater(root.restoreGallerySnapshot)
     }
 
     function restoreGallerySnapshot() {
         galleryGrid.forceLayout()
-        const plan = detailController.takeGalleryRestorePlan(
+        const plan = detailNavigation.takeGalleryRestorePlan(
             searchController.postsModel,
             galleryGrid.width,
             galleryGrid.height,
@@ -803,7 +804,7 @@ ApplicationWindow {
     }
 
     Connections {
-        target: detailController
+        target: detailNavigation
         function onTagSearchRequested(tagName) {
             root.startQueryFromDetailTag(tagName)
         }

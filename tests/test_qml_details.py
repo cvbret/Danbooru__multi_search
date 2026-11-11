@@ -331,7 +331,8 @@ def test_detail_tag_click_starts_exactly_one_gallery_request_from_top():
 
         assert _wait_until(lambda: len(manager.requests) == 1)
         assert detail.isOpen is False
-        assert detail.gallery_snapshot is None
+        navigation = engine.rootContext().contextProperty("detailNavigation")
+        assert navigation.gallery_snapshot is None
         assert root.findChild(QObject, "tagsInput").property("text") == "sample_artist"
         assert root.findChild(QObject, "galleryGrid").property("currentIndex") == -1
     finally:

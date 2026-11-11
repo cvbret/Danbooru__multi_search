@@ -50,6 +50,7 @@ from danbooru_multi_search.danbooru.autocomplete import (
 )
 from danbooru_multi_search.storage import HistoryRepository
 from danbooru_multi_search.storage.database import Database
+from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
@@ -276,10 +277,10 @@ def _create_window(tmp_path):
     )
     details = DanbooruDetailController(
         "https://example.invalid",
-        core.posts_model,
         translations,
         local_timezone=timezone.utc,
     )
+    detail_navigation = DetailNavigationController(details, core.posts_model)
     images = ImageCacheController(tmp_path / "image-cache")
     factory = ImageNetworkAccessManagerFactory(images)
     engine = QQmlApplicationEngine()
@@ -290,6 +291,7 @@ def _create_window(tmp_path):
     context.setContextProperty("searchController", bridge)
     context.setContextProperty("tagSuggestionController", tags)
     context.setContextProperty("detailController", details)
+    context.setContextProperty("detailNavigation", detail_navigation)
     context.setContextProperty("sessionController", session)
     context.setContextProperty("imageCacheController", images)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
@@ -304,6 +306,7 @@ def _create_window(tmp_path):
         "session": session,
         "tags": tags,
         "details": details,
+        "detail_navigation": detail_navigation,
         "images": images,
         "factory": factory,
         "qml_warnings": qml_warnings,
@@ -314,7 +317,7 @@ def _close_window(values) -> None:
     values["bridge"].beginClosing()
     values["core"].shutdown()
     values["session"].begin_shutdown()
-    values["details"].shutdown()
+    values["detail_navigation"].shutdown()
     values["tags"].shutdown()
     values["images"].shutdown()
     values["root"].close()

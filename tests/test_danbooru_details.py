@@ -54,7 +54,6 @@ def _controller(*posts: DanbooruPost, store: TagTranslationStore | None = None):
     translation_store = store or TagTranslationStore()
     controller = DanbooruDetailController(
         "https://example.invalid/deploy?ignored=1#fragment",
-        model,
         translation_store,
         local_timezone=timezone(timedelta(hours=8)),
     )
@@ -210,11 +209,11 @@ def test_gif_and_restricted_formats_choose_safe_components():
     ]
 
 
-def test_detail_holds_original_post_identity_and_invalid_rows_do_nothing():
+def test_detail_holds_original_post_identity_and_invalid_posts_do_nothing():
     post = _post()
     controller, model, _store = _controller(post)
 
-    assert controller.openPost(0, 125.5, 0, 800, 600, 1280, 820) is True
+    assert controller.open_post(model.post_at(0)) is True
     assert controller.current_post is model.posts[0]
     assert controller.postIdText == "10"
     assert controller.scoreText == "-2"
@@ -225,8 +224,8 @@ def test_detail_holds_original_post_identity_and_invalid_rows_do_nothing():
     assert controller.mediaUrl.endswith("large.jpg")
 
     generation = controller.mediaGeneration
-    assert controller.openPost(-1, 0, -1, 1, 1, 1, 1) is False
-    assert controller.openPost(8, 0, -1, 1, 1, 1, 1) is False
+    assert controller.open_post(None) is False
+    assert controller.open_post(object()) is False
     assert controller.current_post is post
     assert controller.mediaGeneration == generation
 
@@ -245,11 +244,11 @@ def test_detail_preserves_missing_zero_and_negative_popularity(
     score_text,
     favorite_text,
 ):
-    controller, _model, _store = _controller(
+    controller, model, _store = _controller(
         _post(score=score, fav_count=favorites)
     )
 
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    assert controller.open_post(model.post_at(0))
     assert controller.scoreText == score_text
     assert controller.favoriteText == favorite_text
 
@@ -276,8 +275,8 @@ def test_translation_snapshot_refreshes_all_names_without_replacing_post():
     )
     store = TagTranslationStore(first_snapshot)
     post = _post()
-    controller, _model, _store = _controller(post, store=store)
-    controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    controller, model, _store = _controller(post, store=store)
+    controller.open_post(model.post_at(0))
 
     groups = controller.tagsModel.groups
     assert len(groups) == 5
@@ -303,8 +302,8 @@ def test_translation_snapshot_refreshes_all_names_without_replacing_post():
 
 
 def test_media_fallback_requires_generation_attempt_and_exact_url():
-    controller, _model, _store = _controller(_post())
-    controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    controller, model, _store = _controller(_post())
+    controller.open_post(model.post_at(0))
     generation = controller.mediaGeneration
     first_url = controller.mediaUrl
 
@@ -327,8 +326,8 @@ def test_media_fallback_requires_generation_attempt_and_exact_url():
 
 
 def test_media_attempt_has_one_terminal_result():
-    controller, _model, _store = _controller(_post())
-    controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    controller, model, _store = _controller(_post())
+    controller.open_post(model.post_at(0))
     generation = controller.mediaGeneration
     attempt = controller.candidateAttempt
     url = controller.mediaUrl
@@ -356,8 +355,8 @@ def test_media_attempt_has_one_terminal_result():
 
 
 def test_cache_clear_stops_current_candidate_without_starting_fallback():
-    controller, _model, _store = _controller(_post())
-    controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    controller, model, _store = _controller(_post())
+    controller.open_post(model.post_at(0))
     generation = controller.mediaGeneration
     attempt = controller.candidateAttempt
     url = controller.mediaUrl
@@ -372,8 +371,8 @@ def test_cache_clear_stops_current_candidate_without_starting_fallback():
 
 
 def test_quality_change_same_quality_retry_and_close_generation_rules():
-    controller, _model, _store = _controller(_post())
-    controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    controller, model, _store = _controller(_post())
+    controller.open_post(model.post_at(0))
     first_generation = controller.mediaGeneration
 
     assert controller.requestQuality("large") is False
@@ -403,8 +402,8 @@ def test_quality_change_same_quality_retry_and_close_generation_rules():
 
 
 def test_restricted_media_never_enters_original_fallback_chain():
-    controller, _model, _store = _controller(_post(file_ext="webm"))
-    controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    controller, model, _store = _controller(_post(file_ext="webm"))
+    controller.open_post(model.post_at(0))
 
     assert controller.restrictedFormat is True
     assert controller.requestedQuality == "large"
@@ -420,9 +419,9 @@ def test_restricted_media_never_enters_original_fallback_chain():
 
 @pytest.mark.parametrize("extension", ["webm", "mp4", "zip", "swf", "mystery"])
 def test_every_restricted_or_unknown_extension_uses_preview_only(extension):
-    controller, _model, _store = _controller(_post(file_ext=extension))
+    controller, model, _store = _controller(_post(file_ext=extension))
 
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    assert controller.open_post(model.post_at(0))
     assert controller.restrictedFormat is True
     assert controller.formatState == (
         "unknown" if extension == "mystery" else "restricted"
@@ -436,177 +435,20 @@ def test_every_restricted_or_unknown_extension_uses_preview_only(extension):
 
 
 def test_restricted_format_without_preview_has_no_media_candidate():
-    controller, _model, _store = _controller(
+    controller, model, _store = _controller(
         _post(file_ext="mp4", preview_url=None)
     )
 
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    assert controller.open_post(model.post_at(0))
     assert controller.mediaState == DetailMediaState.ERROR.value
     assert controller.mediaUrl == ""
     assert "没有可用预览图" in controller.mediaMessage
 
 
-def test_exact_gallery_restore_and_revision_based_post_id_restore():
-    first = _post(10)
-    second = _post(20)
-    controller, model, _store = _controller(first, second)
-    controller.openPost(1, 221.25, 1, 800, 600, 1280, 820)
-    assert controller.closeDetail()
-
-    exact = controller.takeGalleryRestorePlan(
-        model,
-        800,
-        600,
-        1280,
-        820,
-        0,
-        2000,
-    )
-    assert exact == {
-        "available": True,
-        "exact": True,
-        "index": 1,
-        "contentY": 221.25,
-    }
-
-    controller.openPost(1, 500, 1, 800, 600, 1280, 820)
-    opened_post = controller.current_post
-    model.set_posts((_post(20), _post(30)))
-    assert controller.current_post is opened_post
-    assert controller.closeDetail()
-    changed = controller.takeGalleryRestorePlan(
-        model,
-        800,
-        600,
-        1280,
-        820,
-        10,
-        650,
-    )
-    assert changed["exact"] is False
-    assert changed["index"] == 0
-    assert changed["contentY"] == 60
-
-
-def test_changed_gallery_restore_clamps_missing_post_and_empty_model():
-    controller, model, _store = _controller(_post(10), _post(20), _post(30))
-    controller.openPost(2, 900, 2, 800, 600, 1280, 820)
-    assert controller.closeDetail()
-    replacement = DanbooruPostListModel()
-    replacement.set_posts((_post(40), _post(50)))
-
-    changed = controller.takeGalleryRestorePlan(
-        replacement,
-        700,
-        500,
-        1200,
-        760,
-        -15,
-        620,
-    )
-
-    assert changed == {
-        "available": True,
-        "exact": False,
-        "index": 1,
-        "contentY": 105.0,
-    }
-
-    controller.openPost(0, 200, 0, 800, 600, 1280, 820)
-    assert controller.closeDetail()
-    empty = DanbooruPostListModel()
-    empty.set_posts(())
-    empty_plan = controller.takeGalleryRestorePlan(
-        empty,
-        800,
-        600,
-        1280,
-        820,
-        12,
-        0,
-    )
-    assert empty_plan == {
-        "available": True,
-        "exact": False,
-        "index": -1,
-        "contentY": 12.0,
-    }
-
-
-def test_restore_plan_is_invalid_when_signal_synchronously_opens_new_post():
-    first = _post(10)
-    second = _post(20)
-    controller, model, _store = _controller(first, second)
-    assert controller.openPost(0, 125, 0, 800, 600, 1280, 820)
-    assert controller.closeDetail()
-    redirected: list[bool] = []
-
-    def open_second_once() -> None:
-        if redirected:
-            return
-        redirected.append(True)
-        assert controller.openPost(1, 325, 1, 800, 600, 1280, 820)
-
-    controller.gallerySnapshotChanged.connect(open_second_once)
-
-    plan = controller.takeGalleryRestorePlan(
-        model,
-        800,
-        600,
-        1280,
-        820,
-        10,
-        1000,
-    )
-
-    assert plan == {"available": False, "index": -1, "contentY": 10.0}
-    assert controller.isOpen is True
-    assert controller.current_post is second
-    assert controller.gallery_snapshot is not None
-    assert controller.gallery_snapshot.post_id == 20
-
-
-def test_restore_plan_is_invalid_when_signal_synchronously_shuts_down():
-    controller, model, _store = _controller(_post())
-    assert controller.openPost(0, 125, 0, 800, 600, 1280, 820)
-    assert controller.closeDetail()
-    controller.gallerySnapshotChanged.connect(controller.shutdown)
-
-    plan = controller.takeGalleryRestorePlan(
-        model,
-        800,
-        600,
-        1280,
-        820,
-        -5,
-        1000,
-    )
-
-    assert plan == {"available": False, "index": -1, "contentY": -5.0}
-    assert controller.isOpen is False
-    assert controller.gallery_snapshot is None
-
-
-def test_tag_activation_discards_snapshot_and_emits_once():
-    controller, _model, _store = _controller(_post())
-    requested: list[str] = []
-    controller.tagSearchRequested.connect(requested.append)
-    controller.openPost(0, 50, 0, 800, 600, 1280, 820)
-    generation = controller.mediaGeneration
-
-    assert controller.activateTag("sample_artist") is True
-    assert requested == ["sample_artist"]
-    assert controller.isOpen is False
-    assert controller.gallery_snapshot is None
-    assert controller.mediaGeneration == generation + 1
-    assert controller.activateTag("sample_artist") is False
-    assert requested == ["sample_artist"]
-
-
 @pytest.mark.parametrize("action", ["tag", "shutdown"])
 def test_tag_search_and_shutdown_reject_late_media_results(action):
-    controller, _model, _store = _controller(_post())
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    controller, model, _store = _controller(_post())
+    assert controller.open_post(model.post_at(0))
     generation = controller.mediaGeneration
     attempt = controller.candidateAttempt
     url = controller.mediaUrl
@@ -625,87 +467,42 @@ def test_tag_search_and_shutdown_reject_late_media_results(action):
 
 @pytest.mark.parametrize(
     "signal_name",
-    ["mediaChanged", "gallerySnapshotChanged", "openChanged", "detailChanged"],
+    ["mediaChanged", "openChanged", "detailChanged"],
 )
 def test_open_post_stops_after_synchronous_close_from_any_signal(signal_name):
-    controller, _model, _store = _controller(_post())
+    controller, model, _store = _controller(_post())
     getattr(controller, signal_name).connect(controller.closeDetail)
 
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820) is False
+    assert controller.open_post(model.post_at(0)) is False
     assert controller.isOpen is False
     assert controller.mediaUrl == ""
     assert controller.mediaState == DetailMediaState.IDLE.value
 
 
 def test_open_post_stops_after_synchronous_shutdown_without_rebuilding_media():
-    controller, _model, _store = _controller(_post())
+    controller, model, _store = _controller(_post())
     controller.mediaChanged.connect(controller.shutdown)
 
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820) is False
+    assert controller.open_post(model.post_at(0)) is False
     assert controller.isOpen is False
     assert controller.mediaUrl == ""
     assert controller.mediaState == DetailMediaState.IDLE.value
 
 
 def test_open_post_stops_when_tag_model_reset_synchronously_shuts_down():
-    controller, _model, _store = _controller(_post())
+    controller, model, _store = _controller(_post())
     controller.tagsModel.modelReset.connect(controller.shutdown)
 
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820) is False
+    assert controller.open_post(model.post_at(0)) is False
     assert controller.isOpen is False
     assert controller.mediaUrl == ""
 
 
-def test_synchronous_new_open_supersedes_old_open_without_old_signals():
-    first = _post(10, large_file_url="https://cdn.invalid/first.jpg")
-    second = _post(20, large_file_url="https://cdn.invalid/second.jpg")
-    controller, _model, _store = _controller(first, second)
-    redirected: list[bool] = []
-
-    def open_second_once() -> None:
-        if redirected:
-            return
-        redirected.append(True)
-        assert controller.openPost(1, 0, 1, 800, 600, 1280, 820)
-
-    controller.gallerySnapshotChanged.connect(open_second_once)
-
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820) is False
-    assert controller.current_post is second
-    assert controller.postIdText == "20"
-    assert controller.mediaUrl.endswith("second.jpg")
-
-
-@pytest.mark.parametrize("signal_name", ["mediaChanged", "openChanged"])
-def test_close_does_not_restore_over_synchronous_new_open(signal_name):
-    first = _post(10, large_file_url="https://cdn.invalid/first.jpg")
-    second = _post(20, large_file_url="https://cdn.invalid/second.jpg")
-    controller, _model, _store = _controller(first, second)
-    assert controller.openPost(0, 125, 0, 800, 600, 1280, 820)
-    redirected: list[bool] = []
-
-    def open_second_once() -> None:
-        if redirected:
-            return
-        redirected.append(True)
-        assert controller.openPost(1, 325, 1, 800, 600, 1280, 820)
-
-    getattr(controller, signal_name).connect(open_second_once)
-
-    assert controller.closeDetail() is False
-    assert controller.isOpen is True
-    assert controller.current_post is second
-    assert controller.gallery_snapshot is not None
-    assert controller.gallery_snapshot.post_id == 20
-    assert controller.gallery_snapshot.content_y == 325
-    assert controller.mediaUrl.endswith("second.jpg")
-
-
 def test_tag_activation_stops_after_synchronous_shutdown():
-    controller, _model, _store = _controller(_post())
+    controller, model, _store = _controller(_post())
     requested: list[str] = []
     controller.tagSearchRequested.connect(requested.append)
-    assert controller.openPost(0, 0, 0, 800, 600, 1280, 820)
+    assert controller.open_post(model.post_at(0))
     controller.mediaChanged.connect(controller.shutdown)
 
     assert controller.activateTag("sample_artist") is False

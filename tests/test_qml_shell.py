@@ -349,7 +349,10 @@ def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
     assert tag_controller._network_manager is ui_session.network_manager
     assert bridge.core_controller is query_controller
     assert bridge.postsModel is query_controller.posts_model
-    assert detail_controller._gallery_model is query_controller.posts_model
+    navigation = engine.rootContext().contextProperty("detailNavigation")
+    assert navigation._browse_model is query_controller.posts_model
+    assert navigation.detail_controller is detail_controller
+    assert not hasattr(detail_controller, "_gallery_model")
     assert session_controller._posts_model is query_controller.posts_model
     assert detail_controller.translation_store is tag_controller.translation_store
     assert query_controller._tag_store is tag_controller.translation_store

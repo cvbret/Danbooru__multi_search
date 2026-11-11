@@ -60,6 +60,7 @@ hidden_imports = [
     "danbooru_multi_search.tasks.queue",
     "danbooru_multi_search.tasks.retry",
     "danbooru_multi_search.tasks.scheduling",
+    "danbooru_multi_search.ui.detail_navigation",
     "PySide6.QtQuick",
     "PySide6.QtQuickControls2",
     "PySide6.QtQml",

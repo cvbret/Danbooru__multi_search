@@ -1,8 +1,7 @@
-"""Details, media fallback, tag display, and gallery return state."""
+"""Work metadata, media fallback, and tags independent of the source page."""
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import datetime, timezone, tzinfo
 from enum import IntEnum, StrEnum
@@ -20,7 +19,6 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 
@@ -98,19 +96,6 @@ class DetailTagGroup:
     label: str
     entries: tuple[DetailTagEntry, ...]
 
-
-@dataclass(frozen=True, slots=True)
-class GalleryViewSnapshot:
-    model: DanbooruPostListModel
-    revision: int
-    count: int
-    post_id: int
-    index: int
-    content_y: float
-    grid_width: float
-    grid_height: float
-    window_width: float
-    window_height: float
 
 
 def format_file_size_bytes(value: int | None) -> str:
@@ -377,13 +362,11 @@ class DanbooruDetailController(QObject):
     openChanged = Signal()
     detailChanged = Signal()
     mediaChanged = Signal()
-    gallerySnapshotChanged = Signal()
     tagSearchRequested = Signal(str)
 
     def __init__(
         self,
         base_url: str,
-        gallery_model: DanbooruPostListModel,
         translation_store: TagTranslationStore,
         *,
         local_timezone: tzinfo | None = None,
@@ -392,12 +375,10 @@ class DanbooruDetailController(QObject):
         super().__init__(parent)
         build_post_page_url(base_url, 1)
         self._base_url = base_url
-        self._gallery_model = gallery_model
         self._local_timezone = local_timezone
         self._translation_store = translation_store
         self._tags_model = DetailTagGroupListModel(translation_store, self)
         self._current_post: DanbooruPost | None = None
-        self._gallery_snapshot: GalleryViewSnapshot | None = None
         self._is_open = False
         self._shutdown = False
         self._operation_generation = 0
@@ -414,10 +395,6 @@ class DanbooruDetailController(QObject):
     @property
     def current_post(self) -> DanbooruPost | None:
         return self._current_post
-
-    @property
-    def gallery_snapshot(self) -> GalleryViewSnapshot | None:
-        return self._gallery_snapshot
 
     @property
     def translation_store(self) -> TagTranslationStore:
@@ -566,54 +543,18 @@ class DanbooruDetailController(QObject):
             return f"未知格式：{self.fileExtensionText}"
         return ""
 
-    @Slot(int, float, int, float, float, float, float, result=bool)
-    def openPost(
-        self,
-        row: int,
-        content_y: float,
-        current_index: int,
-        grid_width: float,
-        grid_height: float,
-        window_width: float,
-        window_height: float,
-    ) -> bool:
-        if self._shutdown:
-            return False
-        post = self._gallery_model.post_at(row)
-        if post is None:
-            return False
-        values = (
-            content_y,
-            grid_width,
-            grid_height,
-            window_width,
-            window_height,
-        )
-        if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in values):
-            return False
+    def open_post(self, post: DanbooruPost) -> bool:
+        """Display an already available work without fetching its metadata."""
 
+        if self._shutdown or not isinstance(post, DanbooruPost):
+            return False
         self._operation_generation += 1
         operation_generation = self._operation_generation
-        self._gallery_snapshot = GalleryViewSnapshot(
-            model=self._gallery_model,
-            revision=self._gallery_model.revision,
-            count=self._gallery_model.count,
-            post_id=post.id,
-            index=current_index,
-            content_y=float(content_y),
-            grid_width=float(grid_width),
-            grid_height=float(grid_height),
-            window_width=float(window_width),
-            window_height=float(window_height),
-        )
         self._current_post = post
         self._is_open = True
         self._requested_quality = MediaQuality.LARGE
         self._start_media_generation(emit_signal=False)
         self._tags_model.set_post(post)
-        if not self._is_current_open(operation_generation, post):
-            return False
-        self.gallerySnapshotChanged.emit()
         if not self._is_current_open(operation_generation, post):
             return False
         self.openChanged.emit()
@@ -631,13 +572,13 @@ class DanbooruDetailController(QObject):
             return False
         self._operation_generation += 1
         operation_generation = self._operation_generation
-        gallery_snapshot = self._gallery_snapshot
+        post = self._current_post
         self._is_open = False
         self._invalidate_media()
-        if not self._is_current_close(operation_generation, gallery_snapshot):
+        if not self._is_current_close(operation_generation, post):
             return False
         self.openChanged.emit()
-        return self._is_current_close(operation_generation, gallery_snapshot)
+        return self._is_current_close(operation_generation, post)
 
     @Slot(str, result=bool)
     def requestQuality(self, quality: str) -> bool:
@@ -738,12 +679,8 @@ class DanbooruDetailController(QObject):
         self._operation_generation += 1
         operation_generation = self._operation_generation
         post = self._current_post
-        self._gallery_snapshot = None
         self._is_open = False
         self._invalidate_media()
-        if not self._is_current_tag_activation(operation_generation, post):
-            return False
-        self.gallerySnapshotChanged.emit()
         if not self._is_current_tag_activation(operation_generation, post):
             return False
         self.openChanged.emit()
@@ -752,68 +689,6 @@ class DanbooruDetailController(QObject):
         self.tagSearchRequested.emit(tag_name)
         return self._is_current_tag_activation(operation_generation, post)
 
-    @Slot(QObject, float, float, float, float, float, float, result="QVariantMap")
-    def takeGalleryRestorePlan(
-        self,
-        current_model: QObject,
-        grid_width: float,
-        grid_height: float,
-        window_width: float,
-        window_height: float,
-        origin_y: float,
-        content_height: float,
-    ) -> dict[str, object]:
-        unavailable = {
-            "available": False,
-            "index": -1,
-            "contentY": float(origin_y),
-        }
-        operation_generation = self._operation_generation
-        snapshot = self._gallery_snapshot
-        self._gallery_snapshot = None
-        self.gallerySnapshotChanged.emit()
-        if (
-            self._shutdown
-            or self._operation_generation != operation_generation
-            or self._is_open
-            or self._gallery_snapshot is not None
-        ):
-            return unavailable
-        if snapshot is None or not isinstance(current_model, DanbooruPostListModel):
-            return unavailable
-
-        exact = (
-            current_model is snapshot.model
-            and current_model.revision == snapshot.revision
-            and current_model.count == snapshot.count
-            and _same_size(grid_width, snapshot.grid_width)
-            and _same_size(grid_height, snapshot.grid_height)
-            and _same_size(window_width, snapshot.window_width)
-            and _same_size(window_height, snapshot.window_height)
-        )
-        if exact:
-            index = snapshot.index
-            content_y = snapshot.content_y
-        else:
-            index = current_model.row_for_post_id(snapshot.post_id)
-            if index < 0:
-                index = (
-                    -1
-                    if current_model.count == 0
-                    else max(0, min(snapshot.index, current_model.count - 1))
-                )
-            maximum_y = max(
-                float(origin_y),
-                float(origin_y) + max(float(content_height) - float(grid_height), 0.0),
-            )
-            content_y = max(float(origin_y), min(snapshot.content_y, maximum_y))
-        return {
-            "available": True,
-            "exact": exact,
-            "index": index,
-            "contentY": content_y,
-        }
-
     @Slot()
     def shutdown(self) -> None:
         if self._shutdown:
@@ -821,10 +696,8 @@ class DanbooruDetailController(QObject):
         self._operation_generation += 1
         self._shutdown = True
         self._is_open = False
-        self._gallery_snapshot = None
         self._invalidate_media()
         self.openChanged.emit()
-        self.gallerySnapshotChanged.emit()
 
     @property
     def _current_candidate(self) -> MediaCandidate | None:
@@ -917,21 +790,16 @@ class DanbooruDetailController(QObject):
             and self._operation_generation == operation_generation
             and not self._is_open
             and self._current_post is post
-            and self._gallery_snapshot is None
         )
 
     def _is_current_close(
         self,
         operation_generation: int,
-        gallery_snapshot: GalleryViewSnapshot | None,
+        post: DanbooruPost | None,
     ) -> bool:
         return (
             not self._shutdown
             and self._operation_generation == operation_generation
             and not self._is_open
-            and self._gallery_snapshot is gallery_snapshot
+            and self._current_post is post
         )
-
-
-def _same_size(current: float, saved: float) -> bool:
-    return math.isclose(float(current), saved, rel_tol=0.0, abs_tol=1e-6)

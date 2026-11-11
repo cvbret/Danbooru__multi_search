@@ -30,6 +30,7 @@ from danbooru_multi_search.tasks import (
     TaskQueueConfig,
 )
 from danbooru_multi_search.storage import Database, HistoryRepository
+from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
@@ -115,8 +116,12 @@ class _UiSession(QObject):
         )
         self.detail_controller = DanbooruDetailController(
             danbooru_base_url,
-            self.query_controller.posts_model,
             self.translation_store,
+            parent=self,
+        )
+        self.detail_navigation = DetailNavigationController(
+            self.detail_controller,
+            self.query_controller.posts_model,
             parent=self,
         )
         self.tag_controller = DanbooruTagSuggestionController(
@@ -168,7 +173,7 @@ class _UiSession(QObject):
             self.session_controller.begin_shutdown,
             self.session_controller.detach_events,
             self.query_bridge.detach,
-            self.detail_controller.shutdown,
+            self.detail_navigation.shutdown,
             self.tag_controller.begin_shutdown,
             self.tag_controller.shutdown,
             self.image_cache_controller.shutdown,
@@ -193,6 +198,7 @@ class _UiSession(QObject):
             and self.session_controller._closed
             and self.session_controller.events_detached
             and self.detail_controller._shutdown
+            and self.detail_navigation._closed
             and self.query_controller.closed
             and self.query_executor.closed
             and self.query_bridge.closing
@@ -239,6 +245,10 @@ def _create_qml_session(
     engine.rootContext().setContextProperty(
         "detailController",
         session.detail_controller,
+    )
+    engine.rootContext().setContextProperty(
+        "detailNavigation",
+        session.detail_navigation,
     )
     engine.rootContext().setContextProperty(
         "sessionController",

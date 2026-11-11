@@ -29,6 +29,7 @@ from danbooru_multi_search.tasks import (
     SystemClock,
     TaskQueueConfig,
 )
+from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
@@ -102,8 +103,12 @@ class _M1QmlTestSession(QObject):
         )
         self.detail_controller = DanbooruDetailController(
             danbooru_base_url,
-            self.gallery_controller.postsModel,
             self.translation_store,
+            parent=self,
+        )
+        self.detail_navigation = DetailNavigationController(
+            self.detail_controller,
+            self.gallery_controller.postsModel,
             parent=self,
         )
         self.tag_controller = DanbooruTagSuggestionController(
@@ -150,7 +155,7 @@ class _M1QmlTestSession(QObject):
             self.tag_controller.begin_shutdown,
             self.session_controller.begin_shutdown,
             self.session_controller.detach_events,
-            self.detail_controller.shutdown,
+            self.detail_navigation.shutdown,
             self.gallery_controller.shutdown,
             self.tag_controller.shutdown,
             self.image_cache_controller.shutdown,
@@ -198,6 +203,7 @@ def create_m1_qml_test_engine(
     context.setContextProperty("searchController", session.gallery_controller)
     context.setContextProperty("tagSuggestionController", session.tag_controller)
     context.setContextProperty("detailController", session.detail_controller)
+    context.setContextProperty("detailNavigation", session.detail_navigation)
     context.setContextProperty("sessionController", session.session_controller)
     context.setContextProperty(
         "imageCacheController",

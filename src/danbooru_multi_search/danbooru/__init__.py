@@ -47,7 +47,6 @@ _EXPORT_GROUPS = {
         "DetailTagEntry",
         "DetailTagGroup",
         "DetailTagGroupListModel",
-        "GalleryViewSnapshot",
         "MediaCandidate",
         "MediaQuality",
         "build_media_candidates",
@@ -212,6 +211,9 @@ _EXPORT_GROUPS = {
         "TagSyntaxError",
         "has_valid_internal_parentheses",
         "metatag_name",
+    ),
+    "danbooru_multi_search.ui.detail_navigation": (
+        "GalleryViewSnapshot",
     ),
 }
 _EXPORTS = {
