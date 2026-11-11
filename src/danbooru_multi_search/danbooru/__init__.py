@@ -1,206 +1,224 @@
 """Danbooru API models, parsing, paging and asynchronous request controllers."""
 
-from danbooru_multi_search.danbooru.autocomplete import (
-    TAG_SUGGESTION_DEBOUNCE_MS,
-    ActiveTagFragment,
-    DanbooruTagSuggestionController,
-    QueryTagFragment,
-    TagImportOutcome,
-    TagReplacement,
-    TagSuggestionListModel,
-    TagSuggestionRole,
-    locate_active_tag_fragment,
-    locate_query_tag_fragment,
-    merge_tag_suggestions,
-    replace_active_tag_fragment,
-    replace_query_tag_fragment,
-)
+from importlib import import_module
+from typing import Any
 
-from danbooru_multi_search.danbooru.client import (
-    DEFAULT_TIMEOUT_MS,
-    USER_AGENT,
-    DanbooruRequestOutcome,
-    DanbooruSearchController,
-    RequestErrorKind,
-    RequestState,
-    build_posts_request,
-)
-from danbooru_multi_search.danbooru.download import (
-    DEFAULT_MAX_DOWNLOAD_BYTES,
-    DanbooruDownloadController,
-    DanbooruDownloadOutcome,
-    DownloadedFile,
-    DownloadErrorKind,
-    DownloadState,
-    build_media_request,
-    download_destination,
-)
-from danbooru_multi_search.danbooru.details import (
-    DanbooruDetailController,
-    DetailMediaState,
-    DetailTagEntry,
-    DetailTagGroup,
-    DetailTagGroupListModel,
-    GalleryViewSnapshot,
-    MediaCandidate,
-    MediaQuality,
-    build_media_candidates,
-    build_post_page_url,
-    format_file_size_bytes,
-    format_file_size_readable,
-    format_local_created_at,
-)
-from danbooru_multi_search.danbooru.gallery import (
-    DEFAULT_GALLERY_PAGE_SIZE,
-    MAX_GALLERY_PAGE_SIZE,
-    ContentRating,
-    DanbooruGalleryController,
-    DanbooruPostListModel,
-    GalleryPageOutcome,
-    GalleryQueryError,
-    GalleryRequestAccepted,
-    GalleryRequestContext,
-    GalleryRequestOrigin,
-    GalleryRequestSpec,
-    PostRole,
-    build_gallery_request_spec,
-)
-from danbooru_multi_search.danbooru.models import DanbooruPost
-from danbooru_multi_search.danbooru.parsing import (
-    DanbooruParseError,
-    parse_complete_posts_response,
-    parse_posts_response,
-)
-from danbooru_multi_search.danbooru.query_execution import (
-    ACTIVE_EXECUTION_STATES,
-    DEFAULT_ACTIVE_TIME_LIMIT_SECONDS,
-    DEFAULT_BRANCH_PAGE_LIMIT,
-    DEFAULT_CANDIDATE_LIMIT,
-    DEFAULT_EXECUTION_PAGE_SIZE,
-    DanbooruMultiBranchExecutor,
-    PageAttemptFactory,
-    QueryBranchPosition,
-    QueryBranchProgress,
-    QueryExecutionCounts,
-    QueryExecutionAccepted,
-    QueryExecutionBound,
-    QueryExecutionErrorCode,
-    QueryExecutionFailure,
-    QueryExecutionLimits,
-    QueryExecutionSnapshot,
-    QueryExecutionState,
-    QueryLimitReason,
-)
-from danbooru_multi_search.danbooru.query_definition import (
-    GalleryQueryDefinition,
-    QueryMode,
-)
-from danbooru_multi_search.danbooru.query_controller import (
-    DanbooruM2QueryController,
-    GalleryQueryAccepted,
-    GalleryQueryOrigin,
-    GalleryResultEvent,
-    GalleryResultSummary,
-    GalleryViewDefinitionChanged,
-)
-from danbooru_multi_search.danbooru.query_evaluator import (
-    evaluate_post_query,
-    evaluate_query,
-    post_tag_set,
-)
-from danbooru_multi_search.danbooru.query_language import (
-    MAX_QUERY_CHARACTERS,
-    MAX_QUERY_DEPTH,
-    MAX_QUERY_NODES,
-    AndNode,
-    NotNode,
-    OrNode,
-    ParsedQuery,
-    QueryAnalysis,
-    QueryDiagnostic,
-    QueryNode,
-    QueryParseError,
-    SourceSpan,
-    TagNode,
-    analyze_query,
-    format_query_expression,
-    parse_query_expression,
-)
-from danbooru_multi_search.danbooru.query_planning import (
-    MAX_QUERY_BRANCHES,
-    MAX_SEARCH_ITEMS,
-    QueryBranch,
-    QueryPlan,
-    QueryPlanDiagnostic,
-    QueryPlanError,
-    QueryRating,
-    RemoteOrder,
-    RemoteQueryBranch,
-    SearchItem,
-    SearchItemKind,
-    build_query_plan,
-    build_latest_query_plan,
-    build_rank_query_plan,
-    build_standard_query_plan,
-    expand_query_to_dnf,
-    normalize_plan_rating,
-    normalize_remote_order,
-    select_candidate_tags,
-    validate_search_item_budget,
-)
-from danbooru_multi_search.danbooru.result_processing import (
-    PostFileCategory,
-    PostOrientation,
-    ProcessedPost,
-    ProcessedQueryResults,
-    ProcessedResultState,
-    QueryResultSession,
-    ResultFilterSpec,
-    ResultProcessingDiagnostic,
-    ResultProcessingError,
-    ResultSortDirection,
-    ResultSortField,
-    ResultSortSpec,
-    ValidatedResultConfiguration,
-    build_query_result_session,
-    process_query_snapshot,
-    validate_result_configuration,
-)
-from danbooru_multi_search.danbooru.smoke import (
-    SmokeCheckResult,
-    run_danbooru_download_smoke,
-    run_danbooru_smoke,
-)
-from danbooru_multi_search.danbooru.tag_index import (
-    MAX_TAG_CSV_BYTES,
-    MAX_TAG_CSV_FIELD_CHARACTERS,
-    MAX_TAG_CSV_RECORDS,
-    TagCsvImportCancelled,
-    TagCsvImportError,
-    TagCsvImportResult,
-    TagIndexSnapshot,
-    load_tag_csv,
-)
-from danbooru_multi_search.danbooru.tags import (
-    DEFAULT_TAG_SUGGESTION_LIMIT,
-    MAX_TAG_RESPONSE_BYTES,
-    QtTagsRequestAttempt,
-    TagErrorKind,
-    TagParseError,
-    TagSuggestion,
-    build_tags_request,
-    normalize_tag_fragment,
-    normalize_tag_name,
-    parse_tags_response,
-)
-from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
-from danbooru_multi_search.danbooru.tag_syntax import (
-    METATAG_NAMES,
-    QUERY_OPERATOR_NAMES,
-    TagSyntaxError,
-    has_valid_internal_parentheses,
-    metatag_name,
-)
+
+# Public names are grouped by their owning module so importing the package
+# does not load network, Qt, or storage implementations before they are used.
+_EXPORT_GROUPS = {
+    "danbooru_multi_search.danbooru.autocomplete": (
+        "TAG_SUGGESTION_DEBOUNCE_MS",
+        "ActiveTagFragment",
+        "DanbooruTagSuggestionController",
+        "QueryTagFragment",
+        "TagImportOutcome",
+        "TagReplacement",
+        "TagSuggestionListModel",
+        "TagSuggestionRole",
+        "locate_active_tag_fragment",
+        "locate_query_tag_fragment",
+        "merge_tag_suggestions",
+        "replace_active_tag_fragment",
+        "replace_query_tag_fragment",
+    ),
+    "danbooru_multi_search.danbooru.client": (
+        "DEFAULT_TIMEOUT_MS",
+        "USER_AGENT",
+        "DanbooruRequestOutcome",
+        "DanbooruSearchController",
+        "RequestErrorKind",
+        "RequestState",
+        "build_posts_request",
+    ),
+    "danbooru_multi_search.danbooru.download": (
+        "DEFAULT_MAX_DOWNLOAD_BYTES",
+        "DanbooruDownloadController",
+        "DanbooruDownloadOutcome",
+        "DownloadedFile",
+        "DownloadErrorKind",
+        "DownloadState",
+        "build_media_request",
+        "download_destination",
+    ),
+    "danbooru_multi_search.danbooru.details": (
+        "DanbooruDetailController",
+        "DetailMediaState",
+        "DetailTagEntry",
+        "DetailTagGroup",
+        "DetailTagGroupListModel",
+        "GalleryViewSnapshot",
+        "MediaCandidate",
+        "MediaQuality",
+        "build_media_candidates",
+        "build_post_page_url",
+        "format_file_size_bytes",
+        "format_file_size_readable",
+        "format_local_created_at",
+    ),
+    "danbooru_multi_search.danbooru.gallery": (
+        "DEFAULT_GALLERY_PAGE_SIZE",
+        "MAX_GALLERY_PAGE_SIZE",
+        "ContentRating",
+        "DanbooruGalleryController",
+        "DanbooruPostListModel",
+        "GalleryPageOutcome",
+        "GalleryQueryError",
+        "GalleryRequestAccepted",
+        "GalleryRequestContext",
+        "GalleryRequestOrigin",
+        "GalleryRequestSpec",
+        "PostRole",
+        "build_gallery_request_spec",
+    ),
+    "danbooru_multi_search.danbooru.models": (
+        "DanbooruPost",
+    ),
+    "danbooru_multi_search.danbooru.parsing": (
+        "DanbooruParseError",
+        "parse_complete_posts_response",
+        "parse_posts_response",
+    ),
+    "danbooru_multi_search.danbooru.query_types": (
+        "ACTIVE_EXECUTION_STATES",
+        "DEFAULT_ACTIVE_TIME_LIMIT_SECONDS",
+        "DEFAULT_BRANCH_PAGE_LIMIT",
+        "DEFAULT_CANDIDATE_LIMIT",
+        "DEFAULT_EXECUTION_PAGE_SIZE",
+        "QueryBranchPosition",
+        "QueryBranchProgress",
+        "QueryExecutionCounts",
+        "QueryExecutionAccepted",
+        "QueryExecutionBound",
+        "QueryExecutionErrorCode",
+        "QueryExecutionFailure",
+        "QueryExecutionLimits",
+        "QueryExecutionSnapshot",
+        "QueryExecutionState",
+        "QueryLimitReason",
+        "GalleryResultSummary",
+    ),
+    "danbooru_multi_search.danbooru.query_execution": (
+        "DanbooruMultiBranchExecutor",
+        "PageAttemptFactory",
+    ),
+    "danbooru_multi_search.danbooru.query_definition": (
+        "GalleryQueryDefinition",
+        "QueryMode",
+    ),
+    "danbooru_multi_search.danbooru.query_controller": (
+        "DanbooruM2QueryController",
+        "GalleryQueryAccepted",
+        "GalleryQueryOrigin",
+        "GalleryResultEvent",
+        "GalleryViewDefinitionChanged",
+    ),
+    "danbooru_multi_search.danbooru.query_evaluator": (
+        "evaluate_post_query",
+        "evaluate_query",
+        "post_tag_set",
+    ),
+    "danbooru_multi_search.danbooru.query_language": (
+        "MAX_QUERY_CHARACTERS",
+        "MAX_QUERY_DEPTH",
+        "MAX_QUERY_NODES",
+        "AndNode",
+        "NotNode",
+        "OrNode",
+        "ParsedQuery",
+        "QueryAnalysis",
+        "QueryDiagnostic",
+        "QueryNode",
+        "QueryParseError",
+        "SourceSpan",
+        "TagNode",
+        "analyze_query",
+        "format_query_expression",
+        "parse_query_expression",
+    ),
+    "danbooru_multi_search.danbooru.query_planning": (
+        "MAX_QUERY_BRANCHES",
+        "MAX_SEARCH_ITEMS",
+        "QueryBranch",
+        "QueryPlan",
+        "QueryPlanDiagnostic",
+        "QueryPlanError",
+        "QueryRating",
+        "RemoteOrder",
+        "RemoteQueryBranch",
+        "SearchItem",
+        "SearchItemKind",
+        "build_query_plan",
+        "build_latest_query_plan",
+        "build_rank_query_plan",
+        "build_standard_query_plan",
+        "expand_query_to_dnf",
+        "normalize_plan_rating",
+        "normalize_remote_order",
+        "select_candidate_tags",
+        "validate_search_item_budget",
+    ),
+    "danbooru_multi_search.danbooru.result_processing": (
+        "PostFileCategory",
+        "PostOrientation",
+        "ProcessedPost",
+        "ProcessedQueryResults",
+        "ProcessedResultState",
+        "QueryResultSession",
+        "ResultFilterSpec",
+        "ResultProcessingDiagnostic",
+        "ResultProcessingError",
+        "ResultSortDirection",
+        "ResultSortField",
+        "ResultSortSpec",
+        "ValidatedResultConfiguration",
+        "build_query_result_session",
+        "process_query_snapshot",
+        "validate_result_configuration",
+    ),
+    "danbooru_multi_search.danbooru.smoke": (
+        "SmokeCheckResult",
+        "run_danbooru_download_smoke",
+        "run_danbooru_smoke",
+    ),
+    "danbooru_multi_search.danbooru.tag_index": (
+        "MAX_TAG_CSV_BYTES",
+        "MAX_TAG_CSV_FIELD_CHARACTERS",
+        "MAX_TAG_CSV_RECORDS",
+        "TagCsvImportCancelled",
+        "TagCsvImportError",
+        "TagCsvImportResult",
+        "TagIndexSnapshot",
+        "load_tag_csv",
+    ),
+    "danbooru_multi_search.danbooru.tags": (
+        "DEFAULT_TAG_SUGGESTION_LIMIT",
+        "MAX_TAG_RESPONSE_BYTES",
+        "QtTagsRequestAttempt",
+        "TagErrorKind",
+        "TagParseError",
+        "TagSuggestion",
+        "build_tags_request",
+        "normalize_tag_fragment",
+        "normalize_tag_name",
+        "parse_tags_response",
+    ),
+    "danbooru_multi_search.danbooru.tag_translation": (
+        "TagTranslationStore",
+    ),
+    "danbooru_multi_search.danbooru.tag_syntax": (
+        "METATAG_NAMES",
+        "QUERY_OPERATOR_NAMES",
+        "TagSyntaxError",
+        "has_valid_internal_parentheses",
+        "metatag_name",
+    ),
+}
+_EXPORTS = {
+    name: module
+    for module, names in _EXPORT_GROUPS.items()
+    for name in names
+}
 
 __all__ = [
     "DEFAULT_TIMEOUT_MS",
@@ -370,3 +388,16 @@ __all__ = [
     "validate_search_item_budget",
     "validate_result_configuration",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

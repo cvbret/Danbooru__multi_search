@@ -355,7 +355,7 @@ def _migrate_to_version_three(connection: sqlite3.Connection) -> None:
         GalleryQueryDefinition,
         QueryMode,
     )
-    from danbooru_multi_search.danbooru.query_execution import QueryExecutionLimits
+    from danbooru_multi_search.danbooru.query_types import QueryExecutionLimits
     from danbooru_multi_search.danbooru.query_language import parse_query_expression
     from danbooru_multi_search.danbooru.query_planning import QueryRating
     from danbooru_multi_search.danbooru.result_processing import (

@@ -20,15 +20,46 @@ project_qml = [
     (str(qml_root / "HistoryPanel.qml"), "danbooru_multi_search/ui/qml"),
 ]
 
-# These modules are imported conditionally by the platform adapter or loaded by
-# the QML engine. Keeping the list explicit makes the Windows package contract
-# reviewable and lets PyInstaller's PySide6 hooks collect their Qt dependencies.
+# These modules are imported conditionally by platform adapters, lazy package
+# exports, or the QML engine. Keep every lazy export target explicit so freezing
+# preserves the same public imports and collects the required Qt dependencies.
 hidden_imports = [
     "ctypes.wintypes",
     "winreg",
     "danbooru_multi_search.integrations.eagle.client",
     "danbooru_multi_search.integrations.eagle.transport",
     "danbooru_multi_search.platform.windows_wallpaper",
+    "danbooru_multi_search.danbooru.autocomplete",
+    "danbooru_multi_search.danbooru.client",
+    "danbooru_multi_search.danbooru.details",
+    "danbooru_multi_search.danbooru.download",
+    "danbooru_multi_search.danbooru.gallery",
+    "danbooru_multi_search.danbooru.models",
+    "danbooru_multi_search.danbooru.parsing",
+    "danbooru_multi_search.danbooru.query_controller",
+    "danbooru_multi_search.danbooru.query_definition",
+    "danbooru_multi_search.danbooru.query_evaluator",
+    "danbooru_multi_search.danbooru.query_execution",
+    "danbooru_multi_search.danbooru.query_language",
+    "danbooru_multi_search.danbooru.query_planning",
+    "danbooru_multi_search.danbooru.query_types",
+    "danbooru_multi_search.danbooru.result_processing",
+    "danbooru_multi_search.danbooru.smoke",
+    "danbooru_multi_search.danbooru.tag_index",
+    "danbooru_multi_search.danbooru.tag_syntax",
+    "danbooru_multi_search.danbooru.tag_translation",
+    "danbooru_multi_search.danbooru.tags",
+    "danbooru_multi_search.storage.database",
+    "danbooru_multi_search.storage.favorite_transfer",
+    "danbooru_multi_search.storage.favorites",
+    "danbooru_multi_search.storage.history",
+    "danbooru_multi_search.storage.post_snapshot",
+    "danbooru_multi_search.storage.query_serialization",
+    "danbooru_multi_search.tasks.model",
+    "danbooru_multi_search.tasks.qt_scheduling",
+    "danbooru_multi_search.tasks.queue",
+    "danbooru_multi_search.tasks.retry",
+    "danbooru_multi_search.tasks.scheduling",
     "PySide6.QtQuick",
     "PySide6.QtQuickControls2",
     "PySide6.QtQml",

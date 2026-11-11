@@ -1,74 +1,90 @@
 """Persistent storage and database migrations."""
 
-from danbooru_multi_search.storage.database import Database, DatabaseError
-from danbooru_multi_search.storage.favorites import (
-    FAVORITE_SUMMARY_VERSION,
-    FavoriteCandidate,
-    FavoriteCollectionSnapshot,
-    FavoriteError,
-    FavoriteFilter,
-    FavoriteFolder,
-    FavoriteFolderScope,
-    FavoriteIdentity,
-    FavoriteItem,
-    FavoriteObjectType,
-    FavoritePoolCategory,
-    FavoriteRepository,
-    FavoriteSort,
-    FavoriteSortDirection,
-    FavoriteSortField,
-    FavoriteTagCategory,
-    FolderDeleteMode,
-    candidate_from_favorite_item,
-    decode_favorite_summary,
-    decode_favorite_timestamp,
-    encode_favorite_summary,
-    encode_favorite_timestamp,
-    favorite_folder_key,
-)
-from danbooru_multi_search.storage.favorite_transfer import (
-    FAVORITE_TRANSFER_DOCUMENT_TYPE,
-    FAVORITE_TRANSFER_VERSION,
-    MAX_FAVORITE_TRANSFER_BYTES,
-    FavoriteImportMode,
-    FavoriteImportPreview,
-    FavoriteTransferDocument,
-    FavoriteTransferError,
-    FavoriteTransferFolder,
-    FavoriteTransferItem,
-    FavoriteTransferService,
-    decode_favorite_transfer_document,
-    encode_favorite_transfer_document,
-    read_favorite_transfer_document,
-    write_favorite_transfer_document,
-)
-from danbooru_multi_search.storage.history import (
-    BrowserSession,
-    GalleryPosition,
-    HistoryError,
-    HistoryRepository,
-    RecentQuery,
-    RecentTag,
-    WindowGeometry,
-    canonicalize_query_tags,
-)
-from danbooru_multi_search.storage.query_serialization import (
-    QUERY_DEFINITION_VERSION,
-    RESULT_SUMMARY_VERSION,
-    QuerySerializationError,
-    decode_query_definition,
-    decode_result_summary,
-    encode_query_definition,
-    encode_result_summary,
-    query_definition_key,
-    query_definition_tags,
-)
-from danbooru_multi_search.storage.post_snapshot import (
-    POST_SNAPSHOT_VERSION,
-    PostSnapshotError,
-    decode_post_snapshot,
-    encode_post_snapshot,
-)
+from importlib import import_module
+from typing import Any
+
+
+# Public names are grouped by their owning module so importing the package
+# does not load network, Qt, or storage implementations before they are used.
+_EXPORT_GROUPS = {
+    "danbooru_multi_search.storage.database": (
+        "Database",
+        "DatabaseError",
+    ),
+    "danbooru_multi_search.storage.favorites": (
+        "FAVORITE_SUMMARY_VERSION",
+        "FavoriteCandidate",
+        "FavoriteCollectionSnapshot",
+        "FavoriteError",
+        "FavoriteFilter",
+        "FavoriteFolder",
+        "FavoriteFolderScope",
+        "FavoriteIdentity",
+        "FavoriteItem",
+        "FavoriteObjectType",
+        "FavoritePoolCategory",
+        "FavoriteRepository",
+        "FavoriteSort",
+        "FavoriteSortDirection",
+        "FavoriteSortField",
+        "FavoriteTagCategory",
+        "FolderDeleteMode",
+        "candidate_from_favorite_item",
+        "decode_favorite_summary",
+        "decode_favorite_timestamp",
+        "encode_favorite_summary",
+        "encode_favorite_timestamp",
+        "favorite_folder_key",
+    ),
+    "danbooru_multi_search.storage.favorite_transfer": (
+        "FAVORITE_TRANSFER_DOCUMENT_TYPE",
+        "FAVORITE_TRANSFER_VERSION",
+        "MAX_FAVORITE_TRANSFER_BYTES",
+        "FavoriteImportMode",
+        "FavoriteImportPreview",
+        "FavoriteTransferDocument",
+        "FavoriteTransferError",
+        "FavoriteTransferFolder",
+        "FavoriteTransferItem",
+        "FavoriteTransferService",
+        "decode_favorite_transfer_document",
+        "encode_favorite_transfer_document",
+        "read_favorite_transfer_document",
+        "write_favorite_transfer_document",
+    ),
+    "danbooru_multi_search.storage.history": (
+        "BrowserSession",
+        "GalleryPosition",
+        "HistoryError",
+        "HistoryRepository",
+        "RecentQuery",
+        "RecentTag",
+        "WindowGeometry",
+        "canonicalize_query_tags",
+    ),
+    "danbooru_multi_search.storage.query_serialization": (
+        "QUERY_DEFINITION_VERSION",
+        "RESULT_SUMMARY_VERSION",
+        "QuerySerializationError",
+        "decode_query_definition",
+        "decode_result_summary",
+        "encode_query_definition",
+        "encode_result_summary",
+        "query_definition_key",
+        "query_definition_tags",
+    ),
+    "danbooru_multi_search.storage.post_snapshot": (
+        "POST_SNAPSHOT_VERSION",
+        "PostSnapshotError",
+        "decode_post_snapshot",
+        "encode_post_snapshot",
+    ),
+}
+_EXPORTS = {
+    name: module
+    for module, names in _EXPORT_GROUPS.items()
+    for name in names
+}
 
 __all__ = [
     "BrowserSession",
@@ -132,3 +148,16 @@ __all__ = [
     "read_favorite_transfer_document",
     "write_favorite_transfer_document",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
