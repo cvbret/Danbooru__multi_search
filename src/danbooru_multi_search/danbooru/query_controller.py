@@ -16,6 +16,10 @@ from danbooru_multi_search.danbooru.query_definition import (
 )
 from danbooru_multi_search.danbooru.query_execution import (
     DanbooruMultiBranchExecutor,
+)
+# Existing callers may continue to import GalleryResultSummary from here.
+from danbooru_multi_search.danbooru.query_types import (
+    GalleryResultSummary,
     QueryExecutionAccepted,
     QueryExecutionBound,
     QueryExecutionErrorCode,
@@ -77,17 +81,6 @@ class GalleryViewDefinitionChanged:
     view_generation: int
     definition: GalleryQueryDefinition
     applied_to_gallery: bool
-
-
-@dataclass(frozen=True, slots=True)
-class GalleryResultSummary:
-    state: QueryExecutionState
-    remote_rows: int
-    unique_candidates: int
-    local_matches: int
-    visible_count: int
-    limit_reason: QueryLimitReason | None
-    failure_error_code: QueryExecutionErrorCode | None
 
 
 @dataclass(frozen=True, slots=True)

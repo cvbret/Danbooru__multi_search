@@ -10,12 +10,14 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from danbooru_multi_search.danbooru.query_controller import GalleryResultSummary
 from danbooru_multi_search.danbooru.query_definition import (
     GalleryQueryDefinition,
     QueryMode,
 )
-from danbooru_multi_search.danbooru.query_execution import QueryExecutionLimits
+from danbooru_multi_search.danbooru.query_types import (
+    GalleryResultSummary,
+    QueryExecutionLimits,
+)
 from danbooru_multi_search.danbooru.query_language import parse_query_expression
 from danbooru_multi_search.danbooru.query_planning import QueryRating
 from danbooru_multi_search.danbooru.result_processing import (

@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from danbooru_multi_search.danbooru.query_execution import QueryExecutionLimits
+from danbooru_multi_search.danbooru.query_types import QueryExecutionLimits
 from danbooru_multi_search.danbooru.query_language import parse_query_expression
 from danbooru_multi_search.danbooru.query_planning import QueryRating, RemoteOrder
 from danbooru_multi_search.danbooru.result_processing import (

@@ -10,7 +10,7 @@ from fractions import Fraction
 from numbers import Rational
 
 from danbooru_multi_search.danbooru.models import DanbooruPost
-from danbooru_multi_search.danbooru.query_execution import (
+from danbooru_multi_search.danbooru.query_types import (
     ACTIVE_EXECUTION_STATES,
     QueryExecutionSnapshot,
     QueryExecutionState,

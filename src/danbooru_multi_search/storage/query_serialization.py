@@ -9,12 +9,12 @@ from datetime import datetime, timedelta, timezone
 from fractions import Fraction
 from typing import Any
 
-from danbooru_multi_search.danbooru.query_controller import GalleryResultSummary
 from danbooru_multi_search.danbooru.query_definition import (
     GalleryQueryDefinition,
     QueryMode,
 )
-from danbooru_multi_search.danbooru.query_execution import (
+from danbooru_multi_search.danbooru.query_types import (
+    GalleryResultSummary,
     QueryExecutionErrorCode,
     QueryExecutionLimits,
     QueryExecutionState,
