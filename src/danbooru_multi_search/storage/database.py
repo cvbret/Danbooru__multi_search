@@ -351,22 +351,8 @@ class Database:
 def _migrate_to_version_three(connection: sqlite3.Connection) -> None:
     """Rebuild query and session tables while preserving all version-2 rows."""
 
-    from danbooru_multi_search.danbooru.query_definition import (
-        GalleryQueryDefinition,
-        QueryMode,
-    )
-    from danbooru_multi_search.danbooru.query_types import QueryExecutionLimits
-    from danbooru_multi_search.danbooru.query_language import parse_query_expression
-    from danbooru_multi_search.danbooru.query_planning import QueryRating
-    from danbooru_multi_search.danbooru.result_processing import (
-        ResultFilterSpec,
-        ResultSortSpec,
-    )
-    from danbooru_multi_search.storage.query_serialization import (
-        QUERY_DEFINITION_VERSION,
-        decode_normalized_tags,
-        encode_normalized_tags,
-        encode_query_definition,
+    from danbooru_multi_search.storage.migrations_v3 import (
+        version_three_definition_json,
     )
 
     connection.execute(
@@ -414,20 +400,11 @@ def _migrate_to_version_three(connection: sqlite3.Connection) -> None:
         "SELECT * FROM recent_queries ORDER BY id"
     ).fetchall()
     for row in rows:
-        tags = decode_normalized_tags(
+        definition_json = version_three_definition_json(
             str(row["normalized_tags"]),
-            allow_empty=False,
+            str(row["rating"]),
+            int(row["page_size"]),
         )
-        parsed = parse_query_expression(" AND ".join(tags))
-        definition = GalleryQueryDefinition(
-            mode=QueryMode.STANDARD,
-            normalized_expression=parsed.normalized_text,
-            rating=QueryRating(str(row["rating"])),
-            filter_spec=ResultFilterSpec(),
-            sort_spec=ResultSortSpec(),
-            limits=QueryExecutionLimits(page_size=int(row["page_size"])),
-        )
-        definition_json = encode_query_definition(definition)
         connection.execute(
             """
             INSERT INTO recent_queries_v3(
@@ -441,13 +418,13 @@ def _migrate_to_version_three(connection: sqlite3.Connection) -> None:
             (
                 int(row["id"]),
                 definition_json,
-                QUERY_DEFINITION_VERSION,
-                definition.mode.value,
+                1,
+                "standard",
                 definition_json,
                 str(row["display_text"]),
-                encode_normalized_tags(tags),
-                definition.rating.value,
-                definition.limits.page_size,
+                str(row["normalized_tags"]),
+                str(row["rating"]),
+                int(row["page_size"]),
                 int(row["last_submitted_page"]),
                 row["last_committed_page"],
                 row["anchor_post_id"],
