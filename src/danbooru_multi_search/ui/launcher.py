@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Sequence
 from PySide6.QtCore import QObject, QTimer, QUrl, Slot
 from PySide6.QtGui import QGuiApplication, QImageReader
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtNetwork import QNetworkAccessManager, QSslSocket
 
 from danbooru_multi_search.core.settings import (
@@ -30,6 +31,7 @@ from danbooru_multi_search.tasks import (
     TaskQueueConfig,
 )
 from danbooru_multi_search.storage import Database, HistoryRepository
+from danbooru_multi_search.ui.appearance import AppearanceController
 from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
@@ -45,6 +47,13 @@ if TYPE_CHECKING:
 
 def main_qml_path() -> Path:
     return Path(__file__).resolve().parent / "qml" / "M2Main.qml"
+
+
+def configure_controls_style() -> None:
+    """Select the shared palette-based style before loading any QML controls."""
+
+    if QQuickStyle.name() != "Basic":
+        QQuickStyle.setStyle("Basic")
 
 
 class _UiSession(QObject):
@@ -78,6 +87,10 @@ class _UiSession(QObject):
             settings_store = SettingsStore(runtime.paths.settings_file)
             image_cache_directory = runtime.paths.cache_dir / "images"
         self.settings_controller = SettingsController(settings_store, settings)
+        self.appearance_controller = AppearanceController(
+            self.settings_controller,
+            parent=self,
+        )
         self.image_cache_controller = ImageCacheController(
             image_cache_directory,
             settings.image_cache_limit_bytes,
@@ -168,6 +181,7 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.appearance_controller.shutdown,
             self.query_bridge.beginClosing,
             self.query_controller.shutdown,
             self.session_controller.begin_shutdown,
@@ -199,6 +213,7 @@ class _UiSession(QObject):
             and self.session_controller.events_detached
             and self.detail_controller._shutdown
             and self.detail_navigation._closed
+            and self.appearance_controller._closed
             and self.query_controller.closed
             and self.query_executor.closed
             and self.query_bridge.closing
@@ -224,6 +239,7 @@ def _create_qml_session(
         raise RuntimeError(
             "create_qml_engine requires the active QGuiApplication instance"
         )
+    configure_controls_style()
     engine = QQmlApplicationEngine()
     session = _UiSession(
         application,
@@ -234,6 +250,10 @@ def _create_qml_session(
         parent=engine,
     )
     engine.setNetworkAccessManagerFactory(session.image_network_factory)
+    engine.rootContext().setContextProperty(
+        "appearanceController",
+        session.appearance_controller,
+    )
     engine.rootContext().setContextProperty(
         "searchController",
         session.query_bridge,

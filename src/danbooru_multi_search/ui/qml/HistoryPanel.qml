@@ -4,22 +4,23 @@ import QtQuick.Layouts
 
 Item {
     id: panel
+    property QtObject theme: AppTheme {}
     required property var sessionController
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 10
+        spacing: 16
 
         RowLayout {
             Layout.fillWidth: true
             Label {
                 Layout.fillWidth: true
                 text: qsTr("最近查询")
-                color: "#f4f4f5"
+                color: theme.text
                 font.pixelSize: 16
                 font.bold: true
             }
-            Button {
+            ActionButton {
                 id: clearHistoryButton
                 objectName: "clearHistoryButton"
                 text: qsTr("清理历史")
@@ -34,7 +35,7 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            spacing: 8
+            spacing: theme.smallGap
             model: sessionController.historyModel
 
             delegate: ItemDelegate {
@@ -59,8 +60,8 @@ Item {
                 background: Rectangle {
                     radius: 8
                     color: historyRow.highlighted || historyRow.down
-                           ? "#2d4261" : historyRow.hovered ? "#292e38" : "#22262e"
-                    border.color: historyRow.highlighted ? "#60a5fa" : "#3f4653"
+                           ? theme.selected : historyRow.hovered ? theme.raised : theme.card
+                    border.color: historyRow.highlighted ? theme.accent : theme.borderStrong
                 }
 
                 contentItem: ColumnLayout {
@@ -70,20 +71,20 @@ Item {
                         Layout.fillWidth: true
                         Label {
                             text: historyRow.modeText
-                            color: "#93c5fd"
+                            color: theme.accentText
                             font.bold: true
                         }
                         Label {
                             Layout.fillWidth: true
                             text: historyRow.ratingText
-                            color: "#a1a1aa"
+                            color: theme.mutedText
                             horizontalAlignment: Text.AlignRight
                         }
                     }
                     Label {
                         Layout.fillWidth: true
                         text: historyRow.expressionText
-                        color: "#f4f4f5"
+                        color: theme.text
                         wrapMode: Text.Wrap
                         maximumLineCount: 3
                         elide: Text.ElideRight
@@ -94,9 +95,9 @@ Item {
                               + (historyRow.reasonText.length > 0
                                  ? " · " + historyRow.reasonText : "")
                         color: historyRow.stateValue === "failed"
-                               ? "#fda4af"
+                               ? theme.error
                                : historyRow.stateValue.indexOf("partial_") === 0
-                                 ? "#fbbf24" : "#86efac"
+                                 ? theme.warning : theme.success
                         wrapMode: Text.Wrap
                     }
                     Label {
@@ -106,7 +107,7 @@ Item {
                               .arg(historyRow.uniqueCandidates)
                               .arg(historyRow.localMatches)
                               .arg(historyRow.visibleCount)
-                        color: "#a1a1aa"
+                        color: theme.mutedText
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
                     }
@@ -117,7 +118,7 @@ Item {
                 anchors.centerIn: parent
                 visible: historyList.count === 0
                 text: qsTr("暂无查询历史")
-                color: "#71717a"
+                color: theme.subtleText
             }
         }
 
@@ -127,11 +128,11 @@ Item {
             Layout.fillWidth: true
             visible: text.length > 0
             text: sessionController.noticeText
-            color: "#fbbf24"
+            color: theme.warning
             wrapMode: Text.Wrap
         }
 
-        Button {
+        ActionButton {
             id: restoreQueryButton
             objectName: "restoreQueryButton"
             Layout.fillWidth: true

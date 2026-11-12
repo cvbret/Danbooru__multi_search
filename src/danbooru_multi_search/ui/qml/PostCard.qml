@@ -1,0 +1,221 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Rectangle {
+    id: card
+    objectName: "postCard_" + postId
+    required property var cacheController
+    property QtObject theme: AppTheme {}
+    signal activated(int row)
+    required property int index
+    required property int postId
+    required property string previewUrl
+    required property string scoreText
+    required property string favoriteText
+    required property string ratingCode
+    required property string ratingText
+    required property string dimensionsText
+    required property string fileExtension
+    required property string mediaLabel
+    property int thumbnailRebuildToken: 0
+    property bool thumbnailFailed: false
+    property bool thumbnailLoading: false
+
+    width: GridView.view.cellWidth - 12
+    height: GridView.view.cellHeight - 12
+    radius: 9
+    color: theme.card
+    border.color: theme.border
+
+    function rebuildThumbnail() {
+        const token = ++thumbnailRebuildToken
+        thumbnailFailed = false
+        thumbnailLoading = card.previewUrl.length > 0
+        thumbnailLoader.active = false
+        Qt.callLater(function() {
+            if (token !== thumbnailRebuildToken)
+                return
+            thumbnailLoader.active = card.previewUrl.length > 0
+        })
+    }
+
+    function handleThumbnailStatus(
+            token, url, cacheGeneration, status) {
+        if (token !== thumbnailRebuildToken
+                || url !== card.previewUrl)
+            return
+        if (status === Image.Ready) {
+            thumbnailLoading = false
+            const action = cacheController
+                .decodeSuccessActionForGeneration(
+                    url, cacheGeneration)
+            thumbnailFailed = action !== "accepted"
+        } else if (status === Image.Error) {
+            thumbnailLoading = false
+            const finalUrl = cacheController.finalUrlFor(url)
+            const action = cacheController
+                .decodeFailureActionForGeneration(
+                    url, finalUrl, cacheGeneration)
+            if (action === "retry")
+                rebuildThumbnail()
+            else
+                thumbnailFailed = true
+        }
+    }
+
+    function retryThumbnail() {
+        cacheController.prepareManualRetry(
+            card.previewUrl,
+            cacheController.finalUrlFor(card.previewUrl)
+        )
+        rebuildThumbnail()
+    }
+
+    Component.onCompleted: rebuildThumbnail()
+    onPreviewUrlChanged: rebuildThumbnail()
+    Component.onDestruction: {
+        ++thumbnailRebuildToken
+        thumbnailLoader.active = false
+    }
+
+    TapHandler { onTapped: card.activated(card.index) }
+
+    Loader {
+        id: thumbnailLoader
+        objectName: "thumbnailLoader_" + card.postId
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 8
+        height: 220
+        active: false
+        asynchronous: false
+        sourceComponent: thumbnailComponent
+    }
+
+    Component {
+        id: thumbnailComponent
+        Image {
+            objectName: "thumbnail_" + card.postId
+            anchors.fill: parent
+            source: ""
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+            cache: false
+            property int frozenToken: 0
+            property int frozenCacheGeneration: 0
+            property string frozenUrl: ""
+            Component.onCompleted: {
+                frozenToken = card.thumbnailRebuildToken
+                frozenCacheGeneration = cacheController.cacheGeneration
+                frozenUrl = card.previewUrl
+                source = frozenUrl
+            }
+            onStatusChanged: card.handleThumbnailStatus(
+                frozenToken,
+                frozenUrl,
+                frozenCacheGeneration,
+                status
+            )
+        }
+    }
+
+    BusyIndicator {
+        anchors.centerIn: thumbnailLoader
+        running: card.thumbnailLoading
+        visible: running
+    }
+
+    Rectangle {
+        objectName: "thumbnailError_" + card.postId
+        anchors.fill: thumbnailLoader
+        color: theme.raised
+        visible: card.thumbnailFailed
+        Column {
+            anchors.centerIn: parent
+            width: parent.width - 24
+            spacing: theme.smallGap
+            Label {
+                width: parent.width
+                text: qsTr("此缩略图加载失败")
+                color: theme.error
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+            }
+            Button {
+                objectName: "thumbnailRetry_" + card.postId
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: qsTr("重试")
+                onClicked: card.retryThumbnail()
+            }
+        }
+    }
+
+    Row {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.margins: 12
+        spacing: 5
+        Rectangle {
+            width: mediaText.implicitWidth + 12
+            height: 24
+            radius: 5
+            color: theme.mediaBadge
+            visible: card.mediaLabel.length > 0
+            Label {
+                id: mediaText
+                anchors.centerIn: parent
+                text: card.mediaLabel
+                color: "white"
+                font.bold: true
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 12
+        width: ratingLabel.implicitWidth + 12
+        height: 24
+        radius: 5
+        color: theme.ratingColor(card.ratingCode)
+        Label {
+            id: ratingLabel
+            anchors.centerIn: parent
+            text: card.ratingText
+            color: "white"
+            font.bold: true
+        }
+    }
+
+    ColumnLayout {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 10
+        spacing: 4
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("作品 #%1").arg(card.postId)
+            color: theme.text
+            font.bold: true
+            elide: Text.ElideRight
+        }
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("得分 %1 · 收藏 %2")
+                  .arg(card.scoreText).arg(card.favoriteText)
+            color: theme.secondaryText
+            elide: Text.ElideRight
+        }
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("%1 · %2")
+                  .arg(card.fileExtension).arg(card.dimensionsText)
+            color: theme.mutedText
+            elide: Text.ElideRight
+        }
+    }
+}

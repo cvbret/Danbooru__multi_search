@@ -5,6 +5,7 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: root
+    property QtObject theme: AppTheme {}
     visible: true
     x: sessionController.initialWindowX
     y: sessionController.initialWindowY
@@ -13,10 +14,43 @@ ApplicationWindow {
     minimumWidth: sessionController.minimumWindowWidth
     minimumHeight: sessionController.minimumWindowHeight
     title: qsTr("Danbooru Multi Search")
-    color: "#121419"
+    color: theme.background
+    font.pixelSize: theme.fontSize
+
+    palette.window: theme.background
+    palette.windowText: theme.text
+    palette.base: theme.card
+    palette.alternateBase: theme.raised
+    palette.text: theme.text
+    palette.button: theme.surface
+    palette.buttonText: theme.text
+    palette.highlight: theme.accent
+    palette.highlightedText: theme.accentForeground
+    palette.toolTipBase: theme.surface
+    palette.toolTipText: theme.text
+    palette.dark: theme.accent
+    palette.brightText: theme.accentForeground
+    palette.mid: theme.borderStrong
+    palette.light: theme.raised
+    palette.placeholderText: theme.subtleText
+    palette.disabled.button: theme.panel
+    palette.disabled.buttonText: theme.subtleText
+    palette.disabled.text: theme.subtleText
+
+    ApplicationBackground {
+        anchors.fill: parent
+        controller: appearanceController
+        theme: root.theme
+    }
+
+    AppearancePanel {
+        id: appearancePanel
+        controller: appearanceController
+        theme: root.theme
+    }
 
     property bool compactLayout: width < 980
-    property real queryPanelWidth: 360
+    property real queryPanelWidth: 350
     property bool stateTrackingReady: false
     property bool windowStateReportPending: false
     readonly property var browserSession: sessionController
@@ -45,6 +79,9 @@ ApplicationWindow {
 
     function reportGalleryPosition() {
         if (!stateTrackingReady
+                || detailController.isOpen
+                || pageStack.currentIndex !== 0
+                || !galleryPage.visible
                 || searchController.postsModel.count === 0
                 || sessionController.activeHistoryId < 1)
             return
@@ -140,6 +177,7 @@ ApplicationWindow {
     }
 
     function openPostDetails(row) {
+        queryDrawer.close()
         galleryGrid.currentIndex = row
         tagSuggestionController.closeSuggestions()
         detailNavigation.openBrowsePost(
@@ -185,14 +223,6 @@ ApplicationWindow {
 
     function addDetailTagToDraft(tagName) {
         searchController.addVisualTag(null, tagName)
-    }
-
-    function ratingColor(code) {
-        if (code === "g") return "#3f8f5a"
-        if (code === "s") return "#3976b8"
-        if (code === "q") return "#bb7628"
-        if (code === "e") return "#b64056"
-        return "#626872"
     }
 
     Component.onCompleted: {
@@ -249,16 +279,16 @@ ApplicationWindow {
         }
 
         background: Rectangle {
-            color: "#20242c"
-            border.color: "#4b5362"
-            radius: 10
+            color: theme.surface
+            border.color: theme.borderStrong
+            radius: theme.radius
         }
 
         contentItem: ColumnLayout {
-            spacing: 10
+            spacing: theme.gap
             Label {
                 text: qsTr("图片缓存")
-                color: "#f4f4f5"
+                color: theme.text
                 font.pixelSize: 20
                 font.bold: true
             }
@@ -266,11 +296,11 @@ ApplicationWindow {
                 objectName: "imageCacheUsageLabel"
                 text: qsTr("当前占用：%1 MiB")
                       .arg((imageCacheController.currentBytes / 1048576).toFixed(2))
-                color: "#d4d4d8"
+                color: theme.secondaryText
             }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: qsTr("上限（MiB）"); color: "#d4d4d8" }
+                Label { text: qsTr("上限（MiB）"); color: theme.secondaryText }
                 SpinBox {
                     id: cacheLimitInput
                     objectName: "imageCacheLimitInput"
@@ -280,7 +310,7 @@ ApplicationWindow {
                     editable: true
                     Layout.fillWidth: true
                 }
-                Button {
+                ActionButton {
                     objectName: "applyImageCacheLimitButton"
                     text: qsTr("保存上限")
                     onClicked: imageCacheController.setMaximumBytes(
@@ -292,18 +322,18 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 visible: text.length > 0
                 text: imageCacheController.statusText
-                color: "#fbbf24"
+                color: theme.warning
                 wrapMode: Text.Wrap
             }
             RowLayout {
                 Layout.fillWidth: true
-                Button {
+                ActionButton {
                     objectName: "clearImageCacheButton"
                     text: qsTr("清理图片缓存")
                     onClicked: imageCacheController.clearCache()
                 }
                 Item { Layout.fillWidth: true }
-                Button { text: qsTr("关闭"); onClicked: imageCachePopup.close() }
+                ActionButton { text: qsTr("关闭"); onClicked: imageCachePopup.close() }
             }
         }
     }
@@ -313,35 +343,30 @@ ApplicationWindow {
 
         Rectangle {
             id: workspace
-            color: "#181b22"
-            border.color: "#303540"
-            radius: 10
+            color: theme.panel
+            border.color: theme.border
+            radius: theme.radius
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 10
+                anchors.margins: 20
+                spacing: 16
 
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
-                        text: qsTr("查询工作区")
-                        color: "#f4f4f5"
+                        text: qsTr("搜索")
+                        color: theme.text
                         font.pixelSize: 19
                         font.bold: true
                     }
-                    Button {
+                    ActionButton {
                         objectName: "importTagsButton"
                         text: tagSuggestionController.importBusy
                               ? qsTr("导入中") : qsTr("标签库")
                         enabled: !tagSuggestionController.importBusy
                         onClicked: tagCsvDialog.open()
-                    }
-                    Button {
-                        objectName: "imageCacheButton"
-                        text: qsTr("缓存")
-                        onClicked: imageCachePopup.open()
                     }
                 }
 
@@ -349,7 +374,7 @@ ApplicationWindow {
                     objectName: "tagImportStatus"
                     Layout.fillWidth: true
                     text: tagSuggestionController.importStatusText
-                    color: tagSuggestionController.importBusy ? "#93c5fd" : "#71717a"
+                    color: tagSuggestionController.importBusy ? theme.accentText : theme.subtleText
                     elide: Text.ElideRight
                     font.pixelSize: 11
                 }
@@ -358,6 +383,10 @@ ApplicationWindow {
                     id: workspaceTabs
                     objectName: "workspaceTabs"
                     Layout.fillWidth: true
+                    palette.dark: theme.surface
+                    palette.brightText: theme.mutedText
+                    palette.window: theme.selected
+                    palette.windowText: theme.text
                     TabButton { text: qsTr("查询") }
                     TabButton { text: qsTr("筛选") }
                     TabButton {
@@ -372,6 +401,7 @@ ApplicationWindow {
                     currentIndex: workspaceTabs.currentIndex
 
                     QueryEditorPanel {
+                        theme: root.theme
                         controller: searchController
                         tagController: tagSuggestionController
                         onCloseRequested: {
@@ -379,8 +409,14 @@ ApplicationWindow {
                                 queryDrawer.close()
                         }
                     }
-                    QueryFilterPanel { controller: searchController }
-                    HistoryPanel { sessionController: root.browserSession }
+                    QueryFilterPanel {
+                        theme: root.theme
+                        controller: searchController
+                    }
+                    HistoryPanel {
+                        theme: root.theme
+                        sessionController: root.browserSession
+                    }
                 }
             }
         }
@@ -407,7 +443,7 @@ ApplicationWindow {
 
     Item {
         id: wideQueryPanel
-        visible: !root.compactLayout
+        visible: !root.compactLayout && !detailController.isOpen
         width: visible ? root.queryPanelWidth : 0
         anchors.left: parent.left
         anchors.top: parent.top
@@ -426,7 +462,7 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             width: 5
             color: resizeHandle.containsMouse || resizeHandle.pressed
-                   ? "#60a5fa" : "transparent"
+                   ? theme.accent : "transparent"
             MouseArea {
                 id: resizeHandle
                 anchors.fill: parent
@@ -456,7 +492,7 @@ ApplicationWindow {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.margins: 10
+        anchors.margins: 20
         currentIndex: detailController.isOpen ? 1 : 0
 
         Item {
@@ -464,34 +500,58 @@ ApplicationWindow {
 
             ColumnLayout {
                 anchors.fill: parent
-                spacing: 10
+                spacing: theme.gap
 
                 RowLayout {
+                    id: browseHeader
+                    objectName: "browseHeader"
                     Layout.fillWidth: true
-                    Button {
+                    spacing: 12
+                    ActionButton {
                         objectName: "openQueryDrawerButton"
                         visible: root.compactLayout
                         text: qsTr("查询条件")
                         onClicked: queryDrawer.open()
                     }
                     ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 1
+                        Layout.maximumWidth: Math.max(
+                            120, browseHeader.width - browseTools.implicitWidth
+                                 - (root.compactLayout ? 120 : 0) - 32)
+                        Layout.minimumWidth: 0
+                        spacing: 4
                         Label {
-                            text: qsTr("Danbooru 作品浏览器")
-                            color: "#f4f4f5"
-                            font.pixelSize: 22
+                            text: qsTr("Danbooru")
+                            color: theme.text
+                            font.pixelSize: 25
                             font.bold: true
                         }
                         Label {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: searchController.hasDisplayedGallery
                                   ? (searchController.galleryExpression.length > 0
                                      ? searchController.galleryExpression
                                      : searchController.galleryMode === "rank"
                                        ? qsTr("近期热门") : qsTr("最新作品"))
-                                  : qsTr("尚未执行查询")
-                            color: "#a1a1aa"
+                                  : qsTr("作品浏览 · 输入标签，发现喜欢的作品")
+                            color: theme.mutedText
                             elide: Text.ElideRight
+                        }
+                    }
+                    Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                    RowLayout {
+                        id: browseTools
+                        objectName: "browseTools"
+                        spacing: 8
+                        ActionButton {
+                            objectName: "imageCacheButton"
+                            text: qsTr("缓存")
+                            onClicked: imageCachePopup.open()
+                        }
+                        ActionButton {
+                            objectName: "appearanceButton"
+                            text: qsTr("外观")
+                            onClicked: appearancePanel.open()
                         }
                     }
                 }
@@ -499,6 +559,7 @@ ApplicationWindow {
                 QueryStatusBar {
                     id: queryStatus
                     objectName: "queryStatusBar"
+                    theme: root.theme
                     Layout.fillWidth: true
                     controller: searchController
                     sessionController: root.browserSession
@@ -508,280 +569,86 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.minimumHeight: 300
-                    radius: 10
-                    color: "#0f1115"
-                    border.color: "#2d3139"
+                    radius: theme.radius
+                    color: theme.canvas
+                    border.color: theme.border
                     clip: true
 
-                    GridView {
+                    GalleryGrid {
                         id: galleryGrid
                         objectName: "galleryGrid"
                         anchors.fill: parent
                         anchors.margins: 10
-                        clip: true
                         model: searchController.postsModel
-                        cellWidth: Math.max(
-                            225,
-                            width / Math.max(1, Math.floor(width / 245))
-                        )
-                        cellHeight: 340
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: ScrollBar {}
+                        cacheController: imageCacheController
+                        theme: root.theme
+                        onPostActivated: function(row) { root.openPostDetails(row) }
                         onContentYChanged: root.reportGalleryPosition()
                         onCurrentIndexChanged: root.reportGalleryPosition()
                         onWidthChanged: Qt.callLater(root.reportGalleryPosition)
                         onHeightChanged: Qt.callLater(root.reportGalleryPosition)
                         onContentHeightChanged: Qt.callLater(root.reportGalleryPosition)
 
-                        delegate: Rectangle {
-                            id: card
-                            objectName: "postCard_" + postId
-                            required property int index
-                            required property int postId
-                            required property string previewUrl
-                            required property string scoreText
-                            required property string favoriteText
-                            required property string ratingCode
-                            required property string ratingText
-                            required property string dimensionsText
-                            required property string fileExtension
-                            required property string mediaLabel
-                            property int thumbnailRebuildToken: 0
-                            property bool thumbnailFailed: false
-                            property bool thumbnailLoading: false
-
-                            width: GridView.view.cellWidth - 12
-                            height: GridView.view.cellHeight - 12
-                            radius: 9
-                            color: "#191c23"
-                            border.color: "#343944"
-
-                            function rebuildThumbnail() {
-                                const token = ++thumbnailRebuildToken
-                                thumbnailFailed = false
-                                thumbnailLoading = card.previewUrl.length > 0
-                                thumbnailLoader.active = false
-                                Qt.callLater(function() {
-                                    if (token !== thumbnailRebuildToken)
-                                        return
-                                    thumbnailLoader.active = card.previewUrl.length > 0
-                                })
-                            }
-
-                            function handleThumbnailStatus(
-                                    token, url, cacheGeneration, status) {
-                                if (token !== thumbnailRebuildToken
-                                        || url !== card.previewUrl)
-                                    return
-                                if (status === Image.Ready) {
-                                    thumbnailLoading = false
-                                    const action = imageCacheController
-                                        .decodeSuccessActionForGeneration(
-                                            url, cacheGeneration)
-                                    thumbnailFailed = action !== "accepted"
-                                } else if (status === Image.Error) {
-                                    thumbnailLoading = false
-                                    const finalUrl = imageCacheController.finalUrlFor(url)
-                                    const action = imageCacheController
-                                        .decodeFailureActionForGeneration(
-                                            url, finalUrl, cacheGeneration)
-                                    if (action === "retry")
-                                        rebuildThumbnail()
-                                    else
-                                        thumbnailFailed = true
-                                }
-                            }
-
-                            function retryThumbnail() {
-                                imageCacheController.prepareManualRetry(
-                                    card.previewUrl,
-                                    imageCacheController.finalUrlFor(card.previewUrl)
-                                )
-                                rebuildThumbnail()
-                            }
-
-                            Component.onCompleted: rebuildThumbnail()
-                            onPreviewUrlChanged: rebuildThumbnail()
-                            Component.onDestruction: {
-                                ++thumbnailRebuildToken
-                                thumbnailLoader.active = false
-                            }
-
-                            TapHandler { onTapped: root.openPostDetails(card.index) }
-
-                            Loader {
-                                id: thumbnailLoader
-                                objectName: "thumbnailLoader_" + card.postId
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                anchors.margins: 8
-                                height: 220
-                                active: false
-                                asynchronous: false
-                                sourceComponent: thumbnailComponent
-                            }
-
-                            Component {
-                                id: thumbnailComponent
-                                Image {
-                                    objectName: "thumbnail_" + card.postId
-                                    anchors.fill: parent
-                                    source: ""
-                                    fillMode: Image.PreserveAspectFit
-                                    asynchronous: true
-                                    cache: false
-                                    property int frozenToken: 0
-                                    property int frozenCacheGeneration: 0
-                                    property string frozenUrl: ""
-                                    Component.onCompleted: {
-                                        frozenToken = card.thumbnailRebuildToken
-                                        frozenCacheGeneration = imageCacheController.cacheGeneration
-                                        frozenUrl = card.previewUrl
-                                        source = frozenUrl
-                                    }
-                                    onStatusChanged: card.handleThumbnailStatus(
-                                        frozenToken,
-                                        frozenUrl,
-                                        frozenCacheGeneration,
-                                        status
-                                    )
-                                }
-                            }
-
-                            BusyIndicator {
-                                anchors.centerIn: thumbnailLoader
-                                running: card.thumbnailLoading
-                                visible: running
-                            }
-
-                            Rectangle {
-                                objectName: "thumbnailError_" + card.postId
-                                anchors.fill: thumbnailLoader
-                                color: "#242832"
-                                visible: card.thumbnailFailed
-                                Column {
-                                    anchors.centerIn: parent
-                                    width: parent.width - 24
-                                    spacing: 8
-                                    Label {
-                                        width: parent.width
-                                        text: qsTr("此缩略图加载失败")
-                                        color: "#fda4af"
-                                        horizontalAlignment: Text.AlignHCenter
-                                        wrapMode: Text.Wrap
-                                    }
-                                    Button {
-                                        objectName: "thumbnailRetry_" + card.postId
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        text: qsTr("重试")
-                                        onClicked: card.retryThumbnail()
-                                    }
-                                }
-                            }
-
-                            Row {
-                                anchors.left: parent.left
-                                anchors.top: parent.top
-                                anchors.margins: 12
-                                spacing: 5
-                                Rectangle {
-                                    width: mediaText.implicitWidth + 12
-                                    height: 24
-                                    radius: 5
-                                    color: "#a23f52"
-                                    visible: card.mediaLabel.length > 0
-                                    Label {
-                                        id: mediaText
-                                        anchors.centerIn: parent
-                                        text: card.mediaLabel
-                                        color: "white"
-                                        font.bold: true
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                anchors.margins: 12
-                                width: ratingLabel.implicitWidth + 12
-                                height: 24
-                                radius: 5
-                                color: root.ratingColor(card.ratingCode)
-                                Label {
-                                    id: ratingLabel
-                                    anchors.centerIn: parent
-                                    text: card.ratingText
-                                    color: "white"
-                                    font.bold: true
-                                }
-                            }
-
-                            ColumnLayout {
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                anchors.margins: 10
-                                spacing: 4
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: qsTr("作品 #%1").arg(card.postId)
-                                    color: "#f4f4f5"
-                                    font.bold: true
-                                    elide: Text.ElideRight
-                                }
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: qsTr("得分 %1 · 收藏 %2")
-                                          .arg(card.scoreText).arg(card.favoriteText)
-                                    color: "#d4d4d8"
-                                    elide: Text.ElideRight
-                                }
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: qsTr("%1 · %2")
-                                          .arg(card.fileExtension).arg(card.dimensionsText)
-                                    color: "#a1a1aa"
-                                    elide: Text.ElideRight
-                                }
-                            }
-                        }
                     }
 
-                    Label {
-                        objectName: "galleryEmptyState"
+                    ColumnLayout {
                         anchors.centerIn: parent
+                        width: Math.min(540, parent.width - 48)
                         visible: searchController.postsModel.count === 0
-                        width: Math.min(620, parent.width - 48)
-                        text: queryStatus.emptyStateText
-                        color: searchController.queryState === "failed"
-                               ? "#fda4af" : "#a1a1aa"
-                        font.pixelSize: 16
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.Wrap
+                        spacing: 14
+                        Label {
+                            objectName: "galleryEmptyState"
+                            Layout.fillWidth: true
+                            text: searchController.queryState === "idle"
+                                  ? qsTr("从一个标签开始探索")
+                                  : queryStatus.emptyStateText
+                            color: searchController.queryState === "failed"
+                                   ? theme.error : theme.text
+                            font.pixelSize: 23
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: searchController.queryState === "idle"
+                            text: root.compactLayout
+                                  ? qsTr("打开“查询条件”输入英文标签，或查看近期热门与最新作品。")
+                                  : qsTr("在左侧输入英文标签并点击“搜索作品”，也可以查看近期热门与最新作品。")
+                            color: theme.mutedText
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.4
+                        }
+                        ActionButton {
+                            Layout.alignment: Qt.AlignHCenter
+                            visible: root.compactLayout
+                                     && searchController.queryState === "idle"
+                            text: qsTr("打开查询条件")
+                            onClicked: queryDrawer.open()
+                        }
                     }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 8
+                    spacing: theme.smallGap
                     Label {
                         objectName: "rangeDescription"
                         Layout.fillWidth: true
                         text: searchController.rangeDescription.length > 0
                               ? searchController.rangeDescription
-                              : qsTr("范围说明会在取得结果后显示")
-                        color: "#a1a1aa"
+                              : qsTr("搜索仅在你执行查询时开始")
+                        color: theme.mutedText
                         wrapMode: Text.Wrap
                     }
-                    Button {
+                    ActionButton {
                         objectName: "refreshButton"
                         text: qsTr("刷新")
                         enabled: searchController.canRefresh
                         onClicked: searchController.refresh()
                     }
-                    Button {
+                    ActionButton {
                         objectName: "retryButton"
                         text: qsTr("重试失败请求")
                         visible: searchController.canRetry
@@ -793,6 +660,7 @@ ApplicationWindow {
         }
 
         DetailPage {
+            theme: root.theme
             controller: detailController
             complexQueryActionsEnabled: true
             onBackRequested: root.returnToGallery()
@@ -800,6 +668,14 @@ ApplicationWindow {
             onAddTagToQueryRequested: function(tagName) {
                 root.addDetailTagToDraft(tagName)
             }
+        }
+    }
+
+    Connections {
+        target: detailController
+        function onOpenChanged() {
+            if (detailController.isOpen)
+                queryDrawer.close()
         }
     }
 

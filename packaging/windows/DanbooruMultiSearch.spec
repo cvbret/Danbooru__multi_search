@@ -10,6 +10,12 @@ qml_root = package_root / "ui" / "qml"
 version_file = Path(SPECPATH).resolve() / "version_info.txt"
 
 project_qml = [
+    (str(qml_root / "ActionButton.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "AppTheme.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "AppearancePanel.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "ApplicationBackground.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "PostCard.qml"), "danbooru_multi_search/ui/qml"),
+    (str(qml_root / "GalleryGrid.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "Main.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "M2Main.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "DetailPage.qml"), "danbooru_multi_search/ui/qml"),

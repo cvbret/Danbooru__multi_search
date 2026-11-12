@@ -28,7 +28,11 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
-from danbooru_multi_search.core.settings import AppSettings
+from danbooru_multi_search.core.settings import (
+    AppSettings,
+    SettingsController,
+    SettingsStore,
+)
 from danbooru_multi_search.danbooru import (
     DanbooruDetailController,
     DanbooruM2QueryController,
@@ -51,6 +55,8 @@ from danbooru_multi_search.danbooru.autocomplete import (
 from danbooru_multi_search.storage import HistoryRepository
 from danbooru_multi_search.storage.database import Database
 from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
+from danbooru_multi_search.ui.appearance import AppearanceController
+from danbooru_multi_search.ui.launcher import configure_controls_style
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
@@ -281,8 +287,13 @@ def _create_window(tmp_path):
         local_timezone=timezone.utc,
     )
     detail_navigation = DetailNavigationController(details, core.posts_model)
+    settings_controller = SettingsController(
+        SettingsStore(tmp_path / "settings.json"), AppSettings()
+    )
+    appearance = AppearanceController(settings_controller)
     images = ImageCacheController(tmp_path / "image-cache")
     factory = ImageNetworkAccessManagerFactory(images)
+    configure_controls_style()
     engine = QQmlApplicationEngine()
     qml_warnings = []
     engine.warnings.connect(qml_warnings.extend)
@@ -292,6 +303,7 @@ def _create_window(tmp_path):
     context.setContextProperty("tagSuggestionController", tags)
     context.setContextProperty("detailController", details)
     context.setContextProperty("detailNavigation", detail_navigation)
+    context.setContextProperty("appearanceController", appearance)
     context.setContextProperty("sessionController", session)
     context.setContextProperty("imageCacheController", images)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
@@ -307,6 +319,7 @@ def _create_window(tmp_path):
         "tags": tags,
         "details": details,
         "detail_navigation": detail_navigation,
+        "appearance": appearance,
         "images": images,
         "factory": factory,
         "qml_warnings": qml_warnings,
@@ -318,6 +331,7 @@ def _close_window(values) -> None:
     values["core"].shutdown()
     values["session"].begin_shutdown()
     values["detail_navigation"].shutdown()
+    values["appearance"].shutdown()
     values["tags"].shutdown()
     values["images"].shutdown()
     values["root"].close()
@@ -412,6 +426,10 @@ def test_status_count_cards_use_two_rows_when_content_is_narrow(
         )
 
         status_bar = _find(root, "queryStatusBar")
+        assert status_bar.property("visible") is False
+        assert values["bridge"].executeStandard()
+        APPLICATION.processEvents()
+        assert status_bar.property("visible") is True
         card_names = (
             "remoteRowsCountCard",
             "uniqueCandidatesCountCard",
@@ -588,6 +606,7 @@ def test_tree_revision_clears_stale_selection_before_second_delete(tmp_path):
     values = _create_window(tmp_path)
     try:
         root = values["root"]
+        _find(root, "advancedConditionsToggle").setProperty("checked", True)
         bridge = values["bridge"]
         assert bridge.applyAdvancedText("cat AND dog AND bird") is True
         editor = _find(root, "queryEditorPanel")
@@ -610,6 +629,7 @@ def test_clicked_suggestion_row_supplies_its_own_tag_and_artist_category(tmp_pat
     values = _create_window(tmp_path)
     try:
         root = values["root"]
+        _find(root, "advancedConditionsToggle").setProperty("checked", True)
         visual_input = _find(root, "visualTagInput")
         visual_input.forceActiveFocus()
         root.requestActivate()
@@ -1017,6 +1037,75 @@ def test_detail_tag_menu_has_new_query_and_draft_only_actions(tmp_path):
         APPLICATION.processEvents()
         assert values["details"].isOpen is False
         assert len(values["executor"].start_calls) == 1
+    finally:
+        _close_window(values)
+
+
+def test_detail_drawer_closes_after_tag_starts_new_query(tmp_path):
+    values = _create_window(tmp_path)
+    try:
+        root = values["root"]
+        root.setWidth(820)
+        root.setHeight(600)
+        values["core"].posts_model.set_posts((_post(),))
+        assert QMetaObject.invokeMethod(
+            root, "openPostDetails", Qt.ConnectionType.DirectConnection,
+            Q_ARG("QVariant", 0),
+        )
+        APPLICATION.processEvents()
+        drawer = _find(root, "detailInformationDrawer")
+        assert QMetaObject.invokeMethod(drawer, "open", Qt.ConnectionType.DirectConnection)
+        assert _wait_until(lambda: drawer.property("opened"))
+        assert values["details"].activateTag("blue_sky")
+        assert _wait_until(lambda: not drawer.property("opened"))
+        assert values["details"].isOpen is False
+        assert len(values["executor"].start_calls) == 1
+    finally:
+        _close_window(values)
+
+
+def test_hidden_detail_layout_keeps_active_history_gallery_position(tmp_path):
+    values = _create_window(tmp_path)
+    try:
+        root = values["root"]
+        bridge = values["bridge"]
+        executor = values["executor"]
+        session = values["session"]
+        assert bridge.executeStandard()
+        executor.accept_first_page()
+        executor.snapshot = QueryExecutionSnapshot(
+            executor.current_execution_id,
+            QueryExecutionState.COMPLETE,
+            QueryExecutionCounts(30, 30, 30),
+            tuple(_post(index + 1) for index in range(30)),
+            (),
+        )
+        executor.snapshotChanged.emit(executor.snapshot)
+        assert _wait_until(lambda: session.activeHistoryId > 0)
+        APPLICATION.processEvents()
+        QTest.qWait(30)
+        grid = _find(root, "galleryGrid")
+        grid.setProperty("contentY", 340.0)
+        APPLICATION.processEvents()
+        assert QMetaObject.invokeMethod(root, "reportGalleryPosition", Qt.ConnectionType.DirectConnection)
+        before = session._gallery_position
+        assert before is not None and before.query_id == session.activeHistoryId
+        assert before.scroll_position == 340.0
+        assert QMetaObject.invokeMethod(
+            root, "openPostDetails", Qt.ConnectionType.DirectConnection,
+            Q_ARG("QVariant", 4),
+        )
+        APPLICATION.processEvents()
+        assert session._gallery_position == before
+        grid.setProperty("contentY", 900.0)
+        assert QMetaObject.invokeMethod(root, "reportGalleryPosition", Qt.ConnectionType.DirectConnection)
+        APPLICATION.processEvents()
+        assert session._gallery_position == before
+        session.save_final_state()
+        saved = HistoryRepository(Database(tmp_path / "qml.sqlite3")).get_query(session.activeHistoryId)
+        assert saved.scroll_position == before.scroll_position
+        assert saved.anchor_post_id == before.anchor_post_id
+        assert saved.anchor_index == before.anchor_index
     finally:
         _close_window(values)
 

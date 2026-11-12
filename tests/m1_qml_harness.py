@@ -30,6 +30,7 @@ from danbooru_multi_search.tasks import (
     TaskQueueConfig,
 )
 from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
+from danbooru_multi_search.ui.launcher import configure_controls_style
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
@@ -189,6 +190,7 @@ def create_m1_qml_test_engine(
         raise RuntimeError(
             "create_m1_qml_test_engine requires the active QGuiApplication"
         )
+    configure_controls_style()
     engine = QQmlApplicationEngine()
     session = _M1QmlTestSession(
         application,

@@ -76,6 +76,12 @@ GUI_RESULT_FIELDS = frozenset(
 )
 
 QML_FILES = (
+    "ActionButton.qml",
+    "AppTheme.qml",
+    "AppearancePanel.qml",
+    "ApplicationBackground.qml",
+    "PostCard.qml",
+    "GalleryGrid.qml",
     "Main.qml",
     "M2Main.qml",
     "DetailPage.qml",

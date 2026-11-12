@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Rectangle {
     id: statusBar
+    property QtObject theme: AppTheme {}
     required property var controller
     required property var sessionController
     property bool active: controller.queryState === "waiting"
@@ -11,16 +12,16 @@ Rectangle {
                           || controller.queryState === "retry_wait"
     readonly property color stateColor: {
         if (controller.queryState === "failed")
-            return "#f87171"
+            return theme.error
         if (controller.queryState === "partial_failed"
                 || controller.queryState === "partial_limited"
                 || controller.queryState === "partial_cancelled")
-            return "#fbbf24"
+            return theme.warning
         if (active)
-            return "#60a5fa"
+            return theme.accent
         if (controller.queryState === "complete")
-            return "#4ade80"
-        return "#a1a1aa"
+            return theme.success
+        return theme.mutedText
     }
     readonly property string emptyStateText: {
         if (controller.oldGalleryVisible
@@ -50,20 +51,21 @@ Rectangle {
         return qsTr("尚未取得候选")
     }
 
-    radius: 10
-    color: "#1b1f27"
-    border.color: "#343944"
+    visible: controller.queryState !== "idle"
+    radius: theme.radius
+    color: theme.panel
+    border.color: theme.border
     implicitHeight: content.implicitHeight + 20
 
     ColumnLayout {
         id: content
         anchors.fill: parent
         anchors.margins: 10
-        spacing: 8
+        spacing: theme.smallGap
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: theme.smallGap
 
             Rectangle {
                 width: 9
@@ -76,7 +78,7 @@ Rectangle {
                 objectName: "queryStatusText"
                 Layout.fillWidth: true
                 text: controller.statusText
-                color: "#f4f4f5"
+                color: theme.text
                 font.bold: true
                 wrapMode: Text.Wrap
             }
@@ -86,11 +88,11 @@ Rectangle {
                 text: qsTr("分支 %1 · 第 %2 次请求")
                       .arg(controller.failureBranch + 1)
                       .arg(controller.failurePage)
-                color: "#fda4af"
-                font.pixelSize: 11
+                color: theme.error
+                font.pixelSize: 12
             }
 
-            Button {
+            ActionButton {
                 id: cancelButton
                 objectName: "cancelButton"
                 text: qsTr("取消")
@@ -106,7 +108,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 4
             visible: statusBar.active
-            color: "#263244"
+            color: theme.progressTrack
             radius: 2
             clip: true
 
@@ -115,7 +117,7 @@ Rectangle {
                 width: Math.max(28, parent.width * 0.32)
                 height: parent.height
                 radius: 2
-                color: "#60a5fa"
+                color: theme.accent
                 x: 0
                 SequentialAnimation on x {
                     running: statusBar.active
@@ -166,10 +168,10 @@ Rectangle {
                          - countsGrid.columnSpacing * (countsGrid.columns - 1))
                         / countsGrid.columns
                     )
-                    Layout.preferredHeight: 52
+                    Layout.preferredHeight: 44
                     radius: 7
-                    color: "#252a34"
-                    border.color: "#3f4653"
+                    color: theme.raised
+                    border.color: theme.borderStrong
 
                     RowLayout {
                         anchors.fill: parent
@@ -177,14 +179,14 @@ Rectangle {
                         Label {
                             Layout.fillWidth: true
                             text: modelData.label
-                            color: "#a1a1aa"
+                            color: theme.mutedText
                             font.pixelSize: 11
                         }
                         Label {
                             objectName: modelData.objectName
                             text: modelData.value
-                            color: "#f4f4f5"
-                            font.pixelSize: 20
+                            color: theme.text
+                            font.pixelSize: 18
                             font.bold: true
                         }
                     }
@@ -197,7 +199,7 @@ Rectangle {
             Layout.fillWidth: true
             visible: controller.oldGalleryVisible
             text: qsTr("当前查询尚未替换画廊，下面仍显示上一查询结果。")
-            color: "#fbbf24"
+            color: theme.warning
             wrapMode: Text.Wrap
         }
 
@@ -209,7 +211,7 @@ Rectangle {
                   + (controller.failureHttpStatus > 0
                      ? qsTr("（HTTP %1）").arg(controller.failureHttpStatus)
                      : "")
-            color: "#fda4af"
+            color: theme.error
             wrapMode: Text.Wrap
         }
     }

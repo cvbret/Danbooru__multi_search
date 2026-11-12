@@ -73,6 +73,10 @@ def test_version_one_settings_fill_new_defaults_and_keep_legal_old_page_size(
     assert settings.page_size == 20
     assert settings.tag_csv_path == ""
     assert settings.image_cache_limit_bytes == DEFAULT_IMAGE_CACHE_LIMIT_BYTES
+    assert settings.background_image_path == ""
+    assert settings.background_mask == 0.65
+    assert settings.background_blur == 0.2
+    assert settings.background_brightness == 1.0
     assert AppSettings().page_size == 40
 
 

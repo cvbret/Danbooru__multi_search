@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Item {
     id: panel
+    property QtObject theme: AppTheme {}
     required property var controller
     property var formValues: ({})
     property int formRevision: 0
@@ -83,11 +84,11 @@ Item {
 
         ColumnLayout {
             width: parent.width
-            spacing: 14
+            spacing: 20
 
             Label {
-                text: qsTr("内容与分级")
-                color: "#f4f4f5"
+                text: qsTr("内容与人气")
+                color: theme.text
                 font.pixelSize: 16
                 font.bold: true
             }
@@ -96,6 +97,7 @@ Item {
                 id: ratingFilter
                 objectName: "ratingFilter"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 textRole: "label"
                 valueRole: "value"
                 model: [
@@ -111,59 +113,80 @@ Item {
 
             GridLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 columns: 2
                 columnSpacing: 8
                 rowSpacing: 8
 
-                Label { text: qsTr("最低得分"); color: "#a1a1aa" }
+                Label { text: qsTr("最低得分"); color: theme.mutedText }
                 TextField {
                     objectName: "minimumScoreInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: qsTr("整数，可留空")
                     text: panel.textValue("minimumScore")
                     onTextEdited: panel.setValue("minimumScore", text)
                 }
 
-                Label { text: qsTr("最低收藏") ; color: "#a1a1aa" }
+                Label { text: qsTr("最低收藏") ; color: theme.mutedText }
                 TextField {
                     objectName: "minimumFavCountInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: qsTr("非负整数")
                     text: panel.textValue("minimumFavCount")
                     onTextEdited: panel.setValue("minimumFavCount", text)
                 }
 
-                Label { text: qsTr("发布时间起") ; color: "#a1a1aa" }
+            }
+
+            Label {
+                text: qsTr("时间范围")
+                color: theme.text
+                font.pixelSize: 16
+                font.bold: true
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: 8
+                rowSpacing: 10
+
+                Label { text: qsTr("发布时间起") ; color: theme.mutedText }
                 TextField {
                     objectName: "publishedFromInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: "YYYY-MM-DD HH:mm"
                     text: panel.textValue("publishedFrom")
                     onTextEdited: panel.setValue("publishedFrom", text)
                 }
 
-                Label { text: qsTr("发布时间止") ; color: "#a1a1aa" }
+                Label { text: qsTr("发布时间止") ; color: theme.mutedText }
                 TextField {
                     objectName: "publishedUntilInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: "YYYY-MM-DD HH:mm"
                     text: panel.textValue("publishedUntil")
                     onTextEdited: panel.setValue("publishedUntil", text)
                 }
 
-                Label { text: qsTr("最小年龄（天）") ; color: "#a1a1aa" }
+                Label { text: qsTr("最小年龄（天）") ; color: theme.mutedText }
                 TextField {
                     objectName: "minimumAgeDaysInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: qsTr("非负整数")
                     text: panel.textValue("minimumAgeDays")
                     onTextEdited: panel.setValue("minimumAgeDays", text)
                 }
 
-                Label { text: qsTr("最大年龄（天）") ; color: "#a1a1aa" }
+                Label { text: qsTr("最大年龄（天）") ; color: theme.mutedText }
                 TextField {
                     objectName: "maximumAgeDaysInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: qsTr("非负整数")
                     text: panel.textValue("maximumAgeDays")
                     onTextEdited: panel.setValue("maximumAgeDays", text)
@@ -172,13 +195,14 @@ Item {
 
             Label {
                 text: qsTr("文件类别")
-                color: "#f4f4f5"
+                color: theme.text
                 font.bold: true
             }
 
             Flow {
                 Layout.fillWidth: true
-                spacing: 8
+                Layout.minimumWidth: 0
+                spacing: theme.smallGap
                 CheckBox {
                     objectName: "staticFileFilter"
                     text: qsTr("静态图片")
@@ -207,57 +231,63 @@ Item {
 
             Label {
                 text: qsTr("尺寸与长宽比")
-                color: "#f4f4f5"
+                color: theme.text
                 font.pixelSize: 16
                 font.bold: true
             }
 
             GridLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 columns: 2
                 columnSpacing: 8
                 rowSpacing: 8
 
-                Label { text: qsTr("最低宽度") ; color: "#a1a1aa" }
+                Label { text: qsTr("最低宽度") ; color: theme.mutedText }
                 TextField {
                     objectName: "minimumWidthInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: qsTr("正整数")
                     text: panel.textValue("minimumWidth")
                     onTextEdited: panel.setValue("minimumWidth", text)
                 }
 
-                Label { text: qsTr("最低高度") ; color: "#a1a1aa" }
+                Label { text: qsTr("最低高度") ; color: theme.mutedText }
                 TextField {
                     objectName: "minimumHeightInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: qsTr("正整数")
                     text: panel.textValue("minimumHeight")
                     onTextEdited: panel.setValue("minimumHeight", text)
                 }
 
-                Label { text: qsTr("最小长宽比") ; color: "#a1a1aa" }
+                Label { text: qsTr("最小长宽比") ; color: theme.mutedText }
                 TextField {
                     objectName: "minimumAspectRatioInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: qsTr("例如 4:3")
                     text: panel.textValue("minimumAspectRatio")
                     onTextEdited: panel.setValue("minimumAspectRatio", text)
                 }
 
-                Label { text: qsTr("最大长宽比") ; color: "#a1a1aa" }
+                Label { text: qsTr("最大长宽比") ; color: theme.mutedText }
                 TextField {
                     objectName: "maximumAspectRatioInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     placeholderText: qsTr("例如 16:9")
                     text: panel.textValue("maximumAspectRatio")
                     onTextEdited: panel.setValue("maximumAspectRatio", text)
                 }
 
-                Label { text: qsTr("精确比例") ; color: "#a1a1aa" }
+                Label { text: qsTr("精确比例") ; color: theme.mutedText }
                 ComboBox {
                     objectName: "aspectRatioPreset"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     model: [qsTr("自定义"), "1:1", "4:3", "3:2", "16:9"]
                     onActivated: {
                         if (currentIndex === 0)
@@ -274,13 +304,14 @@ Item {
 
             Label {
                 text: qsTr("图片方向")
-                color: "#f4f4f5"
+                color: theme.text
                 font.bold: true
             }
 
             Flow {
                 Layout.fillWidth: true
-                spacing: 8
+                Layout.minimumWidth: 0
+                spacing: theme.smallGap
                 CheckBox {
                     objectName: "landscapeFilter"
                     text: qsTr("横向")
@@ -303,13 +334,14 @@ Item {
 
             Label {
                 text: qsTr("屏蔽标签")
-                color: "#f4f4f5"
+                color: theme.text
                 font.bold: true
             }
 
             TextArea {
                 objectName: "blockedTagsInput"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.preferredHeight: 72
                 placeholderText: qsTr("使用逗号或换行分隔")
                 wrapMode: TextEdit.Wrap
@@ -322,17 +354,19 @@ Item {
 
             Label {
                 text: qsTr("排序")
-                color: "#f4f4f5"
+                color: theme.text
                 font.pixelSize: 16
                 font.bold: true
             }
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 ComboBox {
                     id: sortFieldInput
                     objectName: "sortFieldInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     textRole: "label"
                     valueRole: "value"
                     model: [
@@ -385,46 +419,51 @@ Item {
 
             Label {
                 text: qsTr("执行限制")
-                color: "#f4f4f5"
+                color: theme.text
                 font.pixelSize: 16
                 font.bold: true
             }
 
             GridLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 columns: 2
                 columnSpacing: 8
                 rowSpacing: 8
 
-                Label { text: qsTr("远程单次请求数量") ; color: "#a1a1aa" }
+                Label { text: qsTr("远程单次请求数量") ; color: theme.mutedText }
                 TextField {
                     id: pageSizeInput
                     objectName: "pageSizeInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: panel.textValue("pageSize")
                     onTextEdited: panel.setValue("pageSize", text)
                 }
 
-                Label { text: qsTr("候选数量上限") ; color: "#a1a1aa" }
+                Label { text: qsTr("候选数量上限") ; color: theme.mutedText }
                 TextField {
                     objectName: "candidateLimitInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: panel.textValue("candidateLimit")
                     onTextEdited: panel.setValue("candidateLimit", text)
                 }
 
-                Label { text: qsTr("每分支页数上限") ; color: "#a1a1aa" }
+                Label { text: qsTr("每分支页数上限") ; color: theme.mutedText }
                 TextField {
                     objectName: "branchPageLimitInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: panel.textValue("branchPageLimit")
                     onTextEdited: panel.setValue("branchPageLimit", text)
                 }
 
-                Label { text: qsTr("活动时间上限（秒）") ; color: "#a1a1aa" }
+                Label { text: qsTr("活动时间上限（秒）") ; color: theme.mutedText }
                 TextField {
                     objectName: "activeTimeLimitInput"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: panel.textValue("activeTimeLimitSeconds")
                     onTextEdited: panel.setValue("activeTimeLimitSeconds", text)
                 }
@@ -432,15 +471,17 @@ Item {
 
             Label {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 visible: controller.hasDraftError && controller.errorField !== "expression"
                 text: controller.inputErrorText
-                color: "#fda4af"
+                color: theme.error
                 wrapMode: Text.Wrap
             }
 
             RowLayout {
                 Layout.fillWidth: true
-                Button {
+                Layout.minimumWidth: 0
+                ActionButton {
                     objectName: "applyViewButton"
                     text: qsTr("应用筛选与排序")
                     enabled: controller.canApplyView
@@ -449,7 +490,7 @@ Item {
                 Item { Layout.fillWidth: true }
                 Label {
                     text: qsTr("时区：%1").arg(controller.timeZoneId)
-                    color: "#71717a"
+                    color: theme.subtleText
                     font.pixelSize: 11
                 }
             }

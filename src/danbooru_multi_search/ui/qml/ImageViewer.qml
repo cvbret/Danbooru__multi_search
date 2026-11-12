@@ -3,6 +3,7 @@ import QtQuick.Controls
 
 Item {
     id: viewer
+    property QtObject theme: AppTheme {}
     objectName: "detailImageViewer"
 
     property string candidateUrl: ""
@@ -209,8 +210,8 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#0b0d11"
-        radius: 6
+        color: theme.viewer
+        radius: theme.smallRadius
 
         Flickable {
             id: viewport

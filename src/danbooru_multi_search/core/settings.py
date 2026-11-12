@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 import threading
@@ -32,6 +33,10 @@ class AppSettings:
     download_directory: str = ""
     tag_csv_path: str = ""
     image_cache_limit_bytes: int = DEFAULT_IMAGE_CACHE_LIMIT_BYTES
+    background_image_path: str = ""
+    background_mask: float = 0.65
+    background_blur: float = 0.2
+    background_brightness: float = 1.0
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "AppSettings":
@@ -85,6 +90,25 @@ class AppSettings:
             raise SettingsError(
                 "image_cache_limit_bytes must be between 64 MiB and 16 GiB"
             )
+        if not isinstance(settings.background_image_path, str):
+            raise SettingsError("background_image_path must be a string")
+        if settings.background_image_path and not Path(
+            settings.background_image_path
+        ).is_absolute():
+            raise SettingsError("background_image_path must be absolute or empty")
+        for name, maximum in (
+            ("background_mask", 1.0),
+            ("background_blur", 1.0),
+            ("background_brightness", 2.0),
+        ):
+            value = getattr(settings, name)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not 0 <= value <= maximum
+                or not math.isfinite(value)
+            ):
+                raise SettingsError(f"{name} must be between 0 and {maximum:g}")
         return settings
 
     def to_mapping(self) -> dict[str, Any]:

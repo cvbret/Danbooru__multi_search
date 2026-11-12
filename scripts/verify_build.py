@@ -22,6 +22,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PACKAGE_ROOT = PROJECT_ROOT / "src"
 INSTALLED_CHECK_SCRIPT = PROJECT_ROOT / "scripts" / "check_installed_package.py"
 EXPECTED_QML_MEMBERS = (
+    "danbooru_multi_search/ui/qml/ActionButton.qml",
+    "danbooru_multi_search/ui/qml/AppTheme.qml",
+    "danbooru_multi_search/ui/qml/AppearancePanel.qml",
+    "danbooru_multi_search/ui/qml/ApplicationBackground.qml",
+    "danbooru_multi_search/ui/qml/PostCard.qml",
+    "danbooru_multi_search/ui/qml/GalleryGrid.qml",
     "danbooru_multi_search/ui/qml/Main.qml",
     "danbooru_multi_search/ui/qml/M2Main.qml",
     "danbooru_multi_search/ui/qml/DetailPage.qml",

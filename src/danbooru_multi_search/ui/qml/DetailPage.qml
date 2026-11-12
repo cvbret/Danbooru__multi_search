@@ -4,10 +4,13 @@ import QtQuick.Layouts
 
 Item {
     id: page
+    property QtObject theme: AppTheme {}
     objectName: "detailPage"
 
     required property var controller
     property bool complexQueryActionsEnabled: false
+    readonly property bool wideLayout: width >= 980
+    onWideLayoutChanged: { if (wideLayout) informationDrawer.close() }
     signal backRequested()
     signal importTagsRequested()
     signal addTagToQueryRequested(string tagName)
@@ -39,6 +42,11 @@ Item {
     Connections {
         target: controller
 
+        function onOpenChanged() {
+            if (!controller.isOpen)
+                informationDrawer.close()
+        }
+
         function onMediaChanged() {
             page.syncMedia()
         }
@@ -46,81 +54,98 @@ Item {
 
     Component.onCompleted: syncMedia()
 
+    Drawer {
+        id: informationDrawer
+        objectName: "detailInformationDrawer"
+        parent: Overlay.overlay
+        width: Math.min(400, page.width * 0.9)
+        height: parent ? parent.height : page.height
+        edge: Qt.RightEdge
+        modal: true
+        padding: 16
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    }
+
     ColumnLayout {
         anchors.fill: parent
-        spacing: 10
+        spacing: 16
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
-
-            Button {
+            spacing: 12
+            ActionButton {
                 objectName: "detailBackButton"
                 text: qsTr("返回画廊")
                 onClicked: page.backRequested()
             }
-
-            Button {
+            Label {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                text: qsTr("作品 #%1").arg(controller.postIdText)
+                color: theme.text
+                font.bold: true
+                font.pixelSize: 23
+                elide: Text.ElideRight
+            }
+            ActionButton {
+                objectName: "detailInformationButton"
+                text: qsTr("作品信息")
+                visible: !page.wideLayout
+                onClicked: informationDrawer.open()
+            }
+            ActionButton {
                 objectName: "detailImportTagsButton"
-                text: qsTr("导入标签库")
+                text: qsTr("标签库")
+                flat: true
                 onClicked: page.importTagsRequested()
             }
+        }
 
-            Label {
-                text: qsTr("作品 #%1").arg(controller.postIdText)
-                color: "#f4f4f5"
-                font.bold: true
-                font.pixelSize: 18
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Button {
+        Flow {
+            objectName: "detailActions"
+            Layout.fillWidth: true
+            spacing: 8
+            ActionButton {
                 objectName: "detailPreviewButton"
                 text: qsTr("预览图")
                 checkable: true
                 checked: controller.requestedQuality === "preview"
                 onClicked: controller.requestQuality("preview")
             }
-
-            Button {
+            ActionButton {
                 objectName: "detailLargeButton"
                 text: qsTr("较大图片")
                 checkable: true
                 checked: controller.requestedQuality === "large"
                 onClicked: controller.requestQuality("large")
             }
-
-            Button {
+            ActionButton {
                 objectName: "detailOriginalButton"
                 text: qsTr("原图")
                 checkable: true
                 checked: controller.requestedQuality === "original"
                 onClicked: controller.requestQuality("original")
             }
-
-            ToolSeparator {}
-
-            Button {
+            ActionButton {
                 objectName: "detailFitWindowButton"
                 text: qsTr("适应窗口")
                 onClicked: imageViewer.fitWindow()
             }
-
-            Button {
+            ActionButton {
                 objectName: "detailFitWidthButton"
                 text: qsTr("适应宽度")
                 onClicked: imageViewer.fitWidth()
             }
-
-            Button {
+            ActionButton {
                 objectName: "detailActualSizeButton"
                 text: "100%"
                 onClicked: imageViewer.actualSize()
             }
-
-            Button {
+            ActionButton {
                 objectName: "detailZoomOutButton"
+                width: 40
+                leftPadding: 4
+                rightPadding: 4
                 text: "−"
                 onClicked: imageViewer.zoomAt(
                     1 / 1.15,
@@ -128,9 +153,11 @@ Item {
                     imageViewer.height / 2
                 )
             }
-
-            Button {
+            ActionButton {
                 objectName: "detailZoomInButton"
+                width: 40
+                leftPadding: 4
+                rightPadding: 4
                 text: "+"
                 onClicked: imageViewer.zoomAt(
                     1.15,
@@ -141,9 +168,10 @@ Item {
         }
 
         RowLayout {
+            id: detailBody
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 12
+            spacing: 20
 
             ColumnLayout {
                 Layout.fillWidth: true
@@ -151,6 +179,7 @@ Item {
                 spacing: 6
 
                 ImageViewer {
+                    theme: page.theme
                     id: imageViewer
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -189,19 +218,22 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: controller.mediaMessage
-                        color: controller.mediaState === "error" ? "#fda4af" : "#d4d4d8"
+                        color: controller.mediaState === "error" ? theme.error : theme.secondaryText
                         wrapMode: Text.Wrap
                     }
 
                     Label {
+                        Layout.maximumWidth: Math.max(140, imageViewer.width * 0.48)
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 12
                         text: qsTr("请求：%1 · 已加载：%2 · %3%")
                               .arg(controller.requestedQualityText)
                               .arg(controller.actualQualityText)
                               .arg((imageViewer.zoomScale * 100).toFixed(1))
-                        color: "#a1a1aa"
+                        color: theme.mutedText
                     }
 
-                    Button {
+                    ActionButton {
                         objectName: "detailRetryMediaButton"
                         visible: controller.canRetryMedia
                         text: qsTr("重试图片")
@@ -211,36 +243,58 @@ Item {
             }
 
             Rectangle {
-                Layout.preferredWidth: Math.min(390, page.width * 0.36)
+                id: informationPanel
+                objectName: "detailInformationPanel"
+                parent: page.wideLayout ? detailBody : informationDrawer.contentItem
+                anchors.fill: page.wideLayout ? null : parent
+                Layout.preferredWidth: 340
                 Layout.minimumWidth: 300
                 Layout.fillHeight: true
-                color: "#191c23"
-                border.color: "#343944"
+                color: theme.card
+                border.color: theme.border
                 radius: 7
 
                 ScrollView {
                     anchors.fill: parent
-                    anchors.margins: 12
+                    anchors.margins: 20
                     clip: true
+                    contentWidth: availableWidth
 
                     ColumnLayout {
                         width: Math.max(260, parent.width - 8)
-                        spacing: 9
+                        spacing: 16
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("作品信息")
+                                color: theme.text
+                                font.bold: true
+                                font.pixelSize: 18
+                            }
+                            ActionButton {
+                                visible: !page.wideLayout
+                                text: qsTr("关闭")
+                                flat: true
+                                onClicked: informationDrawer.close()
+                            }
+                        }
 
                         Label {
                             text: qsTr("Danbooru 收录时间")
-                            color: "#a1a1aa"
+                            color: theme.mutedText
                         }
                         Label {
                             Layout.fillWidth: true
                             text: controller.createdAtText
-                            color: "#f4f4f5"
+                            color: theme.text
                             wrapMode: Text.Wrap
                         }
 
                         Label {
                             text: qsTr("尺寸与文件")
-                            color: "#a1a1aa"
+                            color: theme.mutedText
                         }
                         Label {
                             Layout.fillWidth: true
@@ -249,7 +303,7 @@ Item {
                                   .arg(controller.fileExtensionText)
                                   .arg(controller.fileSizeBytesText)
                                   .arg(controller.fileSizeReadableText)
-                            color: "#f4f4f5"
+                            color: theme.text
                             wrapMode: Text.Wrap
                         }
 
@@ -259,14 +313,14 @@ Item {
                             visible: controller.formatStatusText.length > 0
                             text: controller.formatStatusText
                             color: controller.formatState === "unknown"
-                                   ? "#fbbf24"
-                                   : "#fda4af"
+                                   ? theme.warning
+                                   : theme.error
                             wrapMode: Text.Wrap
                         }
 
                         Label {
                             text: qsTr("内容与人气")
-                            color: "#a1a1aa"
+                            color: theme.mutedText
                         }
                         Label {
                             Layout.fillWidth: true
@@ -274,13 +328,13 @@ Item {
                                   .arg(controller.ratingText)
                                   .arg(controller.scoreText)
                                   .arg(controller.favoriteText)
-                            color: "#f4f4f5"
+                            color: theme.text
                             wrapMode: Text.Wrap
                         }
 
                         Label {
                             text: qsTr("Danbooru 地址")
-                            color: "#a1a1aa"
+                            color: theme.mutedText
                         }
                         TextArea {
                             objectName: "detailPostUrlText"
@@ -294,7 +348,7 @@ Item {
 
                         Label {
                             text: qsTr("来源原文")
-                            color: "#a1a1aa"
+                            color: theme.mutedText
                         }
                         TextArea {
                             objectName: "detailSourceText"
@@ -308,7 +362,7 @@ Item {
 
                         Label {
                             text: qsTr("原文件地址")
-                            color: "#a1a1aa"
+                            color: theme.mutedText
                         }
                         TextArea {
                             objectName: "detailOriginalUrlText"
@@ -344,7 +398,7 @@ Item {
 
                                 Label {
                                     text: groupDelegate.groupLabel
-                                    color: "#93c5fd"
+                                    color: theme.accentText
                                     font.bold: true
                                 }
 
@@ -352,7 +406,7 @@ Item {
                                     objectName: "detailEmptyTagGroup_" + groupDelegate.groupKey
                                     visible: groupDelegate.tagItems.length === 0
                                     text: qsTr("暂无标签")
-                                    color: "#71717a"
+                                    color: theme.subtleText
                                 }
 
                                 Flow {
@@ -369,6 +423,13 @@ Item {
                                             readonly property var tagItem:
                                                 groupDelegate.tagItems[index]
                                             objectName: "detailTag_" + tagItem.tagName
+                                            width: Math.min(implicitWidth, parent.width)
+                                            contentItem: Label {
+                                                text: tagButton.text
+                                                color: theme.text
+                                                wrapMode: Text.Wrap
+                                                horizontalAlignment: Text.AlignHCenter
+                                            }
                                             text: tagItem.chineseNameText === "暂无中文名称"
                                                   ? tagItem.tagName
                                                   : tagItem.tagName + " · "
