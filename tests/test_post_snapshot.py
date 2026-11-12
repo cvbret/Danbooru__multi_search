@@ -179,3 +179,21 @@ def test_decoding_requires_text_and_an_object_root():
         decode_post_snapshot(None)  # type: ignore[arg-type]
     with pytest.raises(PostSnapshotError, match="JSON object"):
         decode_post_snapshot("[]")
+
+
+def test_shared_value_rules_keep_unbounded_dimensions_and_media_text():
+    post = replace(
+        _post(), width=10**60, height=10**60, file_size=10**60,
+        preview_url="local-image:preview",
+    )
+    assert decode_post_snapshot(encode_post_snapshot(post)) == post
+
+
+def test_encoding_maps_integer_text_limit_to_snapshot_error():
+    import sys
+
+    limit = sys.get_int_max_str_digits()
+    if limit == 0:
+        pytest.skip("the interpreter has disabled its integer text limit")
+    with pytest.raises(PostSnapshotError):
+        encode_post_snapshot(replace(_post(), width=10**limit))

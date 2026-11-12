@@ -10,14 +10,16 @@ import pytest
 import danbooru_multi_search.storage.favorite_transfer as transfer_module
 import danbooru_multi_search.storage.favorites as favorites_module
 from danbooru_multi_search.danbooru import DanbooruPost
+from danbooru_multi_search.core.favorites import (
+    FavoriteCandidate,
+    FavoriteError,
+    FavoriteTagCategory,
+)
 from danbooru_multi_search.storage import (
     FAVORITE_TRANSFER_DOCUMENT_TYPE,
     FAVORITE_TRANSFER_VERSION,
-    FavoriteCandidate,
-    FavoriteError,
     FavoriteImportMode,
     FavoriteRepository,
-    FavoriteTagCategory,
     FavoriteTransferDocument,
     FavoriteTransferError,
     FavoriteTransferFolder,

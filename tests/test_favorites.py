@@ -8,7 +8,7 @@ import pytest
 
 import danbooru_multi_search.storage.favorites as favorites_module
 from danbooru_multi_search.danbooru import DanbooruPost
-from danbooru_multi_search.storage import (
+from danbooru_multi_search.core.favorites import (
     FavoriteCandidate,
     FavoriteError,
     FavoriteFilter,
@@ -16,12 +16,14 @@ from danbooru_multi_search.storage import (
     FavoriteIdentity,
     FavoriteObjectType,
     FavoritePoolCategory,
-    FavoriteRepository,
     FavoriteSort,
     FavoriteSortDirection,
     FavoriteSortField,
     FavoriteTagCategory,
     FolderDeleteMode,
+)
+from danbooru_multi_search.storage import (
+    FavoriteRepository,
 )
 from danbooru_multi_search.storage.database import Database
 

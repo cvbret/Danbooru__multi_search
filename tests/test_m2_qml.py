@@ -62,8 +62,8 @@ from danbooru_multi_search.ui.image_cache import (
     ImageNetworkAccessManagerFactory,
 )
 from danbooru_multi_search.ui.query_editor import QueryTreeEditor
-from danbooru_multi_search.ui.query_state import (
-    M2QueryBridgeController,
+from danbooru_multi_search.ui.query_state import M2QueryBridgeController
+from danbooru_multi_search.ui.query_forms import (
     default_query_form_values,
 )
 from danbooru_multi_search.ui.session_state import BrowserSessionController

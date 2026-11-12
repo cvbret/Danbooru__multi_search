@@ -11,8 +11,7 @@ _EXPORT_GROUPS = {
         "Database",
         "DatabaseError",
     ),
-    "danbooru_multi_search.storage.favorites": (
-        "FAVORITE_SUMMARY_VERSION",
+    "danbooru_multi_search.core.favorites": (
         "FavoriteCandidate",
         "FavoriteCollectionSnapshot",
         "FavoriteError",
@@ -23,18 +22,23 @@ _EXPORT_GROUPS = {
         "FavoriteItem",
         "FavoriteObjectType",
         "FavoritePoolCategory",
-        "FavoriteRepository",
         "FavoriteSort",
         "FavoriteSortDirection",
         "FavoriteSortField",
         "FavoriteTagCategory",
         "FolderDeleteMode",
         "candidate_from_favorite_item",
+        "favorite_folder_key",
+    ),
+    "danbooru_multi_search.storage.favorite_codec": (
+        "FAVORITE_SUMMARY_VERSION",
         "decode_favorite_summary",
         "decode_favorite_timestamp",
         "encode_favorite_summary",
         "encode_favorite_timestamp",
-        "favorite_folder_key",
+    ),
+    "danbooru_multi_search.storage.favorites": (
+        "FavoriteRepository",
     ),
     "danbooru_multi_search.storage.favorite_transfer": (
         "FAVORITE_TRANSFER_DOCUMENT_TYPE",

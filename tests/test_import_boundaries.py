@@ -17,7 +17,9 @@ PACKAGES = (
     "danbooru_multi_search.tasks",
 )
 PURE_MODULES = (
+    "danbooru_multi_search.core.favorites",
     "danbooru_multi_search.danbooru.models",
+    "danbooru_multi_search.danbooru.post_validation",
     "danbooru_multi_search.danbooru.query_types",
     "danbooru_multi_search.danbooru.query_language",
     "danbooru_multi_search.danbooru.query_planning",
@@ -27,6 +29,7 @@ PURE_MODULES = (
     "danbooru_multi_search.storage.history",
     "danbooru_multi_search.storage.query_serialization",
     "danbooru_multi_search.storage.favorites",
+    "danbooru_multi_search.storage.favorite_codec",
     "danbooru_multi_search.storage.favorite_transfer",
     "danbooru_multi_search.storage.post_snapshot",
     "danbooru_multi_search.tasks.queue",
@@ -124,6 +127,40 @@ def _probe_qt_scheduling() -> None:
     assert cancelled.active is False
 
 
+def _probe_query_forms() -> None:
+    blocked = (
+        "danbooru_multi_search.ui.query_state",
+        "danbooru_multi_search.danbooru.query_controller",
+        "danbooru_multi_search.danbooru.query_execution",
+    )
+
+    class RejectBridge(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path, target=None):
+            if fullname in blocked:
+                raise AssertionError(f"query forms imported {fullname}")
+            return None
+
+    sys.meta_path.insert(0, RejectBridge())
+    from PySide6.QtCore import QTimeZone
+    from danbooru_multi_search.danbooru.query_definition import QueryMode
+    from danbooru_multi_search.ui.query_forms import (
+        build_draft_definition,
+        default_query_form_values,
+        parse_query_form,
+        query_form_values_from_definition,
+    )
+
+    values = default_query_form_values()
+    zone = QTimeZone(b"UTC")
+    form = parse_query_form(values, mode=QueryMode.STANDARD, time_zone=zone)
+    definition = build_draft_definition(
+        form, mode=QueryMode.STANDARD, normalized_expression="cat dog"
+    )
+    assert definition.normalized_expression == "cat AND dog"
+    assert query_form_values_from_definition(definition, time_zone=zone) == values
+    assert not any(name in sys.modules for name in blocked)
+
+
 def _run_probe(mode: str, data_root: Path) -> None:
     result = subprocess.run(
         [sys.executable, str(Path(__file__).resolve()), mode, str(data_root)],
@@ -138,6 +175,10 @@ def _run_probe(mode: str, data_root: Path) -> None:
 
 def test_pure_modules_and_storage_work_with_qt_imports_blocked(tmp_path):
     _run_probe("pure", tmp_path)
+
+
+def test_query_forms_work_without_the_bridge_or_executor(tmp_path):
+    _run_probe("forms", tmp_path)
 
 
 def test_legacy_qt_scheduler_imports_and_timer_cancellation(tmp_path):
@@ -182,5 +223,7 @@ if __name__ == "__main__":
         _probe_pure_imports(Path(sys.argv[2]))
     elif sys.argv[1] == "qt":
         _probe_qt_scheduling()
+    elif sys.argv[1] == "forms":
+        _probe_query_forms()
     else:
         raise ValueError("Unknown probe mode")

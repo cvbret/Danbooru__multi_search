@@ -13,8 +13,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from danbooru_multi_search.storage.favorites import (
-    FAVORITE_SUMMARY_VERSION,
+from danbooru_multi_search.core.favorites import (
     FavoriteCandidate,
     FavoriteCollectionSnapshot,
     FavoriteError,
@@ -22,13 +21,18 @@ from danbooru_multi_search.storage.favorites import (
     FavoriteIdentity,
     FavoriteItemDraft,
     FavoriteObjectType,
-    FavoriteRepository,
     candidate_from_favorite_item,
+    favorite_folder_key,
+)
+from danbooru_multi_search.storage.favorite_codec import (
+    FAVORITE_SUMMARY_VERSION,
     decode_favorite_summary,
     decode_favorite_timestamp,
     encode_favorite_summary,
     encode_favorite_timestamp,
-    favorite_folder_key,
+)
+from danbooru_multi_search.storage.favorites import (
+    FavoriteRepository,
 )
 
 

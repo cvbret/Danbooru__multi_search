@@ -45,8 +45,8 @@ from danbooru_multi_search.danbooru import (
     parse_query_expression,
 )
 from danbooru_multi_search.ui.query_editor import QueryTreeEditor
-from danbooru_multi_search.ui.query_state import (
-    M2QueryBridgeController,
+from danbooru_multi_search.ui.query_state import M2QueryBridgeController
+from danbooru_multi_search.ui.query_forms import (
     QueryInputError,
     build_draft_definition,
     default_query_form_values,
@@ -56,6 +56,17 @@ from danbooru_multi_search.ui.query_state import (
 
 
 APPLICATION = QGuiApplication.instance() or QGuiApplication([])
+
+
+def test_original_form_imports_keep_the_same_objects():
+    from danbooru_multi_search.ui import query_forms, query_state
+
+    for name in (
+        "QueryFormState", "QueryInputDiagnostic", "QueryInputError",
+        "build_draft_definition", "default_query_form_values", "parse_query_form",
+        "parse_windows_local_datetime", "query_form_values_from_definition",
+    ):
+        assert getattr(query_state, name) is getattr(query_forms, name)
 
 
 @dataclass(frozen=True, slots=True)

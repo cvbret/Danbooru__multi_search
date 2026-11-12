@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import math
-import re
-from datetime import datetime
 from typing import Any
 
 from danbooru_multi_search.danbooru.models import DanbooruPost
-from danbooru_multi_search.danbooru.tag_syntax import normalize_tag_name
+from danbooru_multi_search.danbooru.post_validation import (
+    PostValidationError,
+    validate_post_values,
+)
 
 
 POST_SNAPSHOT_VERSION = 1
@@ -37,19 +38,6 @@ _SNAPSHOT_FIELDS = frozenset(
         "width",
     }
 )
-_TAG_FIELDS = (
-    "artist_tags",
-    "character_tags",
-    "copyright_tags",
-    "general_tags",
-    "meta_tags",
-)
-_CREATED_AT_PATTERN = re.compile(
-    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T"
-    r"[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z"
-)
-
-
 class PostSnapshotError(ValueError):
     """Report a stable persisted-post validation or JSON error."""
 
@@ -138,83 +126,10 @@ def decode_post_snapshot(encoded: str) -> DanbooruPost:
 
 
 def _validate_post(post: DanbooruPost) -> None:
-    if not isinstance(post, DanbooruPost):
-        raise TypeError("post must be a DanbooruPost")
-    _positive_integer(post.id, "id")
-    _optional_integer(post.score, "score")
-    favorite_count = _optional_integer(post.fav_count, "fav_count")
-    if favorite_count is not None and favorite_count < 0:
-        raise PostSnapshotError("fav_count cannot be negative")
-    _positive_integer(post.width, "width")
-    _positive_integer(post.height, "height")
-    file_size = _optional_integer(post.file_size, "file_size")
-    if file_size is not None and file_size < 0:
-        raise PostSnapshotError("file_size cannot be negative")
-
-    urls = (
-        _validate_optional_stored_text(post.preview_url, "preview_url"),
-        _validate_optional_stored_text(post.large_file_url, "large_file_url"),
-        _validate_optional_stored_text(post.file_url, "file_url"),
-    )
-    if not any(urls):
-        raise PostSnapshotError("Post snapshot requires at least one media URL")
-    if post.rating not in {"g", "s", "q", "e"}:
-        raise PostSnapshotError("rating is invalid")
-    if (
-        not isinstance(post.file_ext, str)
-        or not post.file_ext
-        or post.file_ext.strip().casefold() != post.file_ext
-    ):
-        raise PostSnapshotError("file_ext must be canonical non-empty text")
-
-    if post.created_at is not None:
-        if (
-            not isinstance(post.created_at, str)
-            or _CREATED_AT_PATTERN.fullmatch(post.created_at) is None
-        ):
-            raise PostSnapshotError("created_at must use fixed UTC text")
-        try:
-            datetime.fromisoformat(post.created_at.removesuffix("Z") + "+00:00")
-        except (OverflowError, ValueError) as exc:
-            raise PostSnapshotError("created_at is not a valid UTC datetime") from exc
-
-    if post.source is not None:
-        if not isinstance(post.source, str):
-            raise PostSnapshotError("source must be text or null")
-        if not post.source.strip():
-            raise PostSnapshotError("source cannot be blank")
-        if len(post.source) > 1200:
-            raise PostSnapshotError("source must not exceed 1200 characters")
-
-    seen_tags: set[str] = set()
-    for field_name in _TAG_FIELDS:
-        tags = getattr(post, field_name)
-        if not isinstance(tags, tuple):
-            raise PostSnapshotError(f"{field_name} must be a tuple")
-        for tag in tags:
-            if not isinstance(tag, str):
-                raise PostSnapshotError(f"{field_name} must contain text")
-            try:
-                normalized = normalize_tag_name(tag)
-            except (TypeError, ValueError) as exc:
-                raise PostSnapshotError(
-                    f"{field_name} contains an invalid tag"
-                ) from exc
-            if normalized != tag:
-                raise PostSnapshotError(
-                    f"{field_name} contains a noncanonical tag"
-                )
-            if tag in seen_tags:
-                raise PostSnapshotError(f"Post snapshot contains duplicate tag {tag!r}")
-            seen_tags.add(tag)
-
-
-def _validate_optional_stored_text(value: object, label: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value or value.strip() != value:
-        raise PostSnapshotError(f"{label} must be canonical non-empty text or null")
-    return value
+    try:
+        validate_post_values(post)
+    except PostValidationError as exc:
+        raise PostSnapshotError(str(exc)) from exc
 
 
 def _load_object(encoded: str) -> dict[str, Any]:
@@ -301,10 +216,3 @@ def _integer(value: object, label: str) -> int:
 
 def _optional_integer(value: object, label: str) -> int | None:
     return None if value is None else _integer(value, label)
-
-
-def _positive_integer(value: object, label: str) -> int:
-    parsed = _integer(value, label)
-    if parsed < 1:
-        raise PostSnapshotError(f"{label} must be positive")
-    return parsed
