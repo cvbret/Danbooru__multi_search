@@ -413,6 +413,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         fail_final_save,
     )
     for name, owner, attribute in (
+        ("downloads-ui", ui_session.download_ui, "shutdown"),
         ("downloads-stop", ui_session.download_manager, "begin_shutdown"),
         ("downloads-save", ui_session.download_manager, "shutdown"),
         ("transfer-stop", ui_session.favorite_transfer, "begin_shutdown"),
@@ -457,6 +458,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
 
     assert reentry_count == 1
     assert events == [
+        "downloads-ui",
         "downloads-stop",
         "transfer-stop",
         "combinations",

@@ -170,3 +170,29 @@ def test_settings_controller_keeps_previous_snapshot_when_save_fails(
         controller.set_image_cache_limit_bytes(768 * 1024 * 1024)
 
     assert controller.settings == initial
+
+
+def test_default_download_directory_merges_and_survives_restart(tmp_path):
+    store = SettingsStore(tmp_path / "settings.json")
+    initial = AppSettings(theme="light", tag_csv_path=str(tmp_path / "tags.csv"), image_cache_limit_bytes=768 * 1024 * 1024)
+    store.save(initial)
+    controller = SettingsController(store, initial)
+    directory = tmp_path / "中文 下载"
+    saved = controller.set_download_directory(directory)
+    assert store.load_or_default(AppSettings()) == saved
+    assert saved.download_directory == str(directory)
+    assert saved.theme == initial.theme and saved.tag_csv_path == initial.tag_csv_path
+    assert saved.image_cache_limit_bytes == initial.image_cache_limit_bytes
+
+
+def test_default_download_directory_failure_retains_previous_value(tmp_path, monkeypatch):
+    store = SettingsStore(tmp_path / "settings.json")
+    previous = AppSettings(download_directory=str(tmp_path / "old"))
+    store.save(previous)
+    controller = SettingsController(store, previous)
+    def fail(_settings):
+        raise SettingsError("save failed")
+    monkeypatch.setattr(store, "save", fail)
+    with pytest.raises(SettingsError):
+        controller.set_download_directory(tmp_path / "new")
+    assert controller.settings is previous and store.load_or_default(AppSettings()) == previous

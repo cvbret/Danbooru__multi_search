@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from danbooru_multi_search.core.favorites import FavoriteError
 from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
+from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.ui.favorites import FavoriteController, post_identity
 
 
@@ -121,6 +122,12 @@ class GallerySelectionController(QObject):
         return (
             not self._closed and revision == self._model.revision and key in self._posts
         )
+
+    def selected_posts(self, selection_revision: int, model_revision: int) -> tuple[DanbooruPost, ...] | None:
+        """Read the explicitly selected works in current gallery order."""
+        if self._closed or self._revision != selection_revision or self._model.revision != model_revision:
+            return None
+        return tuple(post for key, post in self._posts.items() if key in self._selected)
 
     @Slot()
     def _model_changed(self) -> None:

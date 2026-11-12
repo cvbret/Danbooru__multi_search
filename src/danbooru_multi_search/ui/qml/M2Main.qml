@@ -55,6 +55,12 @@ ApplicationWindow {
         theme: root.theme
     }
 
+    DownloadRequestDialog {
+        id: downloadRequestDialog
+        controller: downloadUi
+        theme: root.theme
+    }
+
     property bool artistSuggestionsSuppressed: false
     signal queryEditorRequested()
 
@@ -92,6 +98,7 @@ ApplicationWindow {
         activePage = pageName
         if (pageName === "favorites")
             favoriteCollection.setActive(true)
+        downloadUi.setActive(pageName === "downloads")
     }
 
     RowLayout {
@@ -119,6 +126,15 @@ ApplicationWindow {
             checked: root.activePage === "favorites"
             enabled: !detailController.isOpen
             onClicked: root.showPage("favorites")
+        }
+        ActionButton {
+            objectName: "downloadsNavigationButton"
+            text: qsTr("下载")
+            checkable: true
+            autoExclusive: true
+            checked: root.activePage === "downloads"
+            enabled: !detailController.isOpen
+            onClicked: root.showPage("downloads")
         }
         Item { Layout.fillWidth: true }
     }
@@ -586,7 +602,7 @@ ApplicationWindow {
         anchors.top: pageNavigation.bottom
         anchors.bottom: parent.bottom
         anchors.margins: 20
-        currentIndex: detailController.isOpen ? 2 : (root.activePage === "favorites" ? 1 : 0)
+        currentIndex: detailController.isOpen ? 3 : (root.activePage === "favorites" ? 1 : root.activePage === "downloads" ? 2 : 0)
 
         Item {
             id: galleryPage
@@ -689,7 +705,22 @@ ApplicationWindow {
                         enabled: gallerySelection.selectedCount > 0
                         onClicked: gallerySelection.clearSelection()
                     }
+                    ActionButton {
+                        objectName: "downloadSelectedPostsButton"
+                        text: qsTr("下载已选原文件")
+                        enabled: gallerySelection.selectedCount > 0
+                        property var pressedAction: null
+                        onPressed: pressedAction = {"selection": gallerySelection.revision, "model": gallerySelection.modelRevision}
+                        onClicked: {
+                            if (pressedAction) {
+                                const token = downloadUi.captureGallerySelection(pressedAction.selection, pressedAction.model)
+                                if (token.length) downloadRequestDialog.showRequest(token)
+                            }
+                            pressedAction = null
+                        }
+                    }
                 }
+                Label { Layout.fillWidth: true; text: downloadUi.errorText || downloadUi.noticeText; visible: text.length > 0; color: downloadUi.errorText.length ? theme.error : theme.secondaryText; wrapMode: Text.Wrap }
                 RowLayout {
                     Layout.fillWidth: true
                     visible: favoriteController.noticeText.length > 0
@@ -725,6 +756,8 @@ ApplicationWindow {
                         model: searchController.postsModel
                         favoriteSelection: gallerySelection
                         cacheController: imageCacheController
+                        downloads: downloadUi
+                        onDownloadPrepared: function(token) { downloadRequestDialog.showRequest(token) }
                         theme: root.theme
                         onPostActivated: function(row) { root.openPostDetails(row) }
                         onContentYChanged: root.reportGalleryPosition()
@@ -812,11 +845,15 @@ ApplicationWindow {
             theme: root.theme
         }
 
+        DownloadsPage { controller: downloadUi; theme: root.theme }
+
         DetailPage {
             backLabel: detailNavigation.sourcePage === "favorites" ? qsTr("返回收藏") : qsTr("返回画廊")
             theme: root.theme
             controller: detailController
             favorites: detailFavorites
+            downloads: downloadUi
+            onDownloadPrepared: function(token) { downloadRequestDialog.showRequest(token) }
             complexQueryActionsEnabled: true
             onBackRequested: root.returnToGallery()
             onImportTagsRequested: tagCsvDialog.open()

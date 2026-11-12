@@ -77,6 +77,10 @@ class PersistentDownloadManager(QObject):
     def closed(self) -> bool:
         return self._closed
 
+    @property
+    def halted(self) -> bool:
+        return self._halted
+
     def enqueue_download(self, post: DanbooruPost, directory: Path,
                          policy: DownloadConflictPolicy = DownloadConflictPolicy.SKIP) -> DownloadBatchSnapshot:
         return self.enqueue_batch((post,), directory, policy)
@@ -105,14 +109,14 @@ class PersistentDownloadManager(QObject):
     def snapshot(self, batch_id: str) -> DownloadBatchSnapshot:
         return self._repository.get_batch(batch_id)
 
-    def cancel(self, item_id: str) -> bool:
+    def cancel(self, item_id: str, *, expected_generation: int | None = None) -> bool:
         if self._closed or self._closing or self._halting:
             return False
         try:
             item = self._repository.get_item(item_id)
             if item.state in DOWNLOAD_TERMINAL_STATES:
                 return False
-            item = self._repository.cancel(item_id, item.generation)
+            item = self._repository.cancel(item_id, item.generation if expected_generation is None else expected_generation)
             self._pending = [value for value in self._pending if value != item_id]
             entry = self._entries.get(item_id)
             if entry:
@@ -128,12 +132,12 @@ class PersistentDownloadManager(QObject):
             self._handle_error(exc)
             return False
 
-    def cancel_batch(self, batch_id: str) -> bool:
+    def cancel_batch(self, batch_id: str, *, expected_generations: dict[str, int] | None = None) -> bool:
         if self._closed or self._closing or batch_id in self._cancelling_batches:
             return False
         self._cancelling_batches.add(batch_id)
         try:
-            batch = self._repository.cancel_batch(batch_id)
+            batch = self._repository.cancel_batch(batch_id, expected_generations=expected_generations)
             identifiers = {item.item_id for item in batch.items}
             self._pending = [item_id for item_id in self._pending if item_id not in identifiers]
             # Update every runtime guard before cancelling the first queue item.
@@ -163,15 +167,22 @@ class PersistentDownloadManager(QObject):
             self._cancelling_batches.discard(batch_id)
             self._pump()
 
-    def retry(self, item_id: str) -> bool:
-        if item_id in self._entries or not self._allow_manual_resume():
+    def retry(self, item_id: str, *, expected_generation: int | None = None) -> bool:
+        if item_id in self._entries:
             return False
         try:
+            expected = None if expected_generation is None else {item_id: expected_generation}
+            generations = self._allow_manual_resume(expected)
+            if generations is None:
+                return False
             item = self._repository.get_item(item_id)
+            generation = generations.get(item_id, item.generation)
+            if item.generation != generation:
+                raise DownloadError("stale_download", "下载操作已经失效，请重新选择。")
             if item.batch_id in self._cancelling_batches:
                 return False
             discard_owned_partial(item)
-            item = self._repository.prepare_retry(item_id, item.generation)
+            item = self._repository.prepare_retry(item_id, generation)
             self._pending.append(item_id)
             self._publish(item)
             self._pump()
@@ -180,14 +191,21 @@ class PersistentDownloadManager(QObject):
             self._handle_error(exc)
             return False
 
-    def resume_batch(self, batch_id: str) -> bool:
-        if batch_id in self._cancelling_batches or not self._allow_manual_resume():
+    def resume_batch(self, batch_id: str, *, expected_generations: dict[str, int] | None = None) -> bool:
+        if batch_id in self._cancelling_batches:
             return False
         try:
-            interrupted = tuple(item for item in self.snapshot(batch_id).items if item.state is DownloadTaskState.AWAITING_RESUME)
+            generations = self._allow_manual_resume(expected_generations)
+            if generations is None:
+                return False
+            expected = generations if expected_generations is not None else None
+            batch = self.snapshot(batch_id)
+            if expected is not None and {item.item_id: item.generation for item in batch.items} != expected:
+                raise DownloadError("stale_download", "下载批次已经改变，请重新选择。")
+            interrupted = tuple(item for item in batch.items if item.state is DownloadTaskState.AWAITING_RESUME)
             for item in interrupted:
                 discard_owned_partial(item)
-            waiting = self._repository.prepare_batch_resume(batch_id, interrupted)
+            waiting = self._repository.prepare_batch_resume(batch_id, interrupted, expected_generations=expected)
             self._pending.extend(item.item_id for item in waiting)
             for item in waiting:
                 self._publish(item)
@@ -197,18 +215,15 @@ class PersistentDownloadManager(QObject):
             self._handle_error(exc)
             return False
 
-    def _allow_manual_resume(self) -> bool:
+    def _allow_manual_resume(self, expected: dict[str, int] | None = None) -> dict[str, int] | None:
         if self._closed or self._closing or self._halting:
-            return False
+            return None
         if self._halted:
-            try:
-                self._repository.recover_unfinished()
-            except DownloadError as exc:
-                self._handle_error(exc)
-                return False
+            generations = self._repository.recover_unfinished(expected_generations=expected)
             self._halted = False
             self._error = ""
-        return True
+            return generations
+        return dict(expected or {})
 
     def _pump(self) -> None:
         if self._closed or self._closing or self._halted:

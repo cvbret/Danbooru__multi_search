@@ -67,3 +67,17 @@ def test_busy_callback_clear_selection_prevents_batch_write(tmp_path):
     favorites.busyChanged.connect(lambda: selection.clearSelection() if favorites.busy else None)
     assert not selection.saveSelected(selection.revision, model.revision)
     assert repository.capture_collection().revision == 0
+
+
+def test_selected_posts_exposes_stable_order_only_for_the_captured_source(tmp_path):
+    repository, favorites = build(tmp_path)
+    model = DanbooruPostListModel()
+    works = (post(2**60 + 1), post(2), post(3))
+    model.set_posts(works)
+    selection = GallerySelectionController(model, favorites)
+    selection.setSelected("3", True, model.revision)
+    selection.setSelected(str(2**60 + 1), True, model.revision)
+    revision = selection.revision
+    assert selection.selected_posts(revision, model.revision) == (works[0], works[2])
+    selection.clearSelection()
+    assert selection.selected_posts(revision, model.revision) is None

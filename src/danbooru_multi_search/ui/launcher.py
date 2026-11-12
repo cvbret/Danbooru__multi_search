@@ -35,6 +35,7 @@ from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
 from danbooru_multi_search.storage.downloads import DownloadRepository
 from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
+from danbooru_multi_search.ui.downloads import DownloadUiController
 from danbooru_multi_search.ui.artist_combinations import ArtistCombinationController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
@@ -165,6 +166,11 @@ class _UiSession(QObject):
         self.artist_combinations = ArtistCombinationController(
             ArtistCombinationRepository(database), self.favorite_controller, self.query_bridge, self
         )
+        self.download_ui = DownloadUiController(
+            self.download_manager, self.download_manager._repository, self.settings_controller,
+            self.query_controller.posts_model, self.gallery_selection, self.detail_controller,
+            Path(settings.download_directory) if settings.download_directory else (runtime.paths.download_dir if runtime else temporary_path / "downloads"), self,
+        )
         self.tag_controller = DanbooruTagSuggestionController(
             danbooru_base_url,
             network_manager=self.network_manager,
@@ -207,6 +213,7 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.download_ui.shutdown,
             self.download_manager.begin_shutdown,
             self.favorite_transfer.begin_shutdown,
             self.artist_combinations.shutdown,
@@ -250,6 +257,7 @@ class _UiSession(QObject):
             and self.detail_navigation._closed
             and self.favorite_transfer.shutdown_completed
             and self.download_manager.closed
+            and self.download_ui._closed
             and self.artist_combinations._closed
             and self.favorite_collection._closed
             and self.favorite_controller._closed
@@ -321,6 +329,7 @@ def _create_qml_session(
         session.image_cache_controller,
     )
     engine.rootContext().setContextProperty("favoriteTransfer", session.favorite_transfer)
+    engine.rootContext().setContextProperty("downloadUi", session.download_ui)
     engine.rootContext().setContextProperty("artistCombinations", session.artist_combinations)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)

@@ -387,3 +387,35 @@ def test_new_batch_database_failure_stops_existing_pending_requests(tmp_path, mo
     assert manager._halted and network.replies[0].abort_count == 1
     scheduler.run_ready()
     assert len(network.requests) == 1
+
+
+def test_old_item_ui_generation_cannot_cancel_or_retry_a_new_attempt(tmp_path, monkeypatch):
+    saved, manager, queue, scheduler, network = setup(tmp_path)
+    batch = manager.enqueue_download(works(1)[0], tmp_path)
+    scheduler.run_ready()
+    running = saved.get_item(batch.items[0].item_id)
+    assert not manager.cancel(running.item_id, expected_generation=running.generation - 1)
+    assert network.replies[0].abort_count == 0
+    assert manager.cancel(running.item_id, expected_generation=running.generation)
+    cancelled = saved.get_item(running.item_id)
+    original = manager_module.discard_owned_partial
+    monkeypatch.setattr(manager_module, "discard_owned_partial", lambda _item: pytest.fail("stale retry must not clean any file"))
+    assert not manager.retry(cancelled.item_id, expected_generation=running.generation)
+    monkeypatch.setattr(manager_module, "discard_owned_partial", original)
+    assert manager.retry(cancelled.item_id, expected_generation=cancelled.generation)
+    scheduler.run_ready()
+    assert not manager.cancel(cancelled.item_id, expected_generation=cancelled.generation)
+    assert network.replies[1].abort_count == 0
+
+
+def test_batch_ui_guard_ignores_progress_but_rejects_another_execution_generation(tmp_path):
+    saved, manager, queue, scheduler, network = setup(tmp_path)
+    batch = manager.enqueue_batch(works(), tmp_path)
+    old = {item.item_id: item.generation for item in batch.items}
+    scheduler.run_ready()
+    assert not manager.cancel_batch(batch.batch_id, expected_generations=old)
+    current = saved.get_batch(batch.batch_id)
+    expected = {item.item_id: item.generation for item in current.items}
+    saved.update_progress(current.items[0].item_id, current.items[0].generation, 3, 10)
+    assert manager.cancel_batch(batch.batch_id, expected_generations=expected)
+    assert saved.get_batch(batch.batch_id).counts["cancelled"] == 3

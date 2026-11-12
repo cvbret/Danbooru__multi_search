@@ -86,6 +86,8 @@ QML_FILES = (
     "FavoritesPage.qml",
     "FavoriteTransferDialog.qml",
     "ArtistCombinationPanel.qml",
+    "DownloadsPage.qml",
+    "DownloadRequestDialog.qml",
     "FavoriteObjectCard.qml",
     "FavoriteConfirmDialog.qml",
     "DetailPage.qml",

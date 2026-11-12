@@ -9,6 +9,7 @@ Item {
 
     required property var favorites
     required property var controller
+    required property var downloads
     property bool complexQueryActionsEnabled: false
     property string backLabel: qsTr("返回画廊")
     readonly property bool wideLayout: width >= 980
@@ -16,6 +17,7 @@ Item {
     signal backRequested()
     signal importTagsRequested()
     signal addTagToQueryRequested(string tagName)
+    signal downloadPrepared(string token)
 
     function syncMedia() {
         if (controller.mediaUrl.length === 0) {
@@ -111,10 +113,40 @@ Item {
             wrapMode: Text.Wrap
         }
 
+        Label {
+            objectName: "detailDownloadNotice"
+            Layout.fillWidth: true
+            visible: text.length > 0
+            text: page.downloads.errorText || page.downloads.noticeText
+            color: page.downloads.errorText.length ? theme.error : theme.secondaryText
+            wrapMode: Text.Wrap
+        }
+
         Flow {
             objectName: "detailActions"
             Layout.fillWidth: true
             spacing: 8
+            ActionButton {
+                objectName: "detailDownloadButton"
+                text: qsTr("下载原文件")
+                enabled: page.downloads.detailDownloadAvailable
+                property var pressedAction: null
+                onPressed: pressedAction = {"key": page.downloads.detailPostKey, "revision": page.downloads.detailRevision}
+                onClicked: {
+                    if (pressedAction) {
+                        const token = page.downloads.captureDetailPost(pressedAction.key, pressedAction.revision)
+                        if (token.length) page.downloadPrepared(token)
+                    }
+                    pressedAction = null
+                }
+            }
+            Label {
+                width: Math.min(360, page.width - 24)
+                visible: !page.downloads.detailDownloadAvailable
+                text: qsTr("没有原文件地址，不能用预览图代替下载。")
+                color: theme.secondaryText
+                wrapMode: Text.Wrap
+            }
             ActionButton {
                 text: qsTr("重试收藏状态")
                 visible: favoriteController.noticeText.length > 0

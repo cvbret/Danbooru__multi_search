@@ -7,6 +7,7 @@ import sqlite3
 from collections.abc import Sequence
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 from uuid import uuid4
@@ -16,6 +17,20 @@ from danbooru_multi_search.core.downloads import (
     DownloadConflictPolicy, DownloadError, DownloadItemSnapshot, DownloadRequest, DownloadTaskState, filename_key,
 )
 from danbooru_multi_search.storage.database import Database
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadBatchSummary:
+    """Aggregate read projection; obtaining it never decodes all item rows."""
+    batch_id: str
+    count: int
+    state_counts: tuple[tuple[str, int], ...]
+    bytes_written: int
+    total_bytes: int | None
+
+    @classmethod
+    def from_batch(cls, batch: DownloadBatchSnapshot) -> "DownloadBatchSummary":
+        return cls(batch.batch_id, len(batch.items), tuple(batch.counts.items()), batch.bytes_written, batch.total_bytes)
 
 
 class DownloadRepository:
@@ -62,6 +77,25 @@ class DownloadRepository:
             return tuple(row[0] for row in connection.execute(
                 "SELECT id FROM download_batches ORDER BY created_at DESC, id LIMIT ? OFFSET ?", (limit, offset)))
 
+    def read_batch_summaries(self, *, limit: int = 50, offset: int = 0) -> tuple[DownloadBatchSummary, ...]:
+        if type(limit) is not int or not 1 <= limit <= 1000 or type(offset) is not int or offset < 0:
+            raise DownloadError("invalid_pagination", "下载记录分页范围无效。")
+        states = tuple(DownloadTaskState)
+        counts = ", ".join(f"SUM(CASE WHEN di.state = '{state.value}' THEN 1 ELSE 0 END) AS {state.value}" for state in states)
+        with self._connection() as connection:
+            rows = connection.execute(f"""SELECT db.id, COUNT(di.id) AS count,
+                COALESCE(SUM(di.bytes_written), 0) AS written,
+                CASE WHEN COUNT(di.total_bytes) = COUNT(di.id) THEN SUM(di.total_bytes) ELSE NULL END AS total,
+                SUM(CASE WHEN typeof(di.bytes_written) != 'integer' OR di.bytes_written < 0
+                    OR (di.total_bytes IS NOT NULL AND (typeof(di.total_bytes) != 'integer'
+                        OR di.total_bytes < di.bytes_written)) THEN 1 ELSE 0 END) AS invalid,
+                {counts} FROM download_batches db JOIN download_items di ON di.batch_id = db.id
+                GROUP BY db.id ORDER BY db.created_at DESC, db.id LIMIT ? OFFSET ?""", (limit, offset)).fetchall()
+            if any(row["invalid"] for row in rows):
+                raise DownloadError("invalid_record", "下载进度记录无效，无法显示批次摘要。")
+            return tuple(DownloadBatchSummary(row["id"], row["count"], tuple((state.value, row[state.value]) for state in states),
+                                              row["written"], row["total"]) for row in rows)
+
     def list_items(self, *, states: Sequence[DownloadTaskState] | None = None) -> tuple[DownloadItemSnapshot, ...]:
         with self._connection() as connection:
             where, parameters = "", ()
@@ -77,12 +111,16 @@ class DownloadRepository:
                     {where} ORDER BY db.created_at, db.id, di.position""", parameters)
             return tuple(_item(row) for row in rows)
 
-    def recover_unfinished(self) -> None:
+    def recover_unfinished(self, *, expected_generations: dict[str, int] | None = None) -> dict[str, int]:
         """Recover records only; neither network nor file operations occur here."""
         with self._connection(write=True) as connection:
+            if expected_generations is not None:
+                for identifier, generation in expected_generations.items():
+                    self._current(connection, identifier, generation)
             connection.execute("""UPDATE download_items SET state = 'awaiting_resume', generation = generation + 1,
                 message = '应用已重新启动，等待手动从头恢复。'
                 WHERE state IN ('waiting', 'running', 'retry_wait')""")
+            return {identifier: self._require(connection, identifier)["generation"] for identifier in (expected_generations or {})}
 
     def begin_attempt(self, item_id: str, expected_generation: int) -> DownloadItemSnapshot:
         with self._connection(write=True) as connection:
@@ -132,10 +170,10 @@ class DownloadRepository:
                 error_code = 'cancelled', message = '用户已取消下载。' WHERE id = ?""", (item_id,))
             return _item(self._require(connection, item_id))
 
-    def cancel_batch(self, batch_id: str) -> DownloadBatchSnapshot:
+    def cancel_batch(self, batch_id: str, *, expected_generations: dict[str, int] | None = None) -> DownloadBatchSnapshot:
         """Invalidate every unfinished item before any runtime cancellation signal."""
         with self._connection(write=True) as connection:
-            self._batch(connection, batch_id)
+            self._check_batch_generations(connection, batch_id, expected_generations)
             connection.execute("""UPDATE download_items SET state = 'cancelled', generation = generation + 1,
                 error_code = 'cancelled', message = '用户已取消整个下载批量。'
                 WHERE batch_id = ? AND state NOT IN ('completed', 'skipped', 'failed', 'cancelled')""", (batch_id,))
@@ -150,9 +188,11 @@ class DownloadRepository:
                 bytes_written = 0, total_bytes = NULL, error_code = '', message = '' WHERE id = ?""", (item_id,))
             return _item(self._require(connection, item_id))
 
-    def prepare_batch_resume(self, batch_id: str, expected: tuple[DownloadItemSnapshot, ...]) -> tuple[DownloadItemSnapshot, ...]:
+    def prepare_batch_resume(self, batch_id: str, expected: tuple[DownloadItemSnapshot, ...], *,
+                             expected_generations: dict[str, int] | None = None) -> tuple[DownloadItemSnapshot, ...]:
         """Resume all previously inspected interrupted records in one transaction."""
         with self._connection(write=True) as connection:
+            self._check_batch_generations(connection, batch_id, expected_generations)
             current = tuple(item for item in self._batch(connection, batch_id).items if item.state is DownloadTaskState.AWAITING_RESUME)
             if current != expected:
                 raise DownloadError("stale_download", "下载批量已改变，请重新选择恢复。")
@@ -161,6 +201,13 @@ class DownloadRepository:
                 WHERE batch_id = ? AND state = 'awaiting_resume'""", (batch_id,))
             identifiers = {item.item_id for item in expected}
             return tuple(item for item in self._batch(connection, batch_id).items if item.item_id in identifiers)
+
+    def _check_batch_generations(self, connection: sqlite3.Connection, batch_id: str,
+                                 expected: dict[str, int] | None) -> None:
+        batch = self._batch(connection, batch_id)
+        if expected is not None and (any(type(value) is not int for value in expected.values())
+                or {item.item_id: item.generation for item in batch.items} != expected):
+            raise DownloadError("stale_download", "下载批次已经改变，请重新选择操作。")
 
     def pause(self, item_id: str, expected_generation: int) -> DownloadItemSnapshot:
         return self._update(item_id, expected_generation, {"state": "awaiting_resume", "generation": expected_generation + 1,

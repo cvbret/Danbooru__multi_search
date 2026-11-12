@@ -59,6 +59,9 @@ from danbooru_multi_search.ui.artist_combinations import ArtistCombinationContro
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
+from danbooru_multi_search.storage.downloads import DownloadRepository
+from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
+from danbooru_multi_search.ui.downloads import DownloadUiController
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.storage.database import Database
@@ -303,6 +306,10 @@ def _create_window(tmp_path):
         SettingsStore(tmp_path / "settings.json"), AppSettings()
     )
     appearance = AppearanceController(settings_controller)
+    download_repository = DownloadRepository(database)
+    download_manager = PersistentDownloadManager(download_repository, tags._task_queue, tags._network_manager)
+    download_ui = DownloadUiController(download_manager, download_repository, settings_controller,
+        core.posts_model, selection, details, tmp_path / "downloads")
     images = ImageCacheController(tmp_path / "image-cache")
     factory = ImageNetworkAccessManagerFactory(images)
     configure_controls_style()
@@ -319,6 +326,7 @@ def _create_window(tmp_path):
     context.setContextProperty("sessionController", session)
     context.setContextProperty("imageCacheController", images)
     context.setContextProperty("favoriteTransfer", transfer)
+    context.setContextProperty("downloadUi", download_ui)
     context.setContextProperty("artistCombinations", combinations)
     context.setContextProperty("favoriteCollection", collection)
     context.setContextProperty("favoriteController", favorites)
@@ -343,6 +351,8 @@ def _create_window(tmp_path):
         "favorites": favorites,
         "collection": collection,
         "transfer": transfer,
+        "download_ui": download_ui,
+        "download_manager": download_manager,
         "combinations": combinations,
         "selection": selection,
         "detail_favorites": detail_favorites,
@@ -351,6 +361,8 @@ def _create_window(tmp_path):
 
 
 def _close_window(values) -> None:
+    values["download_ui"].shutdown()
+    values["download_manager"].shutdown()
     values["transfer"].begin_shutdown()
     values["combinations"].shutdown()
     values["transfer"].shutdown()

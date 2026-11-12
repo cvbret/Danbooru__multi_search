@@ -6,8 +6,10 @@ GridView {
     objectName: "galleryGrid"
     required property var favoriteSelection
     required property var cacheController
+    required property var downloads
     property QtObject theme: AppTheme {}
     signal postActivated(int row)
+    signal downloadPrepared(string token)
     clip: true
     cellWidth: Math.max(225, width / Math.max(1, Math.floor(width / 245)))
     cellHeight: 340
@@ -18,6 +20,14 @@ GridView {
         readonly property var favoriteState: {
             const revision = grid.favoriteSelection.revision
             return grid.favoriteSelection.postState(postKey)
+        }
+        readonly property var downloadState: grid.downloads.galleryDownloadState(postKey, actionRevision)
+        downloadActionVisible: true
+        downloadEnabled: downloadState.enabled
+        downloadReason: downloadState.reason
+        onDownloadRequested: function(key, revision) {
+            const token = grid.downloads.captureGalleryPost(key, revision)
+            if (token.length) grid.downloadPrepared(token)
         }
         postKey: grid.favoriteSelection.postKeyAt(index, grid.favoriteSelection.modelRevision)
         selectionKey: postKey

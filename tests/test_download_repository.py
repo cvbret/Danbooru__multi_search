@@ -102,3 +102,28 @@ def test_open_database_failure_uses_stable_storage_error(tmp_path, monkeypatch):
     with pytest.raises(DownloadError) as caught:
         saved.list_batches()
     assert caught.value.code == "storage_error"
+
+
+def test_batch_generation_guard_is_checked_inside_write_transaction(tmp_path):
+    saved = repository(tmp_path)
+    batch = saved.create_batch((request(1), request(2)), tmp_path)
+    expected = {item.item_id: item.generation for item in batch.items}
+    started = saved.begin_attempt(batch.items[0].item_id, 0)
+    with pytest.raises(DownloadError) as caught:
+        saved.cancel_batch(batch.batch_id, expected_generations=expected)
+    assert caught.value.code == "stale_download"
+    assert saved.get_item(started.item_id).state is DownloadTaskState.RUNNING
+    assert saved.get_item(batch.items[1].item_id).state is DownloadTaskState.WAITING
+
+
+def test_batch_summaries_aggregate_without_decoding_item_rows(tmp_path, monkeypatch):
+    import danbooru_multi_search.storage.downloads as module
+    saved = repository(tmp_path)
+    batch = saved.create_batch(tuple(request(index + 1) for index in range(1000)), tmp_path)
+    item = saved.begin_attempt(batch.items[0].item_id, 0)
+    saved.update_progress(item.item_id, item.generation, 10, 20)
+    monkeypatch.setattr(module, "_item", lambda _row: pytest.fail("summaries must not decode complete items"))
+    summary = saved.read_batch_summaries(limit=1)[0]
+    assert summary.batch_id == batch.batch_id and summary.count == 1000
+    assert dict(summary.state_counts)["waiting"] == 999 and summary.bytes_written == 10
+    assert summary.total_bytes is None

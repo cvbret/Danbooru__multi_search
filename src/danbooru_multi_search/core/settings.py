@@ -223,3 +223,10 @@ class SettingsController:
 
         return self.update(image_cache_limit_bytes=value)
 
+    def set_download_directory(self, path: Path) -> AppSettings:
+        """Keep the previous snapshot unless the merged directory setting saves."""
+        local_path = Path(path)
+        if not local_path.is_absolute():
+            raise SettingsError("下载目录必须使用绝对路径。")
+        return self.update(download_directory=str(local_path))
+

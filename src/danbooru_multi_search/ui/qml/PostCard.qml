@@ -16,6 +16,10 @@ Rectangle {
     signal selectionRequested(string key, bool desired, int revision)
     signal favoriteRequested(string key, bool desired, int revision)
     signal detailRequested(string key, int revision, int row)
+    property bool downloadActionVisible: false
+    property bool downloadEnabled: false
+    property string downloadReason: ""
+    signal downloadRequested(string key, int revision)
     required property var cacheController
     property QtObject theme: AppTheme {}
     signal activated(int row)
@@ -160,6 +164,32 @@ Rectangle {
                 pressedAction = null
             }
         }
+        ActionButton {
+            objectName: "postDownload_" + card.postKey
+            theme: card.theme
+            width: 40
+            leftPadding: 4; rightPadding: 4
+            text: "↓"
+            visible: card.downloadActionVisible
+            enabled: card.downloadEnabled
+            Accessible.name: card.downloadReason
+            ToolTip.visible: hovered
+            ToolTip.text: card.downloadReason
+            property var pressedAction: null
+            onPressed: pressedAction = {"key": card.selectionKey, "revision": card.actionRevision}
+            onClicked: { if (pressedAction) card.downloadRequested(pressedAction.key, pressedAction.revision); pressedAction = null }
+        }
+    }
+
+    Label {
+        anchors.left: cardActions.left
+        anchors.top: cardActions.bottom
+        anchors.topMargin: 4
+        visible: card.downloadActionVisible && !card.downloadEnabled
+        text: qsTr("没有原文件地址")
+        color: theme.text
+        padding: 4
+        background: Rectangle { color: theme.surface; radius: 4 }
     }
 
     Loader {
