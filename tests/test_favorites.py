@@ -31,6 +31,66 @@ from danbooru_multi_search.storage.database import Database
 BASE_TIME = datetime(2026, 11, 10, 1, 2, 3, 456789, tzinfo=timezone.utc)
 
 
+def test_page_and_mutation_counts_share_the_revision_snapshot(database, repository, monkeypatch):
+    first = repository.add_favorite(FavoriteCandidate.for_post(_post(1)))
+    second = repository.add_favorite(FavoriteCandidate.for_post(_post(2)))
+    writer = FavoriteRepository(database)
+    original = favorites_module._row_to_item
+    triggered = False
+
+    def read_then_write(connection, row):
+        nonlocal triggered
+        item = original(connection, row)
+        if not triggered:
+            triggered = True
+            writer.add_favorite(FavoriteCandidate.for_pool(3, "new"))
+        return item
+
+    monkeypatch.setattr(favorites_module, "_row_to_item", read_then_write)
+    page = repository.read_favorite_page(FavoriteFilter(), FavoriteSort(), limit=1)
+    assert page.revision == 2
+    assert page.total_count == 2
+    assert len(page.items) == 1
+    assert repository.capture_collection().revision == 3
+    triggered = False
+    # A second attempted duplicate write is a no-op; change the injected identity.
+    def read_then_delete(connection, row):
+        nonlocal triggered
+        item = original(connection, row)
+        if not triggered:
+            triggered = True
+            writer.delete_favorite(second.id)
+        return item
+    monkeypatch.setattr(favorites_module, "_row_to_item", read_then_delete)
+    preview = repository.preview_items((first, second))
+    assert preview.revision == 3
+    assert len(preview.items) == 2
+    with pytest.raises(FavoriteError, match="已经变化"):
+        repository.delete_favorites((first.id, second.id), expected_revision=preview.revision)
+    assert repository.get_favorite(first.id) == first
+
+
+@pytest.mark.parametrize("operation", ["move", "delete", "folder_delete", "rename"])
+def test_revision_guard_rejects_other_repository_changes(repository, operation):
+    folder = repository.create_folder("Folder")
+    item = repository.add_favorite(FavoriteCandidate.for_post(_post(1)), folder_id=folder.id)
+    revision = repository.capture_collection().revision
+    other = FavoriteRepository(repository._database)
+    other.add_favorite(FavoriteCandidate.for_pool(2, "foreign"))
+    with pytest.raises(FavoriteError) as error:
+        if operation == "move":
+            repository.move_favorites((item.id,), None, expected_revision=revision)
+        elif operation == "delete":
+            repository.delete_favorites((item.id,), expected_revision=revision)
+        elif operation == "folder_delete":
+            repository.delete_folder(folder.id, FolderDeleteMode.DELETE_FAVORITES, expected_revision=revision)
+        else:
+            repository.rename_folder(folder.id, "Wrong", expected_revision=revision)
+    assert error.value.code == "stale_preview"
+    assert repository.get_favorite(item.id) == item
+    assert repository.get_folder(folder.id) == folder
+
+
 def test_batch_add_preserves_duplicates_and_changes_revision_once(repository):
     first = FavoriteCandidate.for_post(_post(1))
     old = repository.add_favorite(first, favorited_at=BASE_TIME)

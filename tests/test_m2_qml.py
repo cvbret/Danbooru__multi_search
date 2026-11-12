@@ -55,6 +55,7 @@ from danbooru_multi_search.danbooru.autocomplete import (
 from danbooru_multi_search.storage import HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.favorites import FavoriteController
+from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.storage.database import Database
@@ -292,6 +293,7 @@ def _create_window(tmp_path):
     favorites = FavoriteController(FavoriteRepository(database))
     selection = GallerySelectionController(core.posts_model, favorites)
     detail_favorites = DetailFavoritesController(details, favorites)
+    collection = FavoriteCollectionController(favorites._repository, favorites, detail_navigation)
     settings_controller = SettingsController(
         SettingsStore(tmp_path / "settings.json"), AppSettings()
     )
@@ -311,6 +313,7 @@ def _create_window(tmp_path):
     context.setContextProperty("appearanceController", appearance)
     context.setContextProperty("sessionController", session)
     context.setContextProperty("imageCacheController", images)
+    context.setContextProperty("favoriteCollection", collection)
     context.setContextProperty("favoriteController", favorites)
     context.setContextProperty("gallerySelection", selection)
     context.setContextProperty("detailFavorites", detail_favorites)
@@ -331,6 +334,7 @@ def _create_window(tmp_path):
         "images": images,
         "factory": factory,
         "favorites": favorites,
+        "collection": collection,
         "selection": selection,
         "detail_favorites": detail_favorites,
         "qml_warnings": qml_warnings,
@@ -338,6 +342,7 @@ def _create_window(tmp_path):
 
 
 def _close_window(values) -> None:
+    values["collection"].shutdown()
     values["favorites"].shutdown()
     values["selection"].shutdown()
     values["detail_favorites"].shutdown()

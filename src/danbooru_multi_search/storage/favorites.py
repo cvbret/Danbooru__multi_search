@@ -22,6 +22,8 @@ from danbooru_multi_search.core.favorites import (
     FavoriteIdentity,
     FavoriteItem,
     FavoriteItemDraft,
+    FavoritePageSnapshot,
+    FavoriteMutationSnapshot,
     FavoriteObjectType,
     FavoritePoolCategory,
     FavoriteSort,
@@ -110,11 +112,13 @@ class FavoriteRepository:
         name: str,
         *,
         updated_at: datetime | None = None,
+        expected_revision: int | None = None,
     ) -> FavoriteFolder:
         identifier = _positive_identifier(folder_id, "文件夹编号")
         display_name, normalized_name = _normalize_folder_name(name)
         timestamp = _canonical_timestamp(updated_at or self._clock())
         with self._write_connection() as connection:
+            _check_revision(connection, expected_revision)
             current = _row_to_folder(_require_folder(connection, identifier))
             if current.name == display_name:
                 return current
@@ -149,11 +153,14 @@ class FavoriteRepository:
             ).fetchall()
             return tuple(_row_to_folder(row) for row in rows)
 
-    def delete_folder(self, folder_id: int, mode: FolderDeleteMode) -> int:
+    def delete_folder(
+        self, folder_id: int, mode: FolderDeleteMode, *, expected_revision: int | None = None
+    ) -> int:
         identifier = _positive_identifier(folder_id, "文件夹编号")
         if not isinstance(mode, FolderDeleteMode):
             raise FavoriteError("invalid_delete_mode", "收藏文件夹删除方式无效。")
         with self._write_connection() as connection:
+            _check_revision(connection, expected_revision)
             _require_folder(connection, identifier)
             rows = connection.execute(
                 "SELECT * FROM favorite_items WHERE folder_id = ? ORDER BY id",
@@ -338,11 +345,13 @@ class FavoriteRepository:
             return True
 
     def move_favorites(
-        self, favorite_ids: Iterable[int], folder_id: int | None
+        self, favorite_ids: Iterable[int], folder_id: int | None,
+        *, expected_revision: int | None = None,
     ) -> int:
         identifiers = _batch_identifiers(favorite_ids, allow_empty=False)
         folder_identifier = _optional_positive_identifier(folder_id, "文件夹编号")
         with self._write_connection() as connection:
+            _check_revision(connection, expected_revision)
             if folder_identifier is not None:
                 _require_folder(connection, folder_identifier)
             items = _require_favorites(connection, identifiers)
@@ -362,11 +371,14 @@ class FavoriteRepository:
             _bump_collection_revision(connection)
             return len(changed_ids)
 
-    def delete_favorites(self, favorite_ids: Iterable[int]) -> int:
+    def delete_favorites(
+        self, favorite_ids: Iterable[int], *, expected_revision: int | None = None
+    ) -> int:
         identifiers = _batch_identifiers(favorite_ids, allow_empty=True)
         if not identifiers:
             return 0
         with self._write_connection() as connection:
+            _check_revision(connection, expected_revision)
             _require_favorites(connection, identifiers)
             placeholders = ",".join("?" for _ in identifiers)
             connection.execute(
@@ -396,51 +408,8 @@ class FavoriteRepository:
             minimum=0,
             maximum=_SQLITE_INTEGER_MAX,
         )
-        clauses: list[str] = []
-        parameters: list[Any] = []
-        if filters.folder_scope is FavoriteFolderScope.UNCATEGORIZED:
-            clauses.append("fi.folder_id IS NULL")
-        elif filters.folder_scope is FavoriteFolderScope.FOLDER:
-            clauses.append("fi.folder_id = ?")
-            parameters.append(filters.folder_id)
-        if filters.object_type is not None:
-            clauses.append("fi.object_type = ?")
-            parameters.append(filters.object_type.value)
-        if filters.tag_category is not None:
-            clauses.append("fi.tag_category = ?")
-            parameters.append(filters.tag_category.value)
-        if filters.exact_tag is not None:
-            clauses.append(
-                """EXISTS (
-                       SELECT 1 FROM favorite_post_tags AS ft
-                       WHERE ft.favorite_id = fi.id AND ft.tag_name = ?
-                   )"""
-            )
-            parameters.append(_normalize_tag(filters.exact_tag))
-        if filters.exact_artist is not None:
-            clauses.append(
-                """EXISTS (
-                       SELECT 1 FROM favorite_post_tags AS fa
-                       WHERE fa.favorite_id = fi.id
-                         AND fa.tag_category = 'artist' AND fa.tag_name = ?
-                   )"""
-            )
-            parameters.append(_normalize_tag(filters.exact_artist))
-        if filters.rating is not None:
-            clauses.append("fi.object_type = 'post' AND fi.rating = ?")
-            parameters.append(filters.rating)
-        where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
-        direction = (
-            "ASC"
-            if sorting.direction is FavoriteSortDirection.ASCENDING
-            else "DESC"
-        )
-        if sorting.field is FavoriteSortField.FAVORITED_AT:
-            order_sql = f"fi.favorited_at {direction}, fi.id ASC"
-        elif sorting.field is FavoriteSortField.SCORE:
-            order_sql = f"(fi.score IS NULL), fi.score {direction}, fi.id ASC"
-        else:
-            order_sql = f"(fi.fav_count IS NULL), fi.fav_count {direction}, fi.id ASC"
+        where_sql, parameters = _favorite_filter_sql(filters)
+        order_sql = _favorite_order_sql(sorting)
         with self._read_connection() as connection:
             if filters.folder_scope is FavoriteFolderScope.FOLDER:
                 _require_folder(connection, int(filters.folder_id))
@@ -452,6 +421,70 @@ class FavoriteRepository:
                 (*parameters, page_limit, page_offset),
             ).fetchall()
             return tuple(_row_to_item(connection, row) for row in rows)
+
+    def read_favorite_page(
+        self, filters: FavoriteFilter, sorting: FavoriteSort,
+        *, limit: int = 200, offset: int = 0,
+    ) -> FavoritePageSnapshot:
+        """Read rows, total, folders, and revision from the same SQLite snapshot."""
+
+        if not isinstance(filters, FavoriteFilter) or not isinstance(sorting, FavoriteSort):
+            raise FavoriteError("invalid_filter", "收藏筛选或排序条件无效。")
+        page_limit = _bounded_integer(limit, "limit", minimum=1, maximum=1000)
+        page_offset = _bounded_integer(offset, "offset", minimum=0, maximum=_SQLITE_INTEGER_MAX)
+        where, parameters = _favorite_filter_sql(filters)
+        order = _favorite_order_sql(sorting)
+        with self._read_connection() as connection:
+            if filters.folder_scope is FavoriteFolderScope.FOLDER:
+                _require_folder(connection, filters.folder_id)
+            total = connection.execute(
+                f"SELECT count(*) FROM favorite_items AS fi{where}", parameters
+            ).fetchone()[0]
+            revision = _collection_revision(connection)
+            folders = tuple(_row_to_folder(row) for row in connection.execute(
+                "SELECT * FROM favorite_folders ORDER BY normalized_name, id"
+            ).fetchall())
+            rows = connection.execute(
+                f"SELECT fi.* FROM favorite_items AS fi{where} ORDER BY {order} LIMIT ? OFFSET ?",
+                (*parameters, page_limit, page_offset),
+            ).fetchall()
+            return FavoritePageSnapshot(
+                revision, total, tuple(_row_to_item(connection, row) for row in rows), folders
+            )
+
+    def preview_items(
+        self, expected_items: tuple[FavoriteItem, ...], *,
+        target_folder: FavoriteFolder | None = None,
+    ) -> FavoriteMutationSnapshot:
+        """Reject stale selected records before publishing an effect count."""
+
+        if not isinstance(expected_items, tuple) or not all(isinstance(item, FavoriteItem) for item in expected_items):
+            raise FavoriteError("invalid_batch", "收藏操作缺少有效的记录快照。")
+        identifiers = _batch_identifiers((item.id for item in expected_items), allow_empty=False)
+        with self._read_connection() as connection:
+            items = _require_favorites(connection, identifiers)
+            if {item.id: item for item in items} != {item.id: item for item in expected_items}:
+                raise FavoriteError("stale_preview", "所选收藏已经变化，请刷新后重新选择。")
+            if target_folder is not None:
+                if not isinstance(target_folder, FavoriteFolder) or _row_to_folder(
+                    _require_folder(connection, target_folder.id)
+                ) != target_folder:
+                    raise FavoriteError("stale_preview", "目标文件夹已经变化，请重新选择。")
+            return FavoriteMutationSnapshot(_collection_revision(connection), items, target_folder=target_folder)
+
+    def preview_folder(self, expected_folder: FavoriteFolder) -> FavoriteMutationSnapshot:
+        """Capture the folder's full effect and revision in one read transaction."""
+
+        if not isinstance(expected_folder, FavoriteFolder):
+            raise FavoriteError("invalid_folder", "文件夹快照无效。")
+        with self._read_connection() as connection:
+            folder = _row_to_folder(_require_folder(connection, expected_folder.id))
+            if folder != expected_folder:
+                raise FavoriteError("stale_preview", "文件夹已经变化，请重新选择。")
+            items = tuple(_row_to_item(connection, row) for row in connection.execute(
+                "SELECT * FROM favorite_items WHERE folder_id = ? ORDER BY id", (folder.id,)
+            ).fetchall())
+            return FavoriteMutationSnapshot(_collection_revision(connection), items, folder=folder)
 
     def capture_collection(self) -> FavoriteCollectionSnapshot:
         """Read every folder and favorite from one consistent transaction."""
@@ -981,3 +1014,66 @@ def _strict_integer(value: Any, label: str) -> int:
 def _expect_equal(actual: Any, expected: Any, label: str) -> None:
     if actual != expected or isinstance(actual, bool):
         raise FavoriteError("summary_mismatch", f"{label}与收藏概要不一致。")
+
+
+
+def _favorite_filter_sql(filters: FavoriteFilter) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    parameters: list[Any] = []
+    if filters.folder_scope is FavoriteFolderScope.UNCATEGORIZED:
+        clauses.append("fi.folder_id IS NULL")
+    elif filters.folder_scope is FavoriteFolderScope.FOLDER:
+        clauses.append("fi.folder_id = ?")
+        parameters.append(filters.folder_id)
+    if filters.object_type is not None:
+        clauses.append("fi.object_type = ?")
+        parameters.append(filters.object_type.value)
+    if filters.tag_category is not None:
+        clauses.append("fi.tag_category = ?")
+        parameters.append(filters.tag_category.value)
+    if filters.exact_tag is not None:
+        clauses.append(
+            """EXISTS (
+                   SELECT 1 FROM favorite_post_tags AS ft
+                   WHERE ft.favorite_id = fi.id AND ft.tag_name = ?
+               )"""
+        )
+        parameters.append(_normalize_tag(filters.exact_tag))
+    if filters.exact_artist is not None:
+        clauses.append(
+            """EXISTS (
+                   SELECT 1 FROM favorite_post_tags AS fa
+                   WHERE fa.favorite_id = fi.id
+                     AND fa.tag_category = 'artist' AND fa.tag_name = ?
+               )"""
+        )
+        parameters.append(_normalize_tag(filters.exact_artist))
+    if filters.rating is not None:
+        clauses.append("fi.object_type = 'post' AND fi.rating = ?")
+        parameters.append(filters.rating)
+    where_sql = " WHERE " + " AND ".join(clauses) if clauses else ""
+    return where_sql, parameters
+
+
+def _favorite_order_sql(sorting: FavoriteSort) -> str:
+    direction = (
+        "ASC"
+        if sorting.direction is FavoriteSortDirection.ASCENDING
+        else "DESC"
+    )
+    if sorting.field is FavoriteSortField.FAVORITED_AT:
+        order_sql = f"fi.favorited_at {direction}, fi.id ASC"
+    elif sorting.field is FavoriteSortField.SCORE:
+        order_sql = f"(fi.score IS NULL), fi.score {direction}, fi.id ASC"
+    else:
+        order_sql = f"(fi.fav_count IS NULL), fi.fav_count {direction}, fi.id ASC"
+    return order_sql
+
+
+def _check_revision(connection: sqlite3.Connection, expected: int | None) -> None:
+    if expected is None:
+        return
+    if type(expected) is not int or not 0 <= expected <= _SQLITE_INTEGER_MAX:
+        raise FavoriteError("invalid_preview", "收藏确认修订号无效。")
+    if _collection_revision(connection) != expected:
+        raise FavoriteError("stale_preview", "收藏数据已经变化，请刷新后重新确认。")

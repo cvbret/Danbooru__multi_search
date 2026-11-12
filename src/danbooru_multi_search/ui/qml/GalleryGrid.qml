@@ -15,9 +15,29 @@ GridView {
     ScrollBar.vertical: ScrollBar {}
 
     delegate: PostCard {
-        favoriteSelection: grid.favoriteSelection
+        readonly property var favoriteState: {
+            const revision = grid.favoriteSelection.revision
+            return grid.favoriteSelection.postState(postKey)
+        }
+        postKey: grid.favoriteSelection.postKeyAt(index, grid.favoriteSelection.modelRevision)
+        selectionKey: postKey
+        actionRevision: grid.favoriteSelection.modelRevision
+        selected: favoriteState.selected
+        favoriteKnown: favoriteState.known
+        favoriteSaved: favoriteState.saved
+        favoriteEnabled: favoriteState.enabled
         cacheController: grid.cacheController
         theme: grid.theme
-        onActivated: function(row) { grid.postActivated(row) }
+        onSelectionRequested: function(key, desired, revision) {
+            grid.favoriteSelection.setSelected(key, desired, revision)
+        }
+        onFavoriteRequested: function(key, desired, revision) {
+            grid.favoriteSelection.setPostFavorite(key, desired, revision)
+        }
+        onDetailRequested: function(key, revision, row) {
+            if (revision === grid.favoriteSelection.modelRevision
+                    && key === grid.favoriteSelection.postKeyAt(row, revision))
+                grid.postActivated(row)
+        }
     }
 }

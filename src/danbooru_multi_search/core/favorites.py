@@ -185,6 +185,26 @@ class FavoriteItem:
 
 
 @dataclass(frozen=True, slots=True)
+class FavoritePageSnapshot:
+    """One consistent page, count, folder list, and collection revision."""
+
+    revision: int
+    total_count: int
+    items: tuple[FavoriteItem, ...]
+    folders: tuple[FavoriteFolder, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FavoriteMutationSnapshot:
+    """Validated affected records and folder references from one read."""
+
+    revision: int
+    items: tuple[FavoriteItem, ...]
+    folder: FavoriteFolder | None = None
+    target_folder: FavoriteFolder | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FavoriteFolderDraft:
     """One validated folder supplied by a trusted persistence service."""
 

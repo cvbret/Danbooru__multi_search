@@ -60,6 +60,34 @@ def test_shared_state_is_published_after_commit_and_cancel_is_idempotent(tmp_pat
     assert repository.capture_collection().revision == 2
 
 
+def test_successful_reads_do_not_emit_collection_write_notifications(tmp_path):
+    repository, controller = build(tmp_path)
+    notifications = []
+    controller.collectionChanged.connect(lambda: notifications.append(repository.capture_collection().revision))
+    controller.ensure((post_identity("1"),))
+    controller.retryStates()
+    controller.observe_items(())
+    assert notifications == []
+    assert controller.set_post(post(), True, guard=lambda: True)
+    assert notifications == [1]
+
+
+def test_failed_collection_delete_keeps_shared_saved_fact(tmp_path, monkeypatch):
+    repository, controller = build(tmp_path)
+    assert controller.set_post(post(), True, guard=lambda: True)
+    saved = repository.get_by_identity(post_identity("1"))
+    snapshot = repository.preview_items((saved,))
+    writes = []
+    controller.collectionChanged.connect(lambda: writes.append(True))
+    def fail(*args, **kwargs):
+        raise FavoriteError("injected", "injected delete failure")
+    monkeypatch.setattr(repository, "delete_favorites", fail)
+    assert not controller.delete_items(snapshot, guard=lambda: True)
+    assert controller.state(saved.identity)["saved"]
+    assert writes == []
+    assert repository.get_favorite(saved.id) == saved
+
+
 def test_read_and_write_failures_keep_confirmed_facts(tmp_path, monkeypatch):
     repository, controller = build(tmp_path)
     work = post()

@@ -33,6 +33,7 @@ from danbooru_multi_search.tasks import (
 from danbooru_multi_search.storage import Database, HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.favorites import FavoriteController
+from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.ui.appearance import AppearanceController
@@ -148,6 +149,9 @@ class _UiSession(QObject):
             self.query_controller.posts_model,
             parent=self,
         )
+        self.favorite_collection = FavoriteCollectionController(
+            self.favorite_controller._repository, self.favorite_controller, self.detail_navigation, self
+        )
         self.tag_controller = DanbooruTagSuggestionController(
             danbooru_base_url,
             network_manager=self.network_manager,
@@ -190,6 +194,7 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.favorite_collection.shutdown,
             self.favorite_controller.shutdown,
             self.gallery_selection.shutdown,
             self.detail_favorites.shutdown,
@@ -225,6 +230,7 @@ class _UiSession(QObject):
             and self.session_controller.events_detached
             and self.detail_controller._shutdown
             and self.detail_navigation._closed
+            and self.favorite_collection._closed
             and self.favorite_controller._closed
             and self.gallery_selection._closed
             and self.detail_favorites._closed
@@ -293,6 +299,7 @@ def _create_qml_session(
         "imageCacheController",
         session.image_cache_controller,
     )
+    engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)
     engine.rootContext().setContextProperty("detailFavorites", session.detail_favorites)

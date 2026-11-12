@@ -49,6 +49,46 @@ ApplicationWindow {
         theme: root.theme
     }
 
+    property string activePage: "browse"
+
+    function showPage(pageName) {
+        if (detailController.isOpen)
+            return
+        queryDrawer.close()
+        activePage = pageName
+        if (pageName === "favorites")
+            favoriteCollection.setActive(true)
+    }
+
+    RowLayout {
+        id: pageNavigation
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 12
+        height: 40
+        spacing: 8
+        ActionButton {
+            objectName: "browseNavigationButton"
+            text: qsTr("浏览")
+            checkable: true
+            autoExclusive: true
+            checked: root.activePage === "browse"
+            enabled: !detailController.isOpen
+            onClicked: root.showPage("browse")
+        }
+        ActionButton {
+            objectName: "favoritesNavigationButton"
+            text: qsTr("收藏")
+            checkable: true
+            autoExclusive: true
+            checked: root.activePage === "favorites"
+            enabled: !detailController.isOpen
+            onClicked: root.showPage("favorites")
+        }
+        Item { Layout.fillWidth: true }
+    }
+
     property bool compactLayout: width < 980
     property real queryPanelWidth: 350
     property bool stateTrackingReady: false
@@ -194,8 +234,13 @@ ApplicationWindow {
     function returnToGallery() {
         if (!detailNavigation.closeDetail())
             return
-        if (detailNavigation.sourcePage === "browse")
+        if (detailNavigation.sourcePage === "favorites") {
+            root.activePage = "favorites"
+            favoritesPage.scheduleRestorePosition()
+        } else {
+            root.activePage = "browse"
             Qt.callLater(root.restoreGallerySnapshot)
+        }
     }
 
     function restoreGallerySnapshot() {
@@ -216,12 +261,19 @@ ApplicationWindow {
     }
 
     function startQueryFromDetailTag(tagName) {
+        root.activePage = "browse"
         if (!searchController.applyAdvancedText(tagName))
             return
         searchController.executeStandard()
     }
 
     function addDetailTagToDraft(tagName) {
+        if (detailNavigation.sourcePage === "favorites") {
+            detailNavigation.closeDetail()
+            root.activePage = "browse"
+            if (root.compactLayout)
+                queryDrawer.open()
+        }
         searchController.addVisualTag(null, tagName)
     }
 
@@ -443,10 +495,10 @@ ApplicationWindow {
 
     Item {
         id: wideQueryPanel
-        visible: !root.compactLayout && !detailController.isOpen
+        visible: root.activePage === "browse" && !root.compactLayout && !detailController.isOpen
         width: visible ? root.queryPanelWidth : 0
         anchors.left: parent.left
-        anchors.top: parent.top
+        anchors.top: pageNavigation.bottom
         anchors.bottom: parent.bottom
 
         Loader {
@@ -490,10 +542,10 @@ ApplicationWindow {
         id: pageStack
         anchors.left: wideQueryPanel.right
         anchors.right: parent.right
-        anchors.top: parent.top
+        anchors.top: pageNavigation.bottom
         anchors.bottom: parent.bottom
         anchors.margins: 20
-        currentIndex: detailController.isOpen ? 1 : 0
+        currentIndex: detailController.isOpen ? 2 : (root.activePage === "favorites" ? 1 : 0)
 
         Item {
             id: galleryPage
@@ -618,7 +670,7 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: 300
+                    Layout.minimumHeight: 220
                     radius: theme.radius
                     color: theme.canvas
                     border.color: theme.border
@@ -710,7 +762,15 @@ ApplicationWindow {
             }
         }
 
+        FavoritesPage {
+            id: favoritesPage
+            controller: favoriteCollection
+            cacheController: imageCacheController
+            theme: root.theme
+        }
+
         DetailPage {
+            backLabel: detailNavigation.sourcePage === "favorites" ? qsTr("返回收藏") : qsTr("返回画廊")
             theme: root.theme
             controller: detailController
             favorites: detailFavorites

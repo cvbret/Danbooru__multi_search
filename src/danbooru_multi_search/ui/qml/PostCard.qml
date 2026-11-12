@@ -5,15 +5,17 @@ import QtQuick.Layouts
 Rectangle {
     id: card
     objectName: "postCard_" + postKey
-    required property var favoriteSelection
-    readonly property string postKey: {
-        const revision = favoriteSelection.modelRevision
-        return favoriteSelection.postKeyAt(index, revision)
-    }
-    readonly property var localFavorite: {
-        const revision = favoriteSelection.revision
-        return favoriteSelection.postState(postKey)
-    }
+    required property string postKey
+    required property string selectionKey
+    required property int actionRevision
+    required property bool selected
+    required property bool favoriteKnown
+    required property bool favoriteSaved
+    required property bool favoriteEnabled
+    property string titleText: qsTr("作品 #%1").arg(postKey)
+    signal selectionRequested(string key, bool desired, int revision)
+    signal favoriteRequested(string key, bool desired, int revision)
+    signal detailRequested(string key, int revision, int row)
     required property var cacheController
     property QtObject theme: AppTheme {}
     signal activated(int row)
@@ -88,6 +90,11 @@ Rectangle {
     }
 
     TapHandler {
+        property var pressedAction: null
+        onPressedChanged: {
+            if (pressed)
+                pressedAction = { "key": card.selectionKey, "revision": card.actionRevision, "row": card.index }
+        }
         onTapped: function(point) {
             const p = point.position
             if (p.x >= cardActions.x && p.x <= cardActions.x + cardActions.width
@@ -96,7 +103,10 @@ Rectangle {
             if (card.thumbnailFailed && p.y >= thumbnailLoader.y
                     && p.y <= thumbnailLoader.y + thumbnailLoader.height)
                 return
-            card.activated(card.index)
+            if (pressedAction) {
+                card.activated(pressedAction.row)
+                card.detailRequested(pressedAction.key, pressedAction.revision, pressedAction.row)
+            }
         }
     }
 
@@ -109,18 +119,18 @@ Rectangle {
         z: 2
 
         CheckBox {
-            objectName: "postSelect_" + card.postKey
-            checked: card.localFavorite.selected
+            objectName: "postSelect_" + card.selectionKey
+            checked: card.selected
             Accessible.name: qsTr("选择作品 #%1").arg(card.postKey)
             property var pressedAction: null
             onPressed: pressedAction = {
-                "key": card.postKey,
-                "revision": favoriteSelection.modelRevision,
+                "key": card.selectionKey,
+                "revision": card.actionRevision,
                 "selected": !checked
             }
             onClicked: {
                 if (pressedAction)
-                    favoriteSelection.setSelected(pressedAction.key,
+                    card.selectionRequested(pressedAction.key,
                         pressedAction.selected, pressedAction.revision)
                 pressedAction = null
             }
@@ -131,21 +141,21 @@ Rectangle {
             width: 40
             leftPadding: 4
             rightPadding: 4
-            text: card.localFavorite.known ? (card.localFavorite.saved ? "★" : "☆") : "?"
-            enabled: card.localFavorite.enabled
-            Accessible.name: card.localFavorite.saved ? qsTr("取消本地收藏") : qsTr("本地收藏")
+            text: card.favoriteKnown ? (card.favoriteSaved ? "★" : "☆") : "?"
+            enabled: card.favoriteEnabled
+            Accessible.name: card.favoriteSaved ? qsTr("取消本地收藏") : qsTr("本地收藏")
             ToolTip.visible: hovered
-            ToolTip.text: !card.localFavorite.known ? qsTr("本地收藏状态未知，请重试")
-                         : card.localFavorite.saved ? qsTr("取消本地收藏") : qsTr("本地收藏")
+            ToolTip.text: !card.favoriteKnown ? qsTr("本地收藏状态未知，请重试")
+                         : card.favoriteSaved ? qsTr("取消本地收藏") : qsTr("本地收藏")
             property var pressedAction: null
             onPressed: pressedAction = {
-                "key": card.postKey,
-                "revision": favoriteSelection.modelRevision,
-                "desired": !card.localFavorite.saved
+                "key": card.selectionKey,
+                "revision": card.actionRevision,
+                "desired": !card.favoriteSaved
             }
             onClicked: {
                 if (pressedAction)
-                    favoriteSelection.setPostFavorite(pressedAction.key,
+                    card.favoriteRequested(pressedAction.key,
                         pressedAction.desired, pressedAction.revision)
                 pressedAction = null
             }
@@ -269,7 +279,7 @@ Rectangle {
         spacing: 4
         Label {
             Layout.fillWidth: true
-            text: qsTr("作品 #%1").arg(card.postKey)
+            text: card.titleText
             color: theme.text
             font.bold: true
             elide: Text.ElideRight

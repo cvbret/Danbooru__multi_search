@@ -10,6 +10,7 @@ Item {
     required property var favorites
     required property var controller
     property bool complexQueryActionsEnabled: false
+    property string backLabel: qsTr("返回画廊")
     readonly property bool wideLayout: width >= 980
     onWideLayoutChanged: { if (wideLayout) informationDrawer.close() }
     signal backRequested()
@@ -76,7 +77,7 @@ Item {
             spacing: 12
             ActionButton {
                 objectName: "detailBackButton"
-                text: qsTr("返回画廊")
+                text: page.backLabel
                 onClicked: page.backRequested()
             }
             Label {

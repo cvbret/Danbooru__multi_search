@@ -13,6 +13,8 @@ from danbooru_multi_search.core.favorites import (
     FavoriteItem,
     FavoriteObjectType,
     FavoriteTagCategory,
+    FavoriteMutationSnapshot,
+    FolderDeleteMode,
 )
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.storage.favorites import FavoriteRepository
@@ -22,6 +24,7 @@ class FavoriteController(QObject):
     """Publish favorite facts only after successful reads or committed writes."""
 
     stateChanged = Signal()
+    collectionChanged = Signal()
     noticeChanged = Signal()
     busyChanged = Signal()
 
@@ -109,34 +112,88 @@ class FavoriteController(QObject):
             lambda: (FavoriteCandidate.for_tag(name, category),), desired, guard
         )
 
+    def observe_items(self, items: tuple[FavoriteItem, ...]) -> None:
+        """Accept facts already read successfully in a consistent collection page."""
+
+        if self._closed:
+            return
+        self._observed.update(item.identity for item in items)
+        self._confirmed.update((item.identity, item) for item in items)
+        self.stateChanged.emit()
+
+    def create_folder(self, name: str, *, guard) -> bool:
+        def command():
+            self._repository.create_folder(name)
+            return {}
+        return self._write(command, guard)
+
+    def rename_folder(self, identifier: int, name: str, revision: int, *, guard) -> bool:
+        def command():
+            self._repository.rename_folder(identifier, name, expected_revision=revision)
+            return {}
+        return self._write(command, guard)
+
+    def move_items(self, snapshot: FavoriteMutationSnapshot, *, guard) -> bool:
+        def command():
+            self._repository.move_favorites(
+                tuple(item.id for item in snapshot.items),
+                snapshot.target_folder.id if snapshot.target_folder else None,
+                expected_revision=snapshot.revision,
+            )
+            return {}
+        return self._write(command, guard)
+
+    def delete_items(self, snapshot: FavoriteMutationSnapshot, *, guard) -> bool:
+        def command():
+            self._repository.delete_favorites(
+                tuple(item.id for item in snapshot.items), expected_revision=snapshot.revision
+            )
+            return {item.identity: None for item in snapshot.items}
+        return self._write(command, guard)
+
+    def delete_folder(self, snapshot: FavoriteMutationSnapshot, mode: FolderDeleteMode, *, guard) -> bool:
+        def command():
+            self._repository.delete_folder(
+                snapshot.folder.id, mode, expected_revision=snapshot.revision
+            )
+            return {item.identity: None for item in snapshot.items} if mode is FolderDeleteMode.DELETE_FAVORITES else {}
+        return self._write(command, guard)
+
     def _change(self, build_candidates, desired: bool, guard) -> bool:
-        if self._closed or self._busy or type(desired) is not bool or not guard():
+        if type(desired) is not bool:
+            return False
+
+        def command():
+            candidates = build_candidates()
+            if not candidates or self._closed or not guard():
+                return None
+            if desired:
+                items = self._repository.add_favorites(candidates)
+                return {item.identity: item for item in items}
+            value = candidates[0]
+            identity = value if isinstance(value, FavoriteIdentity) else value.identity
+            self._repository.delete_by_identity(identity)
+            return {identity: None}
+
+        return self._write(command, guard)
+
+    def _write(self, command, guard) -> bool:
+        if self._closed or self._busy or not guard():
             return False
         self._busy = True
         self.busyChanged.emit()
         try:
             if self._closed or not guard():
                 return False
-            candidates = build_candidates()
-            if not candidates:
-                return False
-            # Recheck after any source callbacks and before starting a transaction.
-            if self._closed or not guard():
-                return False
-            if desired:
-                items = self._repository.add_favorites(candidates)
-                values = {item.identity: item for item in items}
-            else:
-                value = candidates[0]
-                identity = value if isinstance(value, FavoriteIdentity) else value.identity
-                self._repository.delete_by_identity(identity)
-                values = {identity: None}
-            if self._closed:
+            values = command()
+            if values is None or self._closed:
                 return False
             self._confirmed.update(values)
             self._set_notice("")
             if not self._closed:
                 self.stateChanged.emit()
+            if not self._closed:
+                self.collectionChanged.emit()
             return not self._closed
         except (FavoriteError, TypeError, ValueError) as exc:
             self._set_notice(f"收藏操作失败：{exc}")

@@ -162,6 +162,7 @@ def test_appearance_qml_resources_and_effect_module_are_in_bundle_contract():
     for name in (
         "ActionButton.qml", "AppTheme.qml", "AppearancePanel.qml", "ApplicationBackground.qml",
         "PostCard.qml", "GalleryGrid.qml",
+        "FavoritesPage.qml", "FavoriteObjectCard.qml", "FavoriteConfirmDialog.qml",
     ):
         assert name in QML_FILES
         assert f"danbooru_multi_search/ui/qml/{name}" in EXPECTED_QML_MEMBERS

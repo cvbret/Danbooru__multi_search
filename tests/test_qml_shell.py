@@ -413,6 +413,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         fail_final_save,
     )
     for name, owner, attribute in (
+        ("collection", ui_session.favorite_collection, "shutdown"),
         ("favorites", ui_session.favorite_controller, "shutdown"),
         ("selection", ui_session.gallery_selection, "shutdown"),
         ("detail-favorites", ui_session.detail_favorites, "shutdown"),
@@ -451,6 +452,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
 
     assert reentry_count == 1
     assert events == [
+        "collection",
         "favorites",
         "selection",
         "detail-favorites",
