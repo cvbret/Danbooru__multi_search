@@ -31,6 +31,76 @@ from danbooru_multi_search.storage.database import Database
 BASE_TIME = datetime(2026, 11, 10, 1, 2, 3, 456789, tzinfo=timezone.utc)
 
 
+def test_batch_add_preserves_duplicates_and_changes_revision_once(repository):
+    first = FavoriteCandidate.for_post(_post(1))
+    old = repository.add_favorite(first, favorited_at=BASE_TIME)
+    before = repository.capture_collection().revision
+    assert repository.add_favorites((first,), folder_id=9999) == (old,)
+    assert repository.capture_collection().revision == before
+    second = FavoriteCandidate.for_post(_post(2))
+    results = repository.add_favorites((first, second, second), favorited_at=BASE_TIME)
+    assert results[0] == old
+    assert len(results) == 2
+    assert results[1].favorited_at == BASE_TIME
+    assert repository.capture_collection().revision == before + 1
+    assert repository.add_favorites(()) == ()
+    assert repository.capture_collection().revision == before + 1
+
+
+@pytest.mark.parametrize("failure", ["second_insert", "revision", "commit"])
+def test_batch_add_rolls_back_items_tags_and_revision(repository, monkeypatch, failure):
+    original = favorites_module._insert_favorite
+    count = 0
+
+    def insert(*args, **kwargs):
+        nonlocal count
+        count += 1
+        value = original(*args, **kwargs)
+        if failure == "second_insert" and count == 2:
+            raise FavoriteError("injected", "second insert failed")
+        return value
+
+    monkeypatch.setattr(favorites_module, "_insert_favorite", insert)
+    if failure == "revision":
+        def bump(connection):
+            raise FavoriteError("injected", "revision failed")
+        monkeypatch.setattr(favorites_module, "_bump_collection_revision", bump)
+    if failure == "commit":
+        from contextlib import contextmanager
+
+        original_write = repository._write_connection
+
+        @contextmanager
+        def fail_commit():
+            with original_write() as connection:
+                yield connection
+                raise FavoriteError("injected", "commit failed")
+
+        monkeypatch.setattr(repository, "_write_connection", fail_commit)
+    with pytest.raises(FavoriteError):
+        repository.add_favorites(tuple(FavoriteCandidate.for_post(_post(i)) for i in (1, 2)))
+    assert repository.capture_collection().revision == 0
+    assert repository.list_favorites() == ()
+    with repository._read_connection() as connection:
+        assert connection.execute("SELECT count(*) FROM favorite_post_tags").fetchone()[0] == 0
+
+
+def test_batch_mixed_unknown_folder_rolls_back_and_identity_delete_ignores_reused_id(repository):
+    first = FavoriteCandidate.for_post(_post(1))
+    old = repository.add_favorite(first)
+    before = repository.capture_collection()
+    with pytest.raises(FavoriteError):
+        repository.add_favorites((first, FavoriteCandidate.for_post(_post(2))), folder_id=9999)
+    assert repository.capture_collection() == before
+    assert repository.delete_by_identity(first.identity)
+    replacement = repository.add_favorite(FavoriteCandidate.for_post(_post(3)))
+    assert replacement.id == old.id  # SQLite may reuse the removed highest row id.
+    revision = repository.capture_collection().revision
+    assert not repository.delete_by_identity(first.identity)
+    assert repository.get_favorite(replacement.id) == replacement
+    assert repository.capture_collection().revision == revision
+
+
 def _post(
     post_id: int,
     *,

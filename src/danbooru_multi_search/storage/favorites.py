@@ -185,30 +185,61 @@ class FavoriteRepository:
         folder_id: int | None = None,
         favorited_at: datetime | None = None,
     ) -> FavoriteItem:
-        validated = _validate_candidate(candidate)
+        return self.add_favorites(
+            (candidate,), folder_id=folder_id, favorited_at=favorited_at
+        )[0]
+
+    def add_favorites(
+        self,
+        candidates: Iterable[FavoriteCandidate],
+        *,
+        folder_id: int | None = None,
+        favorited_at: datetime | None = None,
+    ) -> tuple[FavoriteItem, ...]:
+        """Save unique identities atomically, keeping every existing overview."""
+
+        if isinstance(candidates, (str, bytes)):
+            raise FavoriteError("invalid_batch", "批量收藏必须是收藏概要序列。")
+        try:
+            validated = tuple(
+                _validate_candidate(candidate) for candidate in candidates
+            )
+        except TypeError as exc:
+            raise FavoriteError("invalid_batch", "批量收藏必须是收藏概要序列。") from exc
+        # Different metadata for the same identity still means one favorite;
+        # the first occurrence supplies the overview for a newly saved item.
+        by_identity = {}
+        for candidate in validated:
+            by_identity.setdefault(candidate.identity, candidate)
         folder_identifier = _optional_positive_identifier(folder_id, "文件夹编号")
+        if not by_identity:
+            return ()
         with self._write_connection() as connection:
-            existing = _select_identity(connection, validated.identity)
-            if existing is not None:
-                return _row_to_item(connection, existing)
-            if folder_identifier is not None:
-                _require_folder(connection, folder_identifier)
-            timestamp = _canonical_timestamp(favorited_at or self._clock())
-            favorite_id = _insert_favorite(
-                connection,
-                validated,
-                folder_identifier,
-                timestamp,
-                timestamp,
-            )
-            result = _row_to_item(
-                connection,
-                connection.execute(
-                    "SELECT * FROM favorite_items WHERE id = ?", (favorite_id,)
-                ).fetchone(),
-            )
-            _bump_collection_revision(connection)
-            return result
+            results = []
+            timestamp = None
+            added = False
+            for candidate in by_identity.values():
+                existing = _select_identity(connection, candidate.identity)
+                if existing is not None:
+                    results.append(_row_to_item(connection, existing))
+                    continue
+                if timestamp is None:
+                    if folder_identifier is not None:
+                        _require_folder(connection, folder_identifier)
+                    timestamp = _canonical_timestamp(favorited_at or self._clock())
+                favorite_id = _insert_favorite(
+                    connection, candidate, folder_identifier, timestamp, timestamp
+                )
+                results.append(_row_to_item(
+                    connection,
+                    connection.execute(
+                        "SELECT * FROM favorite_items WHERE id = ?", (favorite_id,)
+                    ).fetchone(),
+                ))
+                added = True
+            if added:
+                _bump_collection_revision(connection)
+            return tuple(results)
 
     def refresh_metadata(
         self,
@@ -289,6 +320,20 @@ class FavoriteRepository:
                 return False
             _row_to_item(connection, row)
             connection.execute("DELETE FROM favorite_items WHERE id = ?", (identifier,))
+            _bump_collection_revision(connection)
+            return True
+
+    def delete_by_identity(self, identity: FavoriteIdentity) -> bool:
+        """Remove the current identity atomically; an absent item is a no-op."""
+
+        if not isinstance(identity, FavoriteIdentity):
+            raise FavoriteError("invalid_identity", "收藏身份无效。")
+        with self._write_connection() as connection:
+            row = _select_identity(connection, identity)
+            if row is None:
+                return False
+            item = _row_to_item(connection, row)
+            connection.execute("DELETE FROM favorite_items WHERE id = ?", (item.id,))
             _bump_collection_revision(connection)
             return True
 

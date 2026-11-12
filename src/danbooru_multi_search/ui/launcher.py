@@ -31,6 +31,10 @@ from danbooru_multi_search.tasks import (
     TaskQueueConfig,
 )
 from danbooru_multi_search.storage import Database, HistoryRepository
+from danbooru_multi_search.storage.favorites import FavoriteRepository
+from danbooru_multi_search.ui.favorites import FavoriteController
+from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
+from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.ui.appearance import AppearanceController
 from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
 from danbooru_multi_search.ui.image_cache import (
@@ -132,6 +136,13 @@ class _UiSession(QObject):
             self.translation_store,
             parent=self,
         )
+        self.favorite_controller = FavoriteController(FavoriteRepository(database), self)
+        self.gallery_selection = GallerySelectionController(
+            self.query_controller.posts_model, self.favorite_controller, self
+        )
+        self.detail_favorites = DetailFavoritesController(
+            self.detail_controller, self.favorite_controller, self
+        )
         self.detail_navigation = DetailNavigationController(
             self.detail_controller,
             self.query_controller.posts_model,
@@ -179,6 +190,9 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.favorite_controller.shutdown,
+            self.gallery_selection.shutdown,
+            self.detail_favorites.shutdown,
             self.appearance_controller.shutdown,
             self.query_bridge.beginClosing,
             self.query_controller.shutdown,
@@ -211,6 +225,9 @@ class _UiSession(QObject):
             and self.session_controller.events_detached
             and self.detail_controller._shutdown
             and self.detail_navigation._closed
+            and self.favorite_controller._closed
+            and self.gallery_selection._closed
+            and self.detail_favorites._closed
             and self.appearance_controller._closed
             and self.query_controller.closed
             and self.query_executor.closed
@@ -276,6 +293,9 @@ def _create_qml_session(
         "imageCacheController",
         session.image_cache_controller,
     )
+    engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
+    engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)
+    engine.rootContext().setContextProperty("detailFavorites", session.detail_favorites)
     engine.load(QUrl.fromLocalFile(str(main_qml_path())))
     if session.settings_controller.settings.tag_csv_path:
         session.tag_controller.importSavedCsv(

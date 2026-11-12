@@ -7,6 +7,7 @@ Item {
     property QtObject theme: AppTheme {}
     objectName: "detailPage"
 
+    required property var favorites
     required property var controller
     property bool complexQueryActionsEnabled: false
     readonly property bool wideLayout: width >= 980
@@ -101,10 +102,42 @@ Item {
             }
         }
 
+        Label {
+            Layout.fillWidth: true
+            visible: favoriteController.noticeText.length > 0
+            text: favoriteController.noticeText
+            color: theme.error
+            wrapMode: Text.Wrap
+        }
+
         Flow {
             objectName: "detailActions"
             Layout.fillWidth: true
             spacing: 8
+            ActionButton {
+                text: qsTr("重试收藏状态")
+                visible: favoriteController.noticeText.length > 0
+                enabled: !favoriteController.busy
+                onClicked: favoriteController.retryStates()
+            }
+            ActionButton {
+                objectName: "detailFavoriteButton"
+                text: !favorites.postState.known ? qsTr("本地收藏状态未知")
+                      : favorites.postState.saved ? qsTr("取消本地收藏") : qsTr("本地收藏")
+                enabled: favorites.postState.enabled
+                property var pressedAction: null
+                onPressed: pressedAction = {
+                    "key": favorites.postKey,
+                    "revision": favorites.revision,
+                    "desired": !favorites.postState.saved
+                }
+                onClicked: {
+                    if (pressedAction)
+                        favorites.setPostFavorite(pressedAction.key,
+                            pressedAction.revision, pressedAction.desired)
+                    pressedAction = null
+                }
+            }
             ActionButton {
                 objectName: "detailPreviewButton"
                 text: qsTr("预览图")
@@ -255,6 +288,7 @@ Item {
                 radius: 7
 
                 ScrollView {
+                    objectName: "detailInformationScroll"
                     anchors.fill: parent
                     anchors.margins: 20
                     clip: true
@@ -438,7 +472,36 @@ Item {
 
                                             Menu {
                                                 id: tagMenu
+                                                objectName: "detailTagMenu_" + tagButton.tagItem.tagName
                                                 y: tagButton.height
+                                                property var favoriteAction: null
+                                                readonly property var favoriteState: {
+                                                    const revision = favorites.revision
+                                                    return favorites.tagState(tagButton.tagItem.tagName,
+                                                        groupDelegate.groupKey)
+                                                }
+                                                onAboutToShow: favoriteAction = {
+                                                    "key": favorites.postKey,
+                                                    "revision": favorites.revision,
+                                                    "name": tagButton.tagItem.tagName,
+                                                    "category": groupDelegate.groupKey,
+                                                    "desired": !favoriteState.saved
+                                                }
+
+                                                MenuItem {
+                                                    objectName: "detailTagFavorite_" + tagButton.tagItem.tagName
+                                                    visible: groupDelegate.groupKey !== "meta"
+                                                    text: !tagMenu.favoriteState.known ? qsTr("本地收藏状态未知")
+                                                          : tagMenu.favoriteState.saved ? qsTr("取消本地收藏标签")
+                                                          : qsTr("本地收藏标签")
+                                                    enabled: tagMenu.favoriteState.enabled
+                                                    onTriggered: {
+                                                        const action = tagMenu.favoriteAction
+                                                        if (action)
+                                                            favorites.setTagFavorite(action.key, action.revision,
+                                                                action.name, action.category, action.desired)
+                                                    }
+                                                }
 
                                                 MenuItem {
                                                     objectName: "detailTagNewQuery_"

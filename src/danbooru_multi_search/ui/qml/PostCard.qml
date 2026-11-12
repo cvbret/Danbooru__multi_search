@@ -4,12 +4,20 @@ import QtQuick.Layouts
 
 Rectangle {
     id: card
-    objectName: "postCard_" + postId
+    objectName: "postCard_" + postKey
+    required property var favoriteSelection
+    readonly property string postKey: {
+        const revision = favoriteSelection.modelRevision
+        return favoriteSelection.postKeyAt(index, revision)
+    }
+    readonly property var localFavorite: {
+        const revision = favoriteSelection.revision
+        return favoriteSelection.postState(postKey)
+    }
     required property var cacheController
     property QtObject theme: AppTheme {}
     signal activated(int row)
     required property int index
-    required property int postId
     required property string previewUrl
     required property string scoreText
     required property string favoriteText
@@ -79,11 +87,74 @@ Rectangle {
         thumbnailLoader.active = false
     }
 
-    TapHandler { onTapped: card.activated(card.index) }
+    TapHandler {
+        onTapped: function(point) {
+            const p = point.position
+            if (p.x >= cardActions.x && p.x <= cardActions.x + cardActions.width
+                    && p.y >= cardActions.y && p.y <= cardActions.y + cardActions.height)
+                return
+            if (card.thumbnailFailed && p.y >= thumbnailLoader.y
+                    && p.y <= thumbnailLoader.y + thumbnailLoader.height)
+                return
+            card.activated(card.index)
+        }
+    }
+
+    Row {
+        id: cardActions
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.margins: 12
+        spacing: 4
+        z: 2
+
+        CheckBox {
+            objectName: "postSelect_" + card.postKey
+            checked: card.localFavorite.selected
+            Accessible.name: qsTr("选择作品 #%1").arg(card.postKey)
+            property var pressedAction: null
+            onPressed: pressedAction = {
+                "key": card.postKey,
+                "revision": favoriteSelection.modelRevision,
+                "selected": !checked
+            }
+            onClicked: {
+                if (pressedAction)
+                    favoriteSelection.setSelected(pressedAction.key,
+                        pressedAction.selected, pressedAction.revision)
+                pressedAction = null
+            }
+        }
+        ActionButton {
+            theme: card.theme
+            objectName: "postFavorite_" + card.postKey
+            width: 40
+            leftPadding: 4
+            rightPadding: 4
+            text: card.localFavorite.known ? (card.localFavorite.saved ? "★" : "☆") : "?"
+            enabled: card.localFavorite.enabled
+            Accessible.name: card.localFavorite.saved ? qsTr("取消本地收藏") : qsTr("本地收藏")
+            ToolTip.visible: hovered
+            ToolTip.text: !card.localFavorite.known ? qsTr("本地收藏状态未知，请重试")
+                         : card.localFavorite.saved ? qsTr("取消本地收藏") : qsTr("本地收藏")
+            property var pressedAction: null
+            onPressed: pressedAction = {
+                "key": card.postKey,
+                "revision": favoriteSelection.modelRevision,
+                "desired": !card.localFavorite.saved
+            }
+            onClicked: {
+                if (pressedAction)
+                    favoriteSelection.setPostFavorite(pressedAction.key,
+                        pressedAction.desired, pressedAction.revision)
+                pressedAction = null
+            }
+        }
+    }
 
     Loader {
         id: thumbnailLoader
-        objectName: "thumbnailLoader_" + card.postId
+        objectName: "thumbnailLoader_" + card.postKey
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -97,7 +168,7 @@ Rectangle {
     Component {
         id: thumbnailComponent
         Image {
-            objectName: "thumbnail_" + card.postId
+            objectName: "thumbnail_" + card.postKey
             anchors.fill: parent
             source: ""
             fillMode: Image.PreserveAspectFit
@@ -128,7 +199,7 @@ Rectangle {
     }
 
     Rectangle {
-        objectName: "thumbnailError_" + card.postId
+        objectName: "thumbnailError_" + card.postKey
         anchors.fill: thumbnailLoader
         color: theme.raised
         visible: card.thumbnailFailed
@@ -144,7 +215,7 @@ Rectangle {
                 wrapMode: Text.Wrap
             }
             Button {
-                objectName: "thumbnailRetry_" + card.postId
+                objectName: "thumbnailRetry_" + card.postKey
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: qsTr("重试")
                 onClicked: card.retryThumbnail()
@@ -198,7 +269,7 @@ Rectangle {
         spacing: 4
         Label {
             Layout.fillWidth: true
-            text: qsTr("作品 #%1").arg(card.postId)
+            text: qsTr("作品 #%1").arg(card.postKey)
             color: theme.text
             font.bold: true
             elide: Text.ElideRight

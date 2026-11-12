@@ -565,6 +565,56 @@ ApplicationWindow {
                     sessionController: root.browserSession
                 }
 
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: theme.smallGap
+                    Label {
+                        height: theme.controlHeight
+                        verticalAlignment: Text.AlignVCenter
+                        text: qsTr("已选择 %1 件作品").arg(gallerySelection.selectedCount)
+                        color: theme.secondaryText
+                    }
+                    ActionButton {
+                        objectName: "saveSelectedFavoritesButton"
+                        text: qsTr("本地收藏已选作品")
+                        enabled: gallerySelection.canSaveSelected
+                        property var pressedAction: null
+                        onPressed: pressedAction = {
+                            "selection": gallerySelection.revision,
+                            "model": gallerySelection.modelRevision
+                        }
+                        onClicked: {
+                            if (pressedAction)
+                                gallerySelection.saveSelected(pressedAction.selection,
+                                    pressedAction.model)
+                            pressedAction = null
+                        }
+                    }
+                    ActionButton {
+                        objectName: "clearFavoriteSelectionButton"
+                        text: qsTr("清除选择")
+                        enabled: gallerySelection.selectedCount > 0
+                        onClicked: gallerySelection.clearSelection()
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: favoriteController.noticeText.length > 0
+                    Label {
+                        objectName: "favoriteNotice"
+                        Layout.fillWidth: true
+                        text: favoriteController.noticeText
+                        color: theme.error
+                        wrapMode: Text.Wrap
+                    }
+                    ActionButton {
+                        objectName: "retryFavoriteStatesButton"
+                        text: qsTr("重试收藏状态")
+                        enabled: !favoriteController.busy
+                        onClicked: favoriteController.retryStates()
+                    }
+                }
+
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -580,6 +630,7 @@ ApplicationWindow {
                         anchors.fill: parent
                         anchors.margins: 10
                         model: searchController.postsModel
+                        favoriteSelection: gallerySelection
                         cacheController: imageCacheController
                         theme: root.theme
                         onPostActivated: function(row) { root.openPostDetails(row) }
@@ -662,6 +713,7 @@ ApplicationWindow {
         DetailPage {
             theme: root.theme
             controller: detailController
+            favorites: detailFavorites
             complexQueryActionsEnabled: true
             onBackRequested: root.returnToGallery()
             onImportTagsRequested: tagCsvDialog.open()

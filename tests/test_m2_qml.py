@@ -53,6 +53,10 @@ from danbooru_multi_search.danbooru.autocomplete import (
     DanbooruTagSuggestionController,
 )
 from danbooru_multi_search.storage import HistoryRepository
+from danbooru_multi_search.storage.favorites import FavoriteRepository
+from danbooru_multi_search.ui.favorites import FavoriteController
+from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
+from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.storage.database import Database
 from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
 from danbooru_multi_search.ui.appearance import AppearanceController
@@ -285,6 +289,9 @@ def _create_window(tmp_path):
         local_timezone=timezone.utc,
     )
     detail_navigation = DetailNavigationController(details, core.posts_model)
+    favorites = FavoriteController(FavoriteRepository(database))
+    selection = GallerySelectionController(core.posts_model, favorites)
+    detail_favorites = DetailFavoritesController(details, favorites)
     settings_controller = SettingsController(
         SettingsStore(tmp_path / "settings.json"), AppSettings()
     )
@@ -304,6 +311,9 @@ def _create_window(tmp_path):
     context.setContextProperty("appearanceController", appearance)
     context.setContextProperty("sessionController", session)
     context.setContextProperty("imageCacheController", images)
+    context.setContextProperty("favoriteController", favorites)
+    context.setContextProperty("gallerySelection", selection)
+    context.setContextProperty("detailFavorites", detail_favorites)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
     assert engine.rootObjects(), [error.toString() for error in engine.warnings()]
     root = engine.rootObjects()[0]
@@ -320,11 +330,17 @@ def _create_window(tmp_path):
         "appearance": appearance,
         "images": images,
         "factory": factory,
+        "favorites": favorites,
+        "selection": selection,
+        "detail_favorites": detail_favorites,
         "qml_warnings": qml_warnings,
     }
 
 
 def _close_window(values) -> None:
+    values["favorites"].shutdown()
+    values["selection"].shutdown()
+    values["detail_favorites"].shutdown()
     values["bridge"].beginClosing()
     values["core"].shutdown()
     values["session"].begin_shutdown()
