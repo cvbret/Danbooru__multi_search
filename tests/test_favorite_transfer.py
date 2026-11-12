@@ -69,6 +69,26 @@ def _empty_document(*, exported_at: datetime = BASE_TIME) -> FavoriteTransferDoc
     return FavoriteTransferDocument(exported_at, (), ())
 
 
+def test_optional_apply_checkpoint_runs_before_repository_mutation(tmp_path, monkeypatch):
+    repository = FavoriteRepository(_database(tmp_path / "checkpoint.sqlite3"))
+    service = FavoriteTransferService(repository)
+    preview = service.preview_import(_empty_document(), FavoriteImportMode.REPLACE)
+    writes = []
+    original = repository.apply_collection_import
+    def apply(**kwargs):
+        writes.append(True)
+        return original(**kwargs)
+    monkeypatch.setattr(repository, "apply_collection_import", apply)
+    class Cancelled(Exception):
+        pass
+    def checkpoint():
+        raise Cancelled()
+    with pytest.raises(Cancelled):
+        service.apply_import(preview, before_apply=checkpoint)
+    assert writes == []
+    assert repository.capture_collection().revision == 0
+
+
 def _folder(
     reference: str,
     name: str,

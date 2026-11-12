@@ -413,6 +413,8 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         fail_final_save,
     )
     for name, owner, attribute in (
+        ("transfer-stop", ui_session.favorite_transfer, "begin_shutdown"),
+        ("transfer-wait", ui_session.favorite_transfer, "shutdown"),
         ("collection", ui_session.favorite_collection, "shutdown"),
         ("favorites", ui_session.favorite_controller, "shutdown"),
         ("selection", ui_session.gallery_selection, "shutdown"),
@@ -452,11 +454,13 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
 
     assert reentry_count == 1
     assert events == [
+        "transfer-stop",
         "collection",
         "favorites",
         "selection",
         "detail-favorites",
         "bridge-closing",
+        "transfer-wait",
         "query",
         "session",
         "session-detach",
@@ -491,3 +495,68 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
     assert stored.result_summary.state == QueryExecutionState.PARTIAL_CANCELLED
 
     _close_engine(engine)
+
+
+def test_active_import_finishes_before_m2_cancel_and_final_history_save(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from threading import Event, Thread, get_ident
+    from PySide6.QtCore import QUrl
+    from danbooru_multi_search.core.favorites import FavoriteCandidate
+    from danbooru_multi_search.storage.database import Database
+    from danbooru_multi_search.storage.favorites import FavoriteRepository
+    from danbooru_multi_search.storage.favorite_transfer import FavoriteTransferService
+
+    application = QGuiApplication.instance() or QGuiApplication([])
+    runtime = initialize_runtime(tmp_path / "application")
+    source_db = Database(tmp_path / "source.sqlite3")
+    source_db.initialize()
+    source_repository = FavoriteRepository(source_db)
+    source_repository.add_favorite(FavoriteCandidate.for_pool(9, "source"))
+    source_path = tmp_path / "source.json"
+    FavoriteTransferService(source_repository).export_file(source_path)
+    manager = _RecordingNetworkManager()
+    engine, bridge = create_qml_engine(application, danbooru_base_url="https://example.invalid", runtime=runtime, network_manager=manager)
+    session = bridge.parent()
+    entered, release = Event(), Event()
+    gui = get_ident()
+    original_write = FavoriteRepository._write_connection
+    @contextmanager
+    def hold_commit(repository):
+        with original_write(repository) as connection:
+            yield connection
+            if get_ident() != gui:
+                entered.set()
+                assert release.wait(5)
+    monkeypatch.setattr(FavoriteRepository, "_write_connection", hold_commit)
+    transfer = session.favorite_transfer
+    releaser = None
+    try:
+        assert bridge.applyAdvancedText("cat") and bridge.executeStandard()
+        assert _wait_until(lambda: len(manager.requests) == 1)
+        token = transfer.beginImportSelection()
+        assert transfer.acceptImportFile(QUrl.fromLocalFile(str(source_path)), token)
+        assert _wait_until(lambda: not transfer.busy)
+        assert transfer.confirmImport(transfer.preview["token"])
+        assert _wait_until(entered.is_set)
+        original_query_shutdown = session.query_controller.shutdown
+        checked = []
+        def query_shutdown():
+            assert transfer.shutdown_completed
+            assert len(FavoriteRepository(runtime.database).list_favorites()) == 1
+            checked.append(True)
+            original_query_shutdown()
+        monkeypatch.setattr(session.query_controller, "shutdown", query_shutdown)
+        releaser = Thread(target=lambda: (transfer._closing_event.wait(5), release.set()))
+        releaser.start()
+        session.shutdown()
+        releaser.join()
+        assert checked == [True]
+        assert session.shutdown_completed
+        stored = session.history_repository.latest_query()
+        assert stored.result_summary.state == QueryExecutionState.PARTIAL_CANCELLED
+        assert manager.replies[0].abort_count == 1
+    finally:
+        release.set()
+        if releaser is not None:
+            releaser.join()
+        _close_engine(engine)

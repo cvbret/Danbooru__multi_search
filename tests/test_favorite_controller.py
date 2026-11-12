@@ -88,6 +88,32 @@ def test_failed_collection_delete_keeps_shared_saved_fact(tmp_path, monkeypatch)
     assert repository.get_favorite(saved.id) == saved
 
 
+def test_external_snapshot_is_published_before_writes_are_reenabled(tmp_path):
+    repository, controller = build(tmp_path)
+    old = repository.add_favorite(FavoriteCandidate.for_post(post(1)))
+    controller.ensure((old.identity,))
+    assert controller.begin_external_write("import")
+    assert not controller.set_post(post(2), True, guard=lambda: True)
+    repository.delete_by_identity(old.identity)
+    new = repository.add_favorite(FavoriteCandidate.for_post(post(3)))
+    events = []
+    controller.collectionChanged.connect(lambda: events.append((controller.busy, controller.state(old.identity)["saved"], controller.state(new.identity)["saved"])))
+    assert controller.publish_external_snapshot("import", repository.capture_collection())
+    assert events == [(True, False, True)]
+    controller.finish_external_write("wrong-owner")
+    assert controller.busy
+    controller.finish_external_write("import")
+    assert not controller.busy
+
+
+def test_external_reservation_rechecks_synchronous_close(tmp_path):
+    repository, controller = build(tmp_path)
+    controller.busyChanged.connect(controller.shutdown)
+    assert not controller.begin_external_write("import")
+    assert controller._external_write is None
+    assert repository.capture_collection().revision == 0
+
+
 def test_read_and_write_failures_keep_confirmed_facts(tmp_path, monkeypatch):
     repository, controller = build(tmp_path)
     work = post()

@@ -14,6 +14,7 @@ from danbooru_multi_search.core.favorites import (
     FavoriteObjectType,
     FavoriteTagCategory,
     FavoriteMutationSnapshot,
+    FavoriteCollectionSnapshot,
     FolderDeleteMode,
 )
 from danbooru_multi_search.danbooru.models import DanbooruPost
@@ -37,6 +38,7 @@ class FavoriteController(QObject):
         self._observed: set[FavoriteIdentity] = set()
         self._notice = ""
         self._busy = False
+        self._external_write: str | None = None
         self._closed = False
 
     @Property(str, notify=noticeChanged)
@@ -45,7 +47,43 @@ class FavoriteController(QObject):
 
     @Property(bool, notify=busyChanged)
     def busy(self) -> bool:
-        return self._busy or self._closed
+        return self._busy or self._closed or self._external_write is not None
+
+    def begin_external_write(self, token: str) -> bool:
+        """Reserve GUI favorite writes before a background import can lock SQLite."""
+
+        if not token or self.busy:
+            return False
+        self._external_write = token
+        self.busyChanged.emit()
+        if self._closed or self._external_write != token:
+            if self._external_write == token:
+                self._external_write = None
+            return False
+        return True
+
+    def publish_external_snapshot(self, token: str, snapshot: FavoriteCollectionSnapshot) -> bool:
+        """Publish committed facts while the external write reservation is held."""
+
+        if self._closed or self._external_write != token:
+            return False
+        current = {item.identity: item for item in snapshot.favorites}
+        self._observed.update(current)
+        self._confirmed = {identity: current.get(identity) for identity in self._observed}
+        self._set_notice("")
+        if self._closed or self._external_write != token:
+            return False
+        self.stateChanged.emit()
+        if self._closed or self._external_write != token:
+            return False
+        self.collectionChanged.emit()
+        return not self._closed and self._external_write == token
+
+    def finish_external_write(self, token: str) -> None:
+        if self._external_write == token:
+            self._external_write = None
+            if not self._closed:
+                self.busyChanged.emit()
 
     def state(self, identity: FavoriteIdentity) -> dict[str, bool]:
         """Return cached facts; reading this value never performs database work."""
@@ -178,7 +216,7 @@ class FavoriteController(QObject):
         return self._write(command, guard)
 
     def _write(self, command, guard) -> bool:
-        if self._closed or self._busy or not guard():
+        if self.busy or not guard():
             return False
         self._busy = True
         self.busyChanged.emit()

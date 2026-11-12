@@ -34,6 +34,7 @@ from danbooru_multi_search.storage import Database, HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
+from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.ui.appearance import AppearanceController
@@ -152,6 +153,7 @@ class _UiSession(QObject):
         self.favorite_collection = FavoriteCollectionController(
             self.favorite_controller._repository, self.favorite_controller, self.detail_navigation, self
         )
+        self.favorite_transfer = FavoriteTransferController(database.path, self.favorite_controller, self)
         self.tag_controller = DanbooruTagSuggestionController(
             danbooru_base_url,
             network_manager=self.network_manager,
@@ -194,12 +196,14 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.favorite_transfer.begin_shutdown,
             self.favorite_collection.shutdown,
             self.favorite_controller.shutdown,
             self.gallery_selection.shutdown,
             self.detail_favorites.shutdown,
-            self.appearance_controller.shutdown,
             self.query_bridge.beginClosing,
+            self.favorite_transfer.shutdown,
+            self.appearance_controller.shutdown,
             self.query_controller.shutdown,
             self.session_controller.begin_shutdown,
             self.session_controller.detach_events,
@@ -230,6 +234,7 @@ class _UiSession(QObject):
             and self.session_controller.events_detached
             and self.detail_controller._shutdown
             and self.detail_navigation._closed
+            and self.favorite_transfer.shutdown_completed
             and self.favorite_collection._closed
             and self.favorite_controller._closed
             and self.gallery_selection._closed
@@ -299,6 +304,7 @@ def _create_qml_session(
         "imageCacheController",
         session.image_cache_controller,
     )
+    engine.rootContext().setContextProperty("favoriteTransfer", session.favorite_transfer)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)

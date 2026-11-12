@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -250,6 +251,12 @@ def decode_favorite_transfer_document(data: bytes) -> FavoriteTransferDocument:
 def read_favorite_transfer_document(path: Path | str) -> FavoriteTransferDocument:
     """Read at most 64 MiB and decode one local transfer document."""
 
+    return decode_favorite_transfer_document(_read_transfer_bytes(path))
+
+
+def _read_transfer_bytes(path: Path | str) -> bytes:
+    """Read one bounded local file before a separate decode step."""
+
     file_path = _coerce_path(path)
     try:
         if not file_path.is_file():
@@ -267,7 +274,7 @@ def read_favorite_transfer_document(path: Path | str) -> FavoriteTransferDocumen
         raise FavoriteTransferError("file_read_error", "无法读取收藏传输文档。") from exc
     if len(data) > MAX_FAVORITE_TRANSFER_BYTES:
         raise FavoriteTransferError("document_too_large", "收藏传输文档超过 64 MiB 上限。")
-    return decode_favorite_transfer_document(data)
+    return data
 
 
 def write_favorite_transfer_document(
@@ -278,6 +285,13 @@ def write_favorite_transfer_document(
 
     target = _coerce_path(path)
     data = encode_favorite_transfer_document(document)
+    _write_transfer_bytes(target, data)
+
+
+def _write_transfer_bytes(path: Path | str, data: bytes) -> None:
+    """Finish one atomic write of bytes already validated by the encoder."""
+
+    target = _coerce_path(path)
     parent = target.parent
     if not parent.is_dir():
         raise FavoriteTransferError("invalid_directory", "收藏导出目录不存在。")
@@ -445,7 +459,9 @@ class FavoriteTransferService:
             binding_digest=binding,
         )
 
-    def apply_import(self, preview: FavoriteImportPreview) -> FavoriteCollectionSnapshot:
+    def apply_import(
+        self, preview: FavoriteImportPreview, *, before_apply: Callable[[], None] | None = None
+    ) -> FavoriteCollectionSnapshot:
         if not isinstance(preview, FavoriteImportPreview):
             raise FavoriteTransferError("invalid_preview", "收藏导入预览无效。")
         document_digest = _document_digest(preview.document)
@@ -482,6 +498,8 @@ class FavoriteTransferService:
             for item in preview.document.favorites
         )
         try:
+            if before_apply is not None:
+                before_apply()
             return self._repository.apply_collection_import(
                 expected_revision=preview.collection_revision,
                 expected_document_digest=preview.document_digest,

@@ -56,6 +56,7 @@ from danbooru_multi_search.storage import HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
+from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.storage.database import Database
@@ -294,6 +295,7 @@ def _create_window(tmp_path):
     selection = GallerySelectionController(core.posts_model, favorites)
     detail_favorites = DetailFavoritesController(details, favorites)
     collection = FavoriteCollectionController(favorites._repository, favorites, detail_navigation)
+    transfer = FavoriteTransferController(database.path, favorites)
     settings_controller = SettingsController(
         SettingsStore(tmp_path / "settings.json"), AppSettings()
     )
@@ -313,6 +315,7 @@ def _create_window(tmp_path):
     context.setContextProperty("appearanceController", appearance)
     context.setContextProperty("sessionController", session)
     context.setContextProperty("imageCacheController", images)
+    context.setContextProperty("favoriteTransfer", transfer)
     context.setContextProperty("favoriteCollection", collection)
     context.setContextProperty("favoriteController", favorites)
     context.setContextProperty("gallerySelection", selection)
@@ -335,6 +338,7 @@ def _create_window(tmp_path):
         "factory": factory,
         "favorites": favorites,
         "collection": collection,
+        "transfer": transfer,
         "selection": selection,
         "detail_favorites": detail_favorites,
         "qml_warnings": qml_warnings,
@@ -342,6 +346,8 @@ def _create_window(tmp_path):
 
 
 def _close_window(values) -> None:
+    values["transfer"].begin_shutdown()
+    values["transfer"].shutdown()
     values["collection"].shutdown()
     values["favorites"].shutdown()
     values["selection"].shutdown()

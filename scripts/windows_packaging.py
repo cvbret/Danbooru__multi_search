@@ -84,6 +84,7 @@ QML_FILES = (
     "GalleryGrid.qml",
     "M2Main.qml",
     "FavoritesPage.qml",
+    "FavoriteTransferDialog.qml",
     "FavoriteObjectCard.qml",
     "FavoriteConfirmDialog.qml",
     "DetailPage.qml",

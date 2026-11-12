@@ -5,6 +5,7 @@ import QtQuick.Layouts
 Item {
     id: page
     objectName: "favoritesPage"
+    signal transferRequested()
     required property var controller
     required property var cacheController
     property QtObject theme: AppTheme {}
@@ -110,6 +111,7 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             Label { text: qsTr("本地收藏"); font.pixelSize: 25; font.bold: true; color: theme.text; Layout.fillWidth: true }
+            ActionButton { objectName: "openFavoriteTransferButton"; text: qsTr("导入 / 导出"); onClicked: page.transferRequested() }
             ActionButton { objectName: "reloadFavoritesButton"; text: qsTr("刷新"); onClicked: page.controller.reload() }
             ActionButton {
                 objectName: "createFavoriteFolderButton"

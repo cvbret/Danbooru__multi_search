@@ -49,6 +49,12 @@ ApplicationWindow {
         theme: root.theme
     }
 
+    FavoriteTransferDialog {
+        id: favoriteTransferDialog
+        controller: favoriteTransfer
+        theme: root.theme
+    }
+
     property string activePage: "browse"
 
     function showPage(pageName) {
@@ -765,6 +771,7 @@ ApplicationWindow {
         FavoritesPage {
             id: favoritesPage
             controller: favoriteCollection
+            onTransferRequested: favoriteTransferDialog.open()
             cacheController: imageCacheController
             theme: root.theme
         }
