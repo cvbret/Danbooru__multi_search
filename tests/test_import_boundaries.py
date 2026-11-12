@@ -17,6 +17,9 @@ PACKAGES = (
     "danbooru_multi_search.tasks",
 )
 PURE_MODULES = (
+    "danbooru_multi_search.core.downloads",
+    "danbooru_multi_search.storage.downloads",
+    "danbooru_multi_search.storage.download_files",
     "danbooru_multi_search.core.favorites",
     "danbooru_multi_search.danbooru.models",
     "danbooru_multi_search.danbooru.post_validation",
@@ -71,6 +74,14 @@ def _probe_pure_imports(data_root: Path) -> None:
 
     database = Database(data_root / "pure-imports.sqlite3")
     database.initialize()
+    from danbooru_multi_search.core.downloads import DownloadRequest, DownloadState
+    from danbooru_multi_search.storage.downloads import DownloadRepository
+    from danbooru_multi_search.danbooru import DownloadState as PublicDownloadState
+    assert PublicDownloadState is DownloadState
+    downloads = DownloadRepository(database)
+    batch = downloads.create_batch((DownloadRequest(321, "https://example.invalid/321.jpg", "jpg"),), data_root)
+    downloads.recover_unfinished()
+    assert downloads.get_batch(batch.batch_id).items[0].state.value == "awaiting_resume"
     history = HistoryRepository(database)
     query = history.record_accepted_query(
         display_text="cat",

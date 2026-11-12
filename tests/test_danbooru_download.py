@@ -23,6 +23,14 @@ from danbooru_multi_search.tasks import TaskQueueConfig
 APPLICATION = QGuiApplication.instance() or QGuiApplication([])
 
 
+def test_original_public_download_values_reexport_pure_core_objects():
+    from danbooru_multi_search.core import downloads
+    from danbooru_multi_search import danbooru
+    for name in ("DanbooruDownloadOutcome", "DownloadedFile", "DownloadErrorKind", "DownloadState"):
+        assert getattr(download_module, name) is getattr(downloads, name)
+        assert getattr(danbooru, name) is getattr(downloads, name)
+
+
 def _post(source_url: str, *, file_ext: str = "jpg") -> DanbooruPost:
     return DanbooruPost(
         id=321,

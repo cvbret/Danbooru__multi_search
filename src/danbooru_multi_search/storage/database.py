@@ -273,6 +273,38 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=7,
+        name="persistent_download_tasks",
+        statements=(
+            """CREATE TABLE download_batches (
+                id TEXT PRIMARY KEY NOT NULL,
+                created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE download_items (
+                id TEXT PRIMARY KEY NOT NULL,
+                batch_id TEXT NOT NULL REFERENCES download_batches(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL CHECK(position >= 0),
+                post_id INTEGER NOT NULL CHECK(post_id > 0),
+                source_url TEXT NOT NULL,
+                file_ext TEXT NOT NULL,
+                label TEXT NOT NULL,
+                directory TEXT NOT NULL,
+                policy TEXT NOT NULL CHECK(policy IN ('skip', 'overwrite', 'auto_number')),
+                state TEXT NOT NULL CHECK(state IN ('waiting', 'running', 'retry_wait', 'awaiting_resume', 'completed', 'skipped', 'failed', 'cancelled')),
+                resolved_name TEXT,
+                partial_name TEXT,
+                bytes_written INTEGER NOT NULL DEFAULT 0 CHECK(bytes_written >= 0),
+                total_bytes INTEGER CHECK(total_bytes IS NULL OR total_bytes >= 0),
+                attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+                generation INTEGER NOT NULL DEFAULT 0 CHECK(generation >= 0),
+                error_code TEXT NOT NULL DEFAULT '',
+                message TEXT NOT NULL DEFAULT '',
+                UNIQUE(batch_id, position)
+            )""",
+            "CREATE INDEX download_items_batch_position ON download_items(batch_id, position)",
+        ),
+    ),
 )
 
 

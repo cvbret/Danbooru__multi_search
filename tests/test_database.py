@@ -13,8 +13,8 @@ from danbooru_multi_search.storage.database import Database, DatabaseError, Migr
 def test_database_applies_migrations_once(tmp_path):
     database = Database(tmp_path / "application.sqlite3")
 
-    assert database.initialize() == 6
-    assert database.initialize() == 6
+    assert database.initialize() == 7
+    assert database.initialize() == 7
 
     with database.connect() as connection:
         migrations = connection.execute(
@@ -37,6 +37,7 @@ def test_database_applies_migrations_once(tmp_path):
         (4, "local_favorites"),
         (5, "favorite_collection_revision"),
         (6, "saved_artist_combinations"),
+        (7, "persistent_download_tasks"),
     ]
     assert {
         "app_metadata",
@@ -48,6 +49,8 @@ def test_database_applies_migrations_once(tmp_path):
         "favorite_post_tags",
         "favorite_collection_state",
         "artist_combinations",
+        "download_batches",
+        "download_items",
     }.issubset(tables)
     assert tuple(session) == (1, 0, None)
 
@@ -74,18 +77,18 @@ def test_database_upgrades_version_one_without_losing_existing_data(tmp_path):
 
     database = Database(path)
 
-    assert database.initialize() == 6
-    assert database.initialize() == 6
+    assert database.initialize() == 7
+    assert database.initialize() == 7
     with database.connect() as connection:
         preserved = connection.execute(
             "SELECT value FROM app_metadata WHERE key = 'preserved'"
         ).fetchone()
         migration_count = connection.execute(
-            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4, 5, 6)"
+            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4, 5, 6, 7)"
         ).fetchone()["count"]
 
     assert preserved["value"] == "yes"
-    assert migration_count == 5
+    assert migration_count == 6
 
 
 def test_version_three_schema_enforces_single_session_and_query_constraints(tmp_path):
@@ -192,8 +195,8 @@ def test_version_two_rows_migrate_to_standard_definitions_without_data_loss(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 6
-    assert database.initialize() == 6
+    assert database.initialize() == 7
+    assert database.initialize() == 7
 
     repository = HistoryRepository(database)
     query = repository.get_query(query_id)
@@ -276,8 +279,8 @@ def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 6
-    assert database.initialize() == 6
+    assert database.initialize() == 7
+    assert database.initialize() == 7
 
     preserved_query = repository.get_query(query.id)
     session = repository.load_session()
@@ -315,7 +318,7 @@ def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
     assert [(tag.normalized_tag, tag.use_count) for tag in tags] == [("cat", 1)]
     assert metadata["value"] == "yes"
     assert favorite_counts == (0, 0, 0)
-    assert versions == (1, 2, 3, 4, 5, 6)
+    assert versions == (1, 2, 3, 4, 5, 6, 7)
     assert foreign_key_errors == []
 
 
@@ -394,6 +397,32 @@ def test_version_four_schema_enforces_favorite_identity_and_foreign_keys(tmp_pat
         ).fetchone()
 
     assert favorite["folder_id"] is None
+
+
+def test_version_seven_preserves_history_favorites_folders_and_artist_combinations(tmp_path, monkeypatch):
+    from danbooru_multi_search.core.artist_combinations import ArtistCombinationDraft, ArtistCombinationMode
+    from danbooru_multi_search.core.favorites import FavoriteCandidate, FavoriteTagCategory
+    from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
+    from danbooru_multi_search.storage.favorites import FavoriteRepository
+    migrations = database_module.MIGRATIONS
+    monkeypatch.setattr(database_module, "MIGRATIONS", migrations[:6])
+    database = Database(tmp_path / "application.sqlite3")
+    assert database.initialize() == 6
+    favorites = FavoriteRepository(database)
+    folder = favorites.create_folder("Saved")
+    favorites.add_favorite(FavoriteCandidate.for_tag("artist_a", FavoriteTagCategory.ARTIST), folder_id=folder.id)
+    ArtistCombinationRepository(database).create_combination(ArtistCombinationDraft("Pair", ("artist_a",), ArtistCombinationMode.ALL))
+    history = HistoryRepository(database)
+    query = history.record_accepted_query(display_text="cat", normalized_tags=("cat",), rating="all", page_size=40, page=1, count_tag_usage=True)
+    history.save_browser_state(geometry=WindowGeometry(10, 20, 900, 700), is_maximized=False, active_query_id=query.id, gallery_position=None)
+    tables = ("app_metadata", "recent_queries", "recent_tags", "browser_session", "favorite_folders", "favorite_items", "favorite_post_tags", "favorite_collection_state", "artist_combinations")
+    def capture():
+        with database.connect() as connection:
+            return {name: tuple(tuple(row) for row in connection.execute(f"SELECT * FROM {name} ORDER BY rowid")) for name in tables}
+    before = capture()
+    monkeypatch.setattr(database_module, "MIGRATIONS", migrations)
+    assert database.initialize() == database.initialize() == 7
+    assert capture() == before
 
 
 def test_version_four_upgrades_revision_state_without_losing_favorites(

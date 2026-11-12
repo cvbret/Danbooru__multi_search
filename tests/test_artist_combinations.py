@@ -113,7 +113,7 @@ def test_combinations_survive_favorite_removal_and_replace_without_changing_revi
 
 
 def test_version_six_preserves_all_version_five_rows_and_is_idempotent(tmp_path, monkeypatch):
-    migrations = database_module.MIGRATIONS
+    migrations = database_module.MIGRATIONS[:6]
     monkeypatch.setattr(database_module, "MIGRATIONS", migrations[:5])
     database = Database(tmp_path / "application.sqlite3")
     assert database.initialize() == 5

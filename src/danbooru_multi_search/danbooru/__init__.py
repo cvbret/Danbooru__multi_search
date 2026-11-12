@@ -7,6 +7,13 @@ from typing import Any
 # Public names are grouped by their owning module so importing the package
 # does not load network, Qt, or storage implementations before they are used.
 _EXPORT_GROUPS = {
+    "danbooru_multi_search.core.downloads": (
+        "DEFAULT_MAX_DOWNLOAD_BYTES",
+        "DanbooruDownloadOutcome",
+        "DownloadedFile",
+        "DownloadErrorKind",
+        "DownloadState",
+    ),
     "danbooru_multi_search.danbooru.autocomplete": (
         "TAG_SUGGESTION_DEBOUNCE_MS",
         "ActiveTagFragment",
@@ -32,12 +39,7 @@ _EXPORT_GROUPS = {
         "build_posts_request",
     ),
     "danbooru_multi_search.danbooru.download": (
-        "DEFAULT_MAX_DOWNLOAD_BYTES",
         "DanbooruDownloadController",
-        "DanbooruDownloadOutcome",
-        "DownloadedFile",
-        "DownloadErrorKind",
-        "DownloadState",
         "build_media_request",
         "download_destination",
     ),

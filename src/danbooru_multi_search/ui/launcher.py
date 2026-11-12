@@ -33,6 +33,8 @@ from danbooru_multi_search.tasks import (
 from danbooru_multi_search.storage import Database, HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
+from danbooru_multi_search.storage.downloads import DownloadRepository
+from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
 from danbooru_multi_search.ui.artist_combinations import ArtistCombinationController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
@@ -118,6 +120,10 @@ class _UiSession(QObject):
             scheduler=scheduler,
         )
         self.network_manager = network_manager or QNetworkAccessManager(self)
+        self.download_manager = PersistentDownloadManager(
+            DownloadRepository(database), self.task_queue, self.network_manager,
+            scheduler=scheduler, parent=self,
+        )
         self.translation_store = TagTranslationStore(parent=self)
         self.query_executor = DanbooruMultiBranchExecutor(
             danbooru_base_url,
@@ -201,6 +207,7 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.download_manager.begin_shutdown,
             self.favorite_transfer.begin_shutdown,
             self.artist_combinations.shutdown,
             self.favorite_collection.shutdown,
@@ -209,6 +216,7 @@ class _UiSession(QObject):
             self.detail_favorites.shutdown,
             self.query_bridge.beginClosing,
             self.favorite_transfer.shutdown,
+            self.download_manager.shutdown,
             self.appearance_controller.shutdown,
             self.query_controller.shutdown,
             self.session_controller.begin_shutdown,
@@ -241,6 +249,7 @@ class _UiSession(QObject):
             and self.detail_controller._shutdown
             and self.detail_navigation._closed
             and self.favorite_transfer.shutdown_completed
+            and self.download_manager.closed
             and self.artist_combinations._closed
             and self.favorite_collection._closed
             and self.favorite_controller._closed

@@ -12,6 +12,9 @@ from typing import BinaryIO, Callable
 from PySide6.QtCore import QCoreApplication, QObject, QUrl, Signal, Slot
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from danbooru_multi_search.core.downloads import (
+    DEFAULT_MAX_DOWNLOAD_BYTES, DanbooruDownloadOutcome, DownloadedFile, DownloadErrorKind, DownloadState,
+)
 from danbooru_multi_search.danbooru.client import DEFAULT_TIMEOUT_MS, USER_AGENT
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.tasks import (
@@ -28,45 +31,7 @@ from danbooru_multi_search.tasks import (
 )
 
 
-DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 _FILE_EXTENSION = re.compile(r"[A-Za-z0-9]{1,10}")
-
-
-class DownloadState:
-    SUCCESS = "success"
-    ERROR = "error"
-    CANCELLED = "cancelled"
-
-
-class DownloadErrorKind:
-    INVALID_REQUEST = "invalid_request"
-    HTTP = "http"
-    TIMEOUT = "timeout"
-    NETWORK = "network"
-    EMPTY_RESPONSE = "empty_response"
-    RESPONSE_TOO_LARGE = "response_too_large"
-    FILE = "file_error"
-    CANCELLED = "cancelled"
-
-
-@dataclass(frozen=True, slots=True)
-class DownloadedFile:
-    path: Path
-    source_url: str
-    bytes_written: int
-
-
-@dataclass(frozen=True, slots=True)
-class DanbooruDownloadOutcome:
-    state: str
-    message: str
-    downloaded_file: DownloadedFile | None = None
-    error_kind: str | None = None
-    http_status: int | None = None
-
-    @property
-    def succeeded(self) -> bool:
-        return self.state == DownloadState.SUCCESS
 
 
 def build_media_request(
@@ -99,6 +64,27 @@ def download_destination(post: DanbooruPost, download_directory: Path) -> Path:
     return download_directory / f"{post.id}.{extension}"
 
 
+@dataclass(frozen=True, slots=True)
+class DownloadAttemptHooks:
+    """Optional persistent-job hooks; the original one-shot call uses defaults."""
+
+    progress: Callable[[int, int | None], None] | None = None
+    partial_ready: Callable[[Path], None] | None = None
+    can_continue: Callable[[], bool] | None = None
+    commit: Callable[[Path, Path], None] | None = None
+    cleanup_error: Callable[[str], None] | None = None
+
+
+def start_media_download_attempt(
+    manager: QNetworkAccessManager, request: QNetworkRequest, destination: Path,
+    source_url: str, maximum_bytes: int, completion: Callable[[TaskAttemptResult], None],
+    parent: QObject, *, partial: Path, hooks: DownloadAttemptHooks,
+) -> "_QtDownloadAttempt":
+    """Start one queue-owned attempt with an explicitly owned temporary file."""
+    return _QtDownloadAttempt(manager, request, destination, source_url, maximum_bytes,
+                              completion, parent, partial=partial, hooks=hooks)
+
+
 class _QtDownloadAttempt(QObject):
     def __init__(
         self,
@@ -109,19 +95,24 @@ class _QtDownloadAttempt(QObject):
         maximum_bytes: int,
         completion: Callable[[TaskAttemptResult], None],
         parent: QObject,
+        *,
+        partial: Path | None = None,
+        hooks: DownloadAttemptHooks | None = None,
     ) -> None:
         super().__init__(parent)
         self._completion: Callable[[TaskAttemptResult], None] | None = completion
         self._destination = destination
         self._source_url = source_url
         self._maximum_bytes = maximum_bytes
+        self._hooks = hooks or DownloadAttemptHooks()
         self._bytes_written = 0
+        self._total_bytes: int | None = None
         self._finishing = False
         self._reply: QNetworkReply | None = None
         self._stream: BinaryIO | None = None
         self._temporary_path: Path | None = None
 
-        temporary = tempfile.NamedTemporaryFile(
+        temporary = partial.open("x+b") if partial is not None else tempfile.NamedTemporaryFile(
             mode="w+b",
             prefix=f".{destination.name}.",
             suffix=".part",
@@ -129,8 +120,12 @@ class _QtDownloadAttempt(QObject):
             delete=False,
         )
         self._stream = temporary
-        self._temporary_path = Path(temporary.name)
+        self._temporary_path = partial if partial is not None else Path(temporary.name)
         try:
+            if self._hooks.partial_ready:
+                self._hooks.partial_ready(self._temporary_path)
+            if self._hooks.can_continue and not self._hooks.can_continue():
+                raise OSError("Download was invalidated before its request started.")
             self._reply = manager.get(request)
         except Exception:
             self._discard_temporary_file()
@@ -167,6 +162,10 @@ class _QtDownloadAttempt(QObject):
                     error_code=DownloadErrorKind.RESPONSE_TOO_LARGE,
                 )
             )
+            return
+        if content_length >= 0:
+            self._total_bytes = content_length
+            self._report_progress()
 
     @Slot()
     def _ready_read(self) -> None:
@@ -200,6 +199,18 @@ class _QtDownloadAttempt(QObject):
             )
             return
         self._bytes_written += written
+        self._report_progress()
+
+    def _report_progress(self) -> None:
+        if self._completion is None or self._hooks.progress is None:
+            return
+        total = self._total_bytes
+        if total is not None and total < self._bytes_written:
+            total = None
+        try:
+            self._hooks.progress(self._bytes_written, total)
+        except Exception as exc:
+            self._force_failure(TaskAttemptResult.failure(str(exc), error_code=getattr(exc, "code", DownloadErrorKind.FILE)))
 
     def _force_failure(self, result: TaskAttemptResult) -> None:
         if self._completion is None:
@@ -289,11 +300,16 @@ class _QtDownloadAttempt(QObject):
             )
 
         try:
+            if self._hooks.can_continue and not self._hooks.can_continue():
+                raise OSError("Download was invalidated before file commit.")
             stream.flush()
             os.fsync(stream.fileno())
             stream.close()
             self._stream = None
-            os.replace(temporary_path, self._destination)
+            if self._hooks.commit:
+                self._hooks.commit(temporary_path, self._destination)
+            else:
+                os.replace(temporary_path, self._destination)
             self._temporary_path = None
         except OSError as exc:
             return TaskAttemptResult.failure(
@@ -320,21 +336,25 @@ class _QtDownloadAttempt(QObject):
             completion(result)
 
     def _discard_temporary_file(self) -> None:
+        errors: list[str] = []
         stream = self._stream
         self._stream = None
         if stream is not None:
             try:
                 stream.close()
-            except OSError:
-                pass
+            except OSError as exc:
+                errors.append(str(exc))
 
         temporary_path = self._temporary_path
         self._temporary_path = None
         if temporary_path is not None:
             try:
                 temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                self._temporary_path = temporary_path
+                errors.append(f"{temporary_path}: {exc}")
+        if errors and self._hooks.cleanup_error:
+            self._hooks.cleanup_error("；".join(errors))
 
 
 class DanbooruDownloadController(QObject):

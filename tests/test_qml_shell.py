@@ -413,6 +413,8 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         fail_final_save,
     )
     for name, owner, attribute in (
+        ("downloads-stop", ui_session.download_manager, "begin_shutdown"),
+        ("downloads-save", ui_session.download_manager, "shutdown"),
         ("transfer-stop", ui_session.favorite_transfer, "begin_shutdown"),
         ("combinations", ui_session.artist_combinations, "shutdown"),
         ("transfer-wait", ui_session.favorite_transfer, "shutdown"),
@@ -455,6 +457,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
 
     assert reentry_count == 1
     assert events == [
+        "downloads-stop",
         "transfer-stop",
         "combinations",
         "collection",
@@ -463,6 +466,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         "detail-favorites",
         "bridge-closing",
         "transfer-wait",
+        "downloads-save",
         "query",
         "session",
         "session-detach",
@@ -561,4 +565,34 @@ def test_active_import_finishes_before_m2_cancel_and_final_history_save(tmp_path
         release.set()
         if releaser is not None:
             releaser.join()
+        _close_engine(engine)
+
+
+def test_active_download_shutdown_preserves_shared_query_and_final_history(tmp_path):
+    from danbooru_multi_search.core.downloads import DownloadTaskState
+    application = QGuiApplication.instance() or QGuiApplication([])
+    runtime = initialize_runtime(tmp_path)
+    network = _RecordingNetworkManager()
+    engine, bridge = create_qml_engine(application, danbooru_base_url="https://example.invalid", runtime=runtime, network_manager=network)
+    session = bridge.parent()
+    try:
+        assert bridge.applyAdvancedText("cat") and bridge.executeStandard()
+        assert _wait_until(lambda: len(network.requests) == 1)
+        work = DanbooruPost(id=321, preview_url=None, large_file_url=None, file_url="https://example.invalid/321.jpg",
+            score=0, fav_count=0, rating="g", width=100, height=100, file_ext="jpg")
+        batch = session.download_manager.enqueue_download(work, runtime.paths.download_dir)
+        assert _wait_until(lambda: len(network.requests) == 2)
+        session.download_manager.begin_shutdown()
+        assert network.replies[1].abort_count == 1 and network.replies[0].abort_count == 0
+        assert not session.query_controller.closed and not session.task_queue.is_shutdown
+        session.shutdown()
+        assert session.shutdown_completed
+        assert network.replies[0].abort_count == 1 and network.replies[1].abort_count == 1
+        stored = session.history_repository.latest_query()
+        assert stored.result_summary.state == QueryExecutionState.PARTIAL_CANCELLED
+        assert session.download_manager.snapshot(batch.batch_id).items[0].state is DownloadTaskState.AWAITING_RESUME
+        network.replies[1].readyRead.emit()
+        network.replies[1].finished.emit()
+        assert not list(runtime.paths.download_dir.glob("*.jpg"))
+    finally:
         _close_engine(engine)
