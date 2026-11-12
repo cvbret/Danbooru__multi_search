@@ -258,6 +258,21 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=6,
+        name="saved_artist_combinations",
+        statements=(
+            """
+            CREATE TABLE artist_combinations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL CHECK (length(name) > 0),
+                normalized_name TEXT NOT NULL UNIQUE CHECK (length(normalized_name) > 0),
+                artists_json TEXT NOT NULL CHECK (length(artists_json) > 0),
+                mode TEXT NOT NULL CHECK (mode IN ('all', 'any', 'exclude'))
+            )
+            """,
+        ),
+    ),
 )
 
 

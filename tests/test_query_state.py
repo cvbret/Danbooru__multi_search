@@ -636,6 +636,10 @@ def test_conditional_rank_plan_error_reports_whole_expression_range():
 
 
 def test_visual_tree_commands_refresh_paths_and_enforce_artist_category():
+    from danbooru_multi_search.core.artist_combinations import ArtistCombinationMode
+    from danbooru_multi_search.ui import query_state
+
+    assert query_state.ArtistCombinationMode is ArtistCombinationMode
     bridge, _, _ = _bridge("base")
 
     assert bridge.addVisualTag(None, "cat") is True

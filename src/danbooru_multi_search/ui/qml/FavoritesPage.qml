@@ -6,6 +6,7 @@ Item {
     id: page
     objectName: "favoritesPage"
     signal transferRequested()
+    signal artistCombinationsRequested()
     required property var controller
     required property var cacheController
     property QtObject theme: AppTheme {}
@@ -215,6 +216,7 @@ Item {
         Flow {
             Layout.fillWidth: true
             spacing: 8
+            ActionButton { objectName: "openFavoriteArtistCombinationsButton"; text: qsTr("收藏画师 / 常用组合"); onClicked: page.artistCombinationsRequested() }
             Label { height: 40; verticalAlignment: Text.AlignVCenter; text: qsTr("已加载 %1 / %2 · 已选择 %3").arg(page.controller.loadedCount).arg(page.controller.totalCount).arg(page.controller.selectedCount); color: theme.secondaryText }
             ActionButton {
                 objectName: "selectLoadedFavoritesButton"

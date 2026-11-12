@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TypeAlias
 
+# Preserve the original public import with the same enum object.
+from danbooru_multi_search.core.artist_combinations import ArtistCombinationMode
+
 from danbooru_multi_search.danbooru.query_language import (
     AndNode,
     NotNode,
@@ -37,12 +40,6 @@ _EMPTY_SPAN = SourceSpan(0, 0)
 class QueryGroupOperator(StrEnum):
     AND = "and"
     OR = "or"
-
-
-class ArtistCombinationMode(StrEnum):
-    ALL = "all"
-    ANY = "any"
-    EXCLUDE = "exclude"
 
 
 @dataclass(frozen=True, slots=True)

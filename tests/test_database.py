@@ -13,8 +13,8 @@ from danbooru_multi_search.storage.database import Database, DatabaseError, Migr
 def test_database_applies_migrations_once(tmp_path):
     database = Database(tmp_path / "application.sqlite3")
 
-    assert database.initialize() == 5
-    assert database.initialize() == 5
+    assert database.initialize() == 6
+    assert database.initialize() == 6
 
     with database.connect() as connection:
         migrations = connection.execute(
@@ -36,6 +36,7 @@ def test_database_applies_migrations_once(tmp_path):
         (3, "complex_query_definitions"),
         (4, "local_favorites"),
         (5, "favorite_collection_revision"),
+        (6, "saved_artist_combinations"),
     ]
     assert {
         "app_metadata",
@@ -46,6 +47,7 @@ def test_database_applies_migrations_once(tmp_path):
         "favorite_items",
         "favorite_post_tags",
         "favorite_collection_state",
+        "artist_combinations",
     }.issubset(tables)
     assert tuple(session) == (1, 0, None)
 
@@ -72,18 +74,18 @@ def test_database_upgrades_version_one_without_losing_existing_data(tmp_path):
 
     database = Database(path)
 
-    assert database.initialize() == 5
-    assert database.initialize() == 5
+    assert database.initialize() == 6
+    assert database.initialize() == 6
     with database.connect() as connection:
         preserved = connection.execute(
             "SELECT value FROM app_metadata WHERE key = 'preserved'"
         ).fetchone()
         migration_count = connection.execute(
-            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4, 5)"
+            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4, 5, 6)"
         ).fetchone()["count"]
 
     assert preserved["value"] == "yes"
-    assert migration_count == 4
+    assert migration_count == 5
 
 
 def test_version_three_schema_enforces_single_session_and_query_constraints(tmp_path):
@@ -190,8 +192,8 @@ def test_version_two_rows_migrate_to_standard_definitions_without_data_loss(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 5
-    assert database.initialize() == 5
+    assert database.initialize() == 6
+    assert database.initialize() == 6
 
     repository = HistoryRepository(database)
     query = repository.get_query(query_id)
@@ -274,8 +276,8 @@ def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 5
-    assert database.initialize() == 5
+    assert database.initialize() == 6
+    assert database.initialize() == 6
 
     preserved_query = repository.get_query(query.id)
     session = repository.load_session()
@@ -313,7 +315,7 @@ def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
     assert [(tag.normalized_tag, tag.use_count) for tag in tags] == [("cat", 1)]
     assert metadata["value"] == "yes"
     assert favorite_counts == (0, 0, 0)
-    assert versions == (1, 2, 3, 4, 5)
+    assert versions == (1, 2, 3, 4, 5, 6)
     assert foreign_key_errors == []
 
 
@@ -422,7 +424,7 @@ def test_version_four_upgrades_revision_state_without_losing_favorites(
                 (summary,),
             )
 
-    monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
+    monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations[:5])
     assert database.initialize() == 5
     assert database.initialize() == 5
 

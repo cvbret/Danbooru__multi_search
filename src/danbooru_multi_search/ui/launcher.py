@@ -32,6 +32,8 @@ from danbooru_multi_search.tasks import (
 )
 from danbooru_multi_search.storage import Database, HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
+from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
+from danbooru_multi_search.ui.artist_combinations import ArtistCombinationController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
@@ -154,6 +156,9 @@ class _UiSession(QObject):
             self.favorite_controller._repository, self.favorite_controller, self.detail_navigation, self
         )
         self.favorite_transfer = FavoriteTransferController(database.path, self.favorite_controller, self)
+        self.artist_combinations = ArtistCombinationController(
+            ArtistCombinationRepository(database), self.favorite_controller, self.query_bridge, self
+        )
         self.tag_controller = DanbooruTagSuggestionController(
             danbooru_base_url,
             network_manager=self.network_manager,
@@ -197,6 +202,7 @@ class _UiSession(QObject):
         self._closing = True
         steps = (
             self.favorite_transfer.begin_shutdown,
+            self.artist_combinations.shutdown,
             self.favorite_collection.shutdown,
             self.favorite_controller.shutdown,
             self.gallery_selection.shutdown,
@@ -235,6 +241,7 @@ class _UiSession(QObject):
             and self.detail_controller._shutdown
             and self.detail_navigation._closed
             and self.favorite_transfer.shutdown_completed
+            and self.artist_combinations._closed
             and self.favorite_collection._closed
             and self.favorite_controller._closed
             and self.gallery_selection._closed
@@ -305,6 +312,7 @@ def _create_qml_session(
         session.image_cache_controller,
     )
     engine.rootContext().setContextProperty("favoriteTransfer", session.favorite_transfer)
+    engine.rootContext().setContextProperty("artistCombinations", session.artist_combinations)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)

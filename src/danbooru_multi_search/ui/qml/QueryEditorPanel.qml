@@ -14,8 +14,10 @@ Item {
     property string suggestionTarget: ""
     property bool syncingText: false
     property bool suppressSuggestions: false
+    property bool externalSuggestionSuppressed: false
     property int observedEditorRevision: -1
     signal closeRequested()
+    signal artistCombinationsRequested(var parentPath)
 
     function parentPathForInsert() {
         if ((selectedKind === "and" || selectedKind === "or")
@@ -34,7 +36,7 @@ Item {
     }
 
     function updateAdvancedSuggestions() {
-        if (syncingText || suppressSuggestions || !advancedInput.activeFocus)
+        if (syncingText || suppressSuggestions || externalSuggestionSuppressed || !advancedInput.activeFocus)
             return
         suggestionTarget = "advanced"
         tagController.updateQueryInput(
@@ -44,7 +46,7 @@ Item {
     }
 
     function updateSimpleSuggestions(target, field) {
-        if (suppressSuggestions || !field.activeFocus)
+        if (suppressSuggestions || externalSuggestionSuppressed || !field.activeFocus)
             return
         suggestionTarget = target
         tagController.updateInput(field.text, field.cursorPosition)
@@ -333,6 +335,12 @@ Item {
                 color: theme.mutedText
                 wrapMode: Text.Wrap
                 font.pixelSize: 12
+            }
+
+            ActionButton {
+                objectName: "openQueryArtistCombinationsButton"
+                text: qsTr("收藏画师 / 常用组合")
+                onClicked: panel.artistCombinationsRequested(panel.parentPathForInsert())
             }
 
             Label {

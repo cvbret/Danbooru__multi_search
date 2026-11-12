@@ -14,6 +14,8 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from danbooru_multi_search.core.artist_combinations import ArtistCombinationMode
+
 from danbooru_multi_search.danbooru.query_controller import (
     DanbooruM2QueryController,
     GalleryQueryAccepted,
@@ -46,7 +48,6 @@ from danbooru_multi_search.danbooru.result_processing import (
     ResultProcessingError,
 )
 from danbooru_multi_search.ui.query_editor import (
-    ArtistCombinationMode,
     ConfirmedArtistTag,
     QueryEditorError,
     QueryGroupOperator,

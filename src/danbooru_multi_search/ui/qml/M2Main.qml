@@ -55,6 +55,34 @@ ApplicationWindow {
         theme: root.theme
     }
 
+    property bool artistSuggestionsSuppressed: false
+    signal queryEditorRequested()
+
+    function openArtistCombinations(parentPath) {
+        artistSuggestionsSuppressed = true
+        tagSuggestionController.closeSuggestions()
+        artistCombinationPanel.insertionPath = parentPath
+        artistCombinationPanel.open()
+    }
+
+    ArtistCombinationPanel {
+        id: artistCombinationPanel
+        controller: artistCombinations
+        theme: root.theme
+        onDismissed: Qt.callLater(function() { root.artistSuggestionsSuppressed = false })
+    }
+
+    Connections {
+        target: artistCombinations
+        function onDraftApplied() {
+            root.showPage("browse")
+            root.queryEditorRequested()
+            if (root.compactLayout)
+                queryDrawer.open()
+            artistCombinationPanel.close()
+        }
+    }
+
     property string activePage: "browse"
 
     function showPage(pageName) {
@@ -405,6 +433,11 @@ ApplicationWindow {
             border.color: theme.border
             radius: theme.radius
 
+            Connections {
+                target: root
+                function onQueryEditorRequested() { workspaceTabs.currentIndex = 0 }
+            }
+
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 20
@@ -462,6 +495,8 @@ ApplicationWindow {
                         theme: root.theme
                         controller: searchController
                         tagController: tagSuggestionController
+                        externalSuggestionSuppressed: root.artistSuggestionsSuppressed
+                        onArtistCombinationsRequested: function(parentPath) { root.openArtistCombinations(parentPath) }
                         onCloseRequested: {
                             if (root.compactLayout)
                                 queryDrawer.close()
@@ -772,6 +807,7 @@ ApplicationWindow {
             id: favoritesPage
             controller: favoriteCollection
             onTransferRequested: favoriteTransferDialog.open()
+            onArtistCombinationsRequested: root.openArtistCombinations(null)
             cacheController: imageCacheController
             theme: root.theme
         }

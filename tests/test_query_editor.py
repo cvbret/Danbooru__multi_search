@@ -23,6 +23,12 @@ def _tag(name: str) -> TagNode:
     return TagNode(name, SourceSpan(0, 0))
 
 
+def test_artist_mode_public_import_is_the_pure_core_enum():
+    from danbooru_multi_search.core.artist_combinations import ArtistCombinationMode as CoreMode
+
+    assert ArtistCombinationMode is CoreMode
+
+
 def test_empty_editor_accepts_first_tag_and_returns_to_empty_after_removal():
     editor = QueryTreeEditor()
 
