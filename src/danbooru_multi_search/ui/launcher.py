@@ -163,8 +163,6 @@ class _UiSession(QObject):
             resolved_screen_geometries = tuple(screen_geometries)
         self.session_controller = BrowserSessionController(
             self.history_repository,
-            None,
-            settings,
             resolved_screen_geometries,
             self,
             m2_controller=self.query_controller,

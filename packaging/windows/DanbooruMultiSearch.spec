@@ -16,7 +16,6 @@ project_qml = [
     (str(qml_root / "ApplicationBackground.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "PostCard.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "GalleryGrid.qml"), "danbooru_multi_search/ui/qml"),
-    (str(qml_root / "Main.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "M2Main.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "DetailPage.qml"), "danbooru_multi_search/ui/qml"),
     (str(qml_root / "ImageViewer.qml"), "danbooru_multi_search/ui/qml"),

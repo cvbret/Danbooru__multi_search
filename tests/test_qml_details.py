@@ -25,11 +25,10 @@ from danbooru_multi_search.danbooru import (
     DanbooruPost,
     TagIndexSnapshot,
     TagSuggestion,
-    build_gallery_request_spec,
 )
-from tests.m1_qml_harness import (
-    close_m1_qml_test_engine,
-    create_m1_qml_test_engine,
+from tests.m2_qml_harness import (
+    close_m2_qml_test_engine,
+    create_m2_qml_test_engine,
 )
 
 
@@ -117,7 +116,7 @@ def _post(
 
 def _create_window(posts: tuple[DanbooruPost, ...]):
     manager = FakeNetworkManager()
-    engine, gallery_controller = create_m1_qml_test_engine(
+    engine, gallery_controller = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=manager,
@@ -163,7 +162,7 @@ def _open_post_details(root, row: int) -> None:
 
 
 def _close(engine) -> None:
-    close_m1_qml_test_engine(engine)
+    close_m2_qml_test_engine(engine)
 
 
 def test_opening_detail_loads_local_image_without_metadata_request():
@@ -250,20 +249,17 @@ def test_escape_returns_once_and_preserves_gallery_query_controls():
     posts = tuple(_post(index + 1) for index in range(20))
     engine, root, gallery, detail, manager = _create_window(posts)
     try:
-        committed = build_gallery_request_spec(
-            "blue_sky",
-            "questionable",
-            page=3,
-            limit=80,
-        )
-        gallery._committed_spec = committed
+        assert gallery.applyAdvancedText("blue_sky")
+        values = dict(gallery.draftFormValues)
+        values.update(rating="questionable", pageSize="80")
+        assert gallery.updateDraftForm(values)
         tags_input = root.findChild(QObject, "tagsInput")
         rating_filter = root.findChild(QObject, "ratingFilter")
         page_size = root.findChild(QObject, "pageSizeInput")
+        before_definition = gallery.draft_definition
         grid = root.findChild(QObject, "galleryGrid")
-        tags_input.setProperty("text", "blue_sky")
-        rating_filter.setProperty("currentIndex", 3)
-        page_size.setProperty("value", 80)
+        APPLICATION.processEvents()
+        _invoke(grid, "forceLayout")
         grid.setProperty("currentIndex", 4)
         grid.setProperty("contentY", 120.5)
         before_generation = detail.mediaGeneration
@@ -281,20 +277,18 @@ def test_escape_returns_once_and_preserves_gallery_query_controls():
         )
         assert detail.mediaGeneration == before_generation + 2
         assert detail.mediaUrl == ""
-        assert gallery._committed_spec is committed
-        assert gallery.currentPage == 3
-        assert gallery.pageSize == 80
+        assert gallery.draft_definition == before_definition
         assert gallery.postsModel.revision == before_revision
         assert tags_input.property("text") == "blue_sky"
         assert rating_filter.property("currentValue") == "questionable"
-        assert page_size.property("value") == 80
+        assert page_size.property("text") == "80"
         assert grid.property("currentIndex") == 4
         assert manager.requests == []
     finally:
         _close(engine)
 
 
-def test_detail_tag_click_starts_exactly_one_gallery_request_from_top():
+def test_detail_tag_click_starts_exactly_one_formal_query_from_first_page():
     engine, root, _gallery, detail, manager = _create_window((_post(),))
     try:
         _open_post_details(root, 0)
@@ -322,7 +316,7 @@ def test_detail_tag_click_starts_exactly_one_gallery_request_from_top():
             "detailTagAddToQuery_sample_artist",
         )
         assert add_query_action is not None
-        assert add_query_action.property("visible") is False
+        assert add_query_action.property("visible") is True
         assert QMetaObject.invokeMethod(
             new_query_action,
             "triggered",
@@ -334,7 +328,8 @@ def test_detail_tag_click_starts_exactly_one_gallery_request_from_top():
         navigation = engine.rootContext().contextProperty("detailNavigation")
         assert navigation.gallery_snapshot is None
         assert root.findChild(QObject, "tagsInput").property("text") == "sample_artist"
-        assert root.findChild(QObject, "galleryGrid").property("currentIndex") == -1
+        assert manager.requests[0].url().query().split("page=")[1].split("&")[0] == "1"
+        assert root.findChild(QObject, "galleryGrid").property("count") == 1
     finally:
         _close(engine)
 

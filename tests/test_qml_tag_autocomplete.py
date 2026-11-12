@@ -17,9 +17,9 @@ from danbooru_multi_search.danbooru import (
     TagIndexSnapshot,
     TagSuggestion,
 )
-from tests.m1_qml_harness import (
-    close_m1_qml_test_engine,
-    create_m1_qml_test_engine,
+from tests.m2_qml_harness import (
+    close_m2_qml_test_engine,
+    create_m2_qml_test_engine,
 )
 
 
@@ -84,7 +84,7 @@ def _wait_until(predicate, timeout_ms: int = 1_500) -> bool:
 
 def _create_window():
     manager = FakeNetworkManager()
-    engine, gallery_controller = create_m1_qml_test_engine(
+    engine, gallery_controller = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=manager,
@@ -122,7 +122,7 @@ def _show_suggestions(tags_input, suggestion_popup, text: str, cursor: int):
 
 
 def _close_window(engine) -> None:
-    close_m1_qml_test_engine(engine)
+    close_m2_qml_test_engine(engine)
 
 
 def test_suggestion_popup_keeps_input_focus_and_keyboard_navigation_cycles():
@@ -161,7 +161,7 @@ def test_suggestion_popup_keeps_input_focus_and_keyboard_navigation_cycles():
 
 
 @pytest.mark.parametrize("key", [Qt.Key.Key_Return, Qt.Key.Key_Enter])
-def test_return_keys_select_once_search_once_and_do_not_restart_completion(key):
+def test_return_keys_select_only_then_execute_once_after_popup_closes(key):
     (
         engine,
         root,
@@ -173,19 +173,20 @@ def test_return_keys_select_once_search_once_and_do_not_restart_completion(key):
         manager,
     ) = _create_window()
     try:
-        _show_suggestions(tags_input, suggestion_popup, "猫 dog", 1)
+        _show_suggestions(tags_input, suggestion_popup, "猫 OR dog", 1)
 
         QTest.keyClick(root, key)
 
-        assert _wait_until(lambda: len(manager.requests) == 1)
-        assert tags_input.property("text") == "cat dog"
+        assert manager.requests == []
+        assert tags_input.property("text") == "cat OR dog"
         assert suggestion_popup.property("opened") is False
         assert root.activeFocusItem() == tags_input
-        assert gallery_controller.busy is True
         QTest.qWait(350)
         APPLICATION.processEvents()
-        assert len(manager.requests) == 1
+        assert manager.requests == []
         assert tag_controller.debouncePending is False
+        QTest.keyClick(root, key)
+        assert _wait_until(lambda: len(manager.requests) == 1)
     finally:
         _close_window(engine)
 
@@ -202,7 +203,7 @@ def test_mouse_click_only_replaces_fragment_and_outside_click_closes_popup():
         manager,
     ) = _create_window()
     try:
-        _show_suggestions(tags_input, suggestion_popup, "猫 dog", 1)
+        _show_suggestions(tags_input, suggestion_popup, "猫 OR dog", 1)
         suggestion_row = suggestion_list.property("currentItem")
         assert suggestion_row is not None
         center = suggestion_row.mapToScene(
@@ -216,13 +217,13 @@ def test_mouse_click_only_replaces_fragment_and_outside_click_closes_popup():
         )
 
         assert _wait_until(lambda: not suggestion_popup.property("opened"))
-        assert tags_input.property("text") == "cat dog"
+        assert tags_input.property("text") == "cat OR dog"
         assert manager.requests == []
         QTest.qWait(350)
         assert manager.requests == []
         assert tag_controller.debouncePending is False
 
-        _show_suggestions(tags_input, suggestion_popup, "猫 dog", 1)
+        _show_suggestions(tags_input, suggestion_popup, "猫 OR dog", 1)
         QTest.mouseClick(
             root,
             Qt.MouseButton.LeftButton,
@@ -230,7 +231,7 @@ def test_mouse_click_only_replaces_fragment_and_outside_click_closes_popup():
         )
         assert _wait_until(lambda: not suggestion_popup.property("opened"))
         assert tag_controller.suggestionsModel.count == 0
-        assert tags_input.property("text") == "猫 dog"
+        assert tags_input.property("text") == "猫 OR dog"
         assert manager.requests == []
     finally:
         _close_window(engine)
@@ -274,7 +275,7 @@ def test_input_method_composition_return_does_not_select_or_search():
         manager,
     ) = _create_window()
     try:
-        _show_suggestions(tags_input, suggestion_popup, "cat", 3)
+        _show_suggestions(tags_input, suggestion_popup, "猫", 1)
         assert suggestion_list.property("currentIndex") == 0
         composing = QInputMethodEvent("x", [])
         QGuiApplication.sendEvent(root, composing)
@@ -283,8 +284,14 @@ def test_input_method_composition_return_does_not_select_or_search():
         QTest.keyClick(root, Qt.Key.Key_Return)
 
         assert manager.requests == []
-        assert tags_input.property("text") == "cat"
-        assert suggestion_popup.property("opened") is True
+        assert tags_input.property("text").strip() == "猫"
+        QGuiApplication.sendEvent(tags_input, QInputMethodEvent("", []))
+        _show_suggestions(tags_input, suggestion_popup, "猫 OR dog", 1)
+        QTest.keyClick(root, Qt.Key.Key_Return)
+        assert tags_input.property("text") == "cat OR dog"
+        assert manager.requests == []
+        QTest.keyClick(root, Qt.Key.Key_Return)
+        assert _wait_until(lambda: len(manager.requests) == 1)
     finally:
         QGuiApplication.sendEvent(root, QInputMethodEvent("", []))
         _close_window(engine)

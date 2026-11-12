@@ -11,7 +11,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QObject, QTimeZone, Signal
 from PySide6.QtGui import QGuiApplication
 
-from danbooru_multi_search.core.settings import AppSettings
 from danbooru_multi_search.danbooru import (
     DanbooruPostListModel,
     GalleryQueryAccepted,
@@ -264,13 +263,50 @@ def _build(tmp_path):
     bridge = _FakeBridge(core)
     session = BrowserSessionController(
         repository,
-        None,
-        AppSettings(),
         (ScreenGeometry(WindowGeometry(0, 0, 1920, 1040), primary=True),),
         m2_controller=core,
         query_bridge=bridge,
     )
     return repository, core, bridge, session
+
+
+def test_normal_geometry_survives_maximized_and_minimized_reports(tmp_path):
+    repository, _core, _bridge, session = _build(tmp_path)
+    session.updateWindowState(30, 40, 1020, 740, False, False)
+    session.updateWindowState(0, 0, 1920, 1040, True, False)
+    session.updateWindowState(-32000, -32000, 160, 30, False, True)
+    session.save_final_state()
+    stored = repository.load_session()
+    assert stored.is_maximized is True
+    assert stored.geometry is not None
+    assert (
+        stored.geometry.x,
+        stored.geometry.y,
+        stored.geometry.width,
+        stored.geometry.height,
+    ) == (30, 40, 1020, 740)
+
+
+def test_final_save_failure_still_closes_and_detaches_session(tmp_path, monkeypatch):
+    repository, _core, bridge, session = _build(tmp_path)
+    attempts = []
+
+    def fail_save(**kwargs):
+        attempts.append(kwargs)
+        raise HistoryError("final save failed")
+
+    monkeypatch.setattr(repository, "save_browser_state", fail_save)
+    session.updateWindowState(30, 40, 1020, 740, False, False)
+    session.begin_shutdown()
+    session.detach_events()
+    session.begin_shutdown()
+    assert len(attempts) == 1
+    assert "final save failed" in session.noticeText
+    assert session.events_detached is True
+    assert not session._save_timer.isActive()
+    generation = session._restore_generation
+    bridge.draftEdited.emit()
+    assert session._restore_generation == generation
 
 
 def _store_definition(
@@ -1299,8 +1335,6 @@ def test_old_accept_is_ignored_after_synchronous_new_query(tmp_path):
     bridge = _FakeBridge(core)
     session = BrowserSessionController(
         repository,
-        None,
-        AppSettings(),
         (ScreenGeometry(WindowGeometry(0, 0, 1920, 1040), primary=True),),
         m2_controller=core,
         query_bridge=bridge,
@@ -1328,8 +1362,6 @@ def test_result_arriving_before_session_accept_slot_is_replayed(tmp_path):
     core.queryAccepted.connect(lambda _event: core.result(commit_gallery=True))
     session = BrowserSessionController(
         repository,
-        None,
-        AppSettings(),
         (ScreenGeometry(WindowGeometry(0, 0, 1920, 1040), primary=True),),
         m2_controller=core,
         query_bridge=bridge,
@@ -1369,8 +1401,6 @@ def test_view_arriving_before_session_accept_slot_is_replayed(tmp_path):
     )
     session = BrowserSessionController(
         repository,
-        None,
-        AppSettings(),
         (ScreenGeometry(WindowGeometry(0, 0, 1920, 1040), primary=True),),
         m2_controller=core,
         query_bridge=bridge,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from urllib.parse import parse_qs
 
@@ -24,9 +25,9 @@ from danbooru_multi_search.ui.window_state import (
     WindowGeometry,
     restore_window_geometry,
 )
-from tests.m1_qml_harness import (
-    close_m1_qml_test_engine,
-    create_m1_qml_test_engine,
+from tests.m2_qml_harness import (
+    close_m2_qml_test_engine,
+    create_m2_qml_test_engine,
 )
 
 
@@ -41,12 +42,13 @@ class _PendingReply(QObject):
     def __init__(self) -> None:
         super().__init__()
         self.abort_count = 0
+        self.payload = b""
 
     def abort(self) -> None:
         self.abort_count += 1
 
     def readAll(self) -> bytes:
-        return b""
+        return self.payload
 
     def error(self):
         return QNetworkReply.NetworkError.NoError
@@ -90,10 +92,10 @@ def _wait_until(predicate, timeout_ms: int = 2000) -> bool:
 
 
 def _close(engine) -> None:
-    close_m1_qml_test_engine(engine)
+    close_m2_qml_test_engine(engine)
 
 
-def test_startup_and_history_selection_stay_offline_then_restore_saved_page(
+def test_startup_and_history_selection_stay_offline_then_reexecute_first_page(
     tmp_path,
 ):
     runtime = initialize_runtime(tmp_path)
@@ -108,7 +110,7 @@ def test_startup_and_history_selection_stay_offline_then_restore_saved_page(
     )
     assert repository.mark_query_committed(saved.id, 2)
     manager = _RecordingNetworkManager()
-    engine, gallery = create_m1_qml_test_engine(
+    engine, gallery = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=manager,
@@ -129,9 +131,9 @@ def test_startup_and_history_selection_stay_offline_then_restore_saved_page(
         session.restoreSelected()
         assert _wait_until(lambda: len(manager.requests) == 1)
         restore_query = parse_qs(manager.requests[0].url().query())
-        assert restore_query["page"] == ["2"]
+        assert restore_query["page"] == ["1"]
 
-        gallery.cancelCurrentRequest()
+        gallery.cancel()
         search_button = root.findChild(QObject, "searchButton")
         search_button.clicked.emit()
         assert _wait_until(lambda: len(manager.requests) == 2)
@@ -146,7 +148,7 @@ def test_startup_and_history_selection_stay_offline_then_restore_saved_page(
 
 
 def test_hidden_window_does_not_replace_last_normal_geometry():
-    engine, _gallery = create_m1_qml_test_engine(
+    engine, _gallery = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -179,7 +181,7 @@ def test_hidden_window_does_not_replace_last_normal_geometry():
 
 def test_maximized_state_is_persisted_and_applied_on_actual_restart(tmp_path):
     runtime = initialize_runtime(tmp_path)
-    first_engine, _gallery = create_m1_qml_test_engine(
+    first_engine, _gallery = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -210,24 +212,12 @@ def test_maximized_state_is_persisted_and_applied_on_actual_restart(tmp_path):
     assert persisted.geometry.y == 70
     assert persisted.geometry.width == 1000
     assert persisted.geometry.height == 700
-    current_screens = tuple(
-        ScreenGeometry(
-            WindowGeometry(
-                screen.availableGeometry().x(),
-                screen.availableGeometry().y(),
-                screen.availableGeometry().width(),
-                screen.availableGeometry().height(),
-            ),
-            primary=screen is APPLICATION.primaryScreen(),
-        )
-        for screen in APPLICATION.screens()
-    )
     expected_geometry = restore_window_geometry(
         WindowGeometry(60, 70, 1000, 700),
-        current_screens,
+        (ScreenGeometry(WindowGeometry(0, 0, 1280, 820), primary=True),),
     )
 
-    second_engine, _gallery = create_m1_qml_test_engine(
+    second_engine, _gallery = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -250,7 +240,7 @@ def test_maximized_state_is_persisted_and_applied_on_actual_restart(tmp_path):
 
 def test_closing_reports_same_event_cycle_geometry_before_final_save(tmp_path):
     runtime = initialize_runtime(tmp_path)
-    engine, _gallery = create_m1_qml_test_engine(
+    engine, _gallery = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -264,7 +254,7 @@ def test_closing_reports_same_event_cycle_geometry_before_final_save(tmp_path):
     expected = WindowGeometry(root.x(), root.y(), root.width(), root.height())
 
     root.close()
-    close_m1_qml_test_engine(engine)
+    close_m2_qml_test_engine(engine)
 
     persisted = HistoryRepository(runtime.database).load_session()
     assert persisted.geometry is not None
@@ -277,7 +267,7 @@ def test_closing_reports_same_event_cycle_geometry_before_final_save(tmp_path):
 
 
 def test_small_screen_qml_minimum_does_not_force_window_off_screen():
-    engine, _gallery = create_m1_qml_test_engine(
+    engine, _gallery = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
         network_manager=_RecordingNetworkManager(),
@@ -310,6 +300,35 @@ def _gallery_post(post_id: int) -> DanbooruPost:
     )
 
 
+def _complete_query(bridge, manager, posts):
+    """Deliver complete local rows through the formal executor and history events."""
+
+    if bridge.core_controller.operation_id is None:
+        assert bridge.executeStandard()
+    assert _wait_until(lambda: bool(manager.replies))
+    manager.replies[-1].payload = json.dumps([
+        {
+            "id": post.id,
+            "preview_file_url": post.preview_url,
+            "large_file_url": post.large_file_url,
+            "file_url": post.file_url,
+            "score": post.score,
+            "fav_count": post.fav_count,
+            "rating": post.rating,
+            "image_width": post.width,
+            "image_height": post.height,
+            "file_ext": post.file_ext,
+            "tag_string_artist": "",
+            "tag_string_character": "",
+            "tag_string_copyright": "",
+            "tag_string_general": "cat",
+            "tag_string_meta": "",
+        }
+        for post in posts
+    ]).encode("utf-8")
+    manager.replies[-1].finished.emit()
+
+
 def test_first_visible_card_and_position_are_saved_after_500ms(tmp_path):
     runtime = initialize_runtime(tmp_path)
     repository = HistoryRepository(runtime.database)
@@ -322,20 +341,22 @@ def test_first_visible_card_and_position_are_saved_after_500ms(tmp_path):
         count_tag_usage=True,
     )
     assert repository.mark_query_committed(query.id, 1)
-    engine, gallery = create_m1_qml_test_engine(
+    manager = _RecordingNetworkManager()
+    engine, gallery = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
-        network_manager=_RecordingNetworkManager(),
+        network_manager=manager,
         runtime=runtime,
     )
     root = engine.rootObjects()[0]
     session = engine.rootContext().contextProperty("sessionController")
     grid = root.findChild(QObject, "galleryGrid")
     try:
-        gallery.postsModel.set_posts(
-            tuple(_gallery_post(index + 1) for index in range(30))
+        assert gallery.applyAdvancedText("cat")
+        _complete_query(
+            gallery, manager, tuple(_gallery_post(index + 1) for index in range(30))
         )
-        session._displayed_model_revision = gallery.postsModel.revision
+        assert _wait_until(lambda: session.activeHistoryId == query.id)
         assert _wait_until(lambda: grid.property("count") == 30)
         grid.setProperty("contentY", 330.0)
         assert _wait_until(
@@ -375,31 +396,31 @@ def test_delayed_restore_callback_cannot_move_gallery_after_edit(tmp_path):
     assert repository.update_gallery_position(
         GalleryPosition(query.id, 6, 5, 0.0, 340.0)
     )
-    engine, gallery = create_m1_qml_test_engine(
+    manager = _RecordingNetworkManager()
+    engine, gallery = create_m2_qml_test_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
-        network_manager=_RecordingNetworkManager(),
+        network_manager=manager,
         runtime=runtime,
     )
     root = engine.rootObjects()[0]
     session = engine.rootContext().contextProperty("sessionController")
     grid = root.findChild(QObject, "galleryGrid")
     try:
-        gallery.postsModel.set_posts(
-            tuple(_gallery_post(index + 1) for index in range(20))
+        session.restoreSelected()
+        _complete_query(
+            gallery, manager, tuple(_gallery_post(index + 1) for index in range(20))
         )
-        session._displayed_model_revision = gallery.postsModel.revision
-        assert _wait_until(lambda: grid.property("count") == 20)
+        assert session._restore_ready is not None
         grid.setProperty("currentIndex", -1)
         grid.setProperty("contentY", 0.0)
-        session._restore_ready = repository.get_query(query.id)
-
         assert QMetaObject.invokeMethod(
-            root,
-            "restoreHistoryPosition",
-            Qt.ConnectionType.DirectConnection,
+            root, "restoreHistoryPosition", Qt.ConnectionType.DirectConnection
         )
+        token, revision = session._restore_application
+        assert session.galleryRestorePlanCurrent(token, revision)
         session.controlsEdited()
+        assert not session.galleryRestorePlanCurrent(token, revision)
         APPLICATION.processEvents()
         QTest.qWait(20)
 

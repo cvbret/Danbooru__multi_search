@@ -28,7 +28,6 @@ EXPECTED_QML_MEMBERS = (
     "danbooru_multi_search/ui/qml/ApplicationBackground.qml",
     "danbooru_multi_search/ui/qml/PostCard.qml",
     "danbooru_multi_search/ui/qml/GalleryGrid.qml",
-    "danbooru_multi_search/ui/qml/Main.qml",
     "danbooru_multi_search/ui/qml/M2Main.qml",
     "danbooru_multi_search/ui/qml/DetailPage.qml",
     "danbooru_multi_search/ui/qml/ImageViewer.qml",

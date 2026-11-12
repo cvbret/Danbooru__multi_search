@@ -82,7 +82,6 @@ QML_FILES = (
     "ApplicationBackground.qml",
     "PostCard.qml",
     "GalleryGrid.qml",
-    "Main.qml",
     "M2Main.qml",
     "DetailPage.qml",
     "ImageViewer.qml",

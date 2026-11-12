@@ -270,8 +270,6 @@ def _create_window(tmp_path):
     database.initialize()
     session = BrowserSessionController(
         HistoryRepository(database),
-        None,
-        AppSettings(),
         (ScreenGeometry(WindowGeometry(0, 0, 1280, 820), primary=True),),
         m2_controller=core,
         query_bridge=bridge,

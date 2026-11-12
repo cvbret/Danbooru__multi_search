@@ -29,10 +29,6 @@ from danbooru_multi_search.danbooru.client import (
     DEFAULT_TIMEOUT_MS,
     select_preferred_tls_backend,
 )
-from danbooru_multi_search.danbooru.gallery import (
-    GalleryQueryError,
-    build_gallery_request_spec,
-)
 from danbooru_multi_search.danbooru.tag_index import (
     TagCsvImportCancelled,
     TagCsvImportError,
@@ -180,21 +176,21 @@ def replace_active_tag_fragment(
     context = locate_active_tag_fragment(text, cursor)
     if context.is_empty or context.token_count > 2:
         return TagReplacement(text, cursor, False, False)
+    if not isinstance(tag_name, str) or not tag_name.isascii():
+        return TagReplacement(text, cursor, False, False)
     try:
-        replacement_spec = build_gallery_request_spec(tag_name)
-    except GalleryQueryError:
+        normalized_tag = normalize_tag_name(tag_name)
+    except TagSyntaxError:
         return TagReplacement(text, cursor, False, False)
-    if len(replacement_spec.tags) != 1:
-        return TagReplacement(text, cursor, False, False)
-    normalized_tag = replacement_spec.tags[0]
 
     replaced = text[: context.start] + normalized_tag + text[context.end :]
     new_cursor = context.start + len(normalized_tag)
     if len(replaced.split()) > 2:
         return TagReplacement(text, cursor, False, False)
     try:
-        build_gallery_request_spec(replaced)
-    except GalleryQueryError:
+        for token in replaced.split():
+            normalize_tag_name(token)
+    except TagSyntaxError:
         should_search = False
     else:
         should_search = replaced.isascii()

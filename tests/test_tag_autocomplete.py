@@ -90,6 +90,29 @@ def test_replacement_preserves_spacing_and_waits_for_all_chinese_to_be_mapped():
     assert replace_active_tag_fragment("cat", 1, "dog wolf").changed is False
 
 
+@pytest.mark.parametrize(
+    "tag_name",
+    [
+        "OR", "-cat", "~cat", "rating:g", "cat dog", "猫", "\u3000cat\u3000",
+        "cat*", "(cat)", "cat_(nested_(tag))",
+    ],
+)
+def test_plain_fragment_replacement_rejects_unsupported_selection(tag_name):
+    replacement = replace_active_tag_fragment("ca dog", 2, tag_name)
+    assert replacement.text == "ca dog"
+    assert replacement.cursor == 2
+    assert replacement.changed is False
+    assert replacement.should_search is False
+
+
+@pytest.mark.parametrize("other", ["OR", "rating:g", "-dog", "dog*", "猫"])
+def test_plain_fragment_replacement_waits_for_invalid_surrounding_token(other):
+    replacement = replace_active_tag_fragment(f"ca {other}", 2, " CAT ")
+    assert replacement.text == f"cat {other}"
+    assert replacement.changed is True
+    assert replacement.should_search is False
+
+
 def test_merge_is_order_independent_and_preserves_none_zero_and_remote_priority():
     local = [
         TagSuggestion("cat", ("猫",), None, 4),
