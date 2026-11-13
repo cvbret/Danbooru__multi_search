@@ -159,7 +159,7 @@ def test_named_queries_are_independent_of_history_and_favorite_replace(tmp_path)
 
 @pytest.mark.parametrize("fail", [False, True])
 def test_version_eight_only_adds_table_and_rolls_back_atomically(tmp_path, monkeypatch, fail):
-    migrations = database_module.MIGRATIONS
+    migrations = database_module.MIGRATIONS[:8]
     monkeypatch.setattr(database_module, "MIGRATIONS", migrations[:7])
     database = Database(tmp_path / "application.sqlite3")
     assert database.initialize() == 7

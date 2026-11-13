@@ -327,6 +327,49 @@ def test_three_branches_rotate_strictly_and_skip_short_and_empty_branches():
     ]
 
 
+def test_checkpoint_resume_keeps_other_branches_when_one_has_used_its_page_quota():
+    first = _harness(_plan("a OR b"), limits=QueryExecutionLimits(page_size=1, branch_page_limit=2))
+    first.succeed((_post(1, "a"),))
+    first.succeed((_post(2, "b"),))
+    first.succeed((_post(3, "a"),))
+    first.executor.cancel()
+    saved = first.executor.export_checkpoint()
+    second = _harness(saved.plan, auto_start=False)
+    second.executor.resume(saved)
+    second.dispatch()
+    assert _request_positions(second) == [("b", 2)]
+    second.succeed(())
+    assert second.executor.snapshot.state is QueryExecutionState.PARTIAL_LIMITED
+    assert second.executor.snapshot.limit_reason is QueryLimitReason.PAGE_LIMIT
+    assert second.executor.snapshot.counts.unique_candidates == 3
+    second.executor.shutdown()
+
+
+def test_checkpoint_candidate_midpage_cutoff_and_time_budget_cannot_be_reset():
+    from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError
+    limited = _harness(_plan("a"), limits=QueryExecutionLimits(page_size=2, candidate_limit=1))
+    limited.succeed((_post(1, "a"), _post(2, "a")))
+    saved = limited.executor.export_checkpoint()
+    assert saved.counts.remote_rows == 2 and saved.counts.unique_candidates == 1
+    second = _harness(saved.plan, auto_start=False)
+    with pytest.raises(CheckpointError):
+        second.executor.resume(saved)
+    assert second.factory.attempts == []
+    first = _harness(_plan("a"), limits=QueryExecutionLimits(active_time_limit_seconds=10))
+    first.clock.advance_only(6)
+    first.executor.cancel()
+    saved = first.executor.export_checkpoint()
+    second.executor.resume(saved)
+    second.dispatch()
+    second.scheduler.advance(4)
+    assert second.executor.snapshot.limit_reason is QueryLimitReason.TIME_LIMIT
+    assert second.executor.export_checkpoint().elapsed_active_seconds == 10
+    with pytest.raises(CheckpointError):
+        second.executor.resume(second.executor.export_checkpoint())
+    first.executor.shutdown()
+    second.executor.shutdown()
+
+
 def test_full_tenth_page_is_page_limited_but_other_branches_finish():
     harness = _harness(
         _plan("a OR b"),

@@ -165,10 +165,15 @@ class HistoryRepository:
         database: Database,
         *,
         clock: Callable[[], datetime] | None = None,
+        busy_timeout_ms: int = 5000,
     ) -> None:
         self._database = database
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.RLock()
+        self._busy_timeout_ms = busy_timeout_ms
+
+    def _connect(self) -> sqlite3.Connection:
+        return self._database.connect() if self._busy_timeout_ms == 5000 else self._database.connect(busy_timeout_ms=self._busy_timeout_ms)
 
     def record_accepted_query(
         self,
@@ -211,6 +216,7 @@ class HistoryRepository:
         page: int,
         count_tag_usage: bool,
         used_at: datetime | None = None,
+        transaction_hook: Callable[[sqlite3.Connection, RecentQuery], None] | None = None,
     ) -> RecentQuery | None:
         """Record one accepted M2 definition and its unique expression tags.
 
@@ -233,7 +239,7 @@ class HistoryRepository:
         query_key = query_definition_key(definition)
 
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._database.connect(busy_timeout_ms=0) if transaction_hook else self._connect()) as connection:
                 with connection:
                     connection.execute("BEGIN IMMEDIATE")
                     _validate_existing_query_identity(
@@ -294,6 +300,8 @@ class HistoryRepository:
                         (query_key,),
                     ).fetchone()
                     result = _row_to_query(row) if row is not None else None
+                    if result is not None and transaction_hook is not None:
+                        transaction_hook(connection, result)
         except sqlite3.Error as exc:
             raise HistoryError(f"Unable to record accepted query: {exc}") from exc
         return result
@@ -304,6 +312,7 @@ class HistoryRepository:
         source_query_id: int,
         definition: GalleryQueryDefinition,
         used_at: datetime | None = None,
+        transaction_hook: Callable[[sqlite3.Connection, RecentQuery], None] | None = None,
     ) -> RecentQuery | None:
         """Create or reuse a view identity without incrementing recent tags."""
 
@@ -315,7 +324,7 @@ class HistoryRepository:
         query_key = query_definition_key(definition)
         encoded_tags = encode_normalized_tags(query_definition_tags(definition))
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._database.connect(busy_timeout_ms=0) if transaction_hook else self._connect()) as connection:
                 with connection:
                     connection.execute("BEGIN IMMEDIATE")
                     source = connection.execute(
@@ -409,6 +418,8 @@ class HistoryRepository:
                         (query_key,),
                     ).fetchone()
                     result = _row_to_query(row) if row is not None else None
+                    if result is not None and transaction_hook is not None:
+                        transaction_hook(connection, result)
         except sqlite3.Error as exc:
             raise HistoryError(f"Unable to record view definition: {exc}") from exc
         return result
@@ -417,13 +428,15 @@ class HistoryRepository:
         self,
         query_id: int,
         summary: GalleryResultSummary,
+        *,
+        transaction_hook: Callable[[sqlite3.Connection, RecentQuery], None] | None = None,
     ) -> bool:
         """Update only the result summary without changing query identity."""
 
         _validate_identifier(query_id, "query_id")
         encoded = encode_result_summary(summary)
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._database.connect(busy_timeout_ms=0) if transaction_hook else self._connect()) as connection:
                 with connection:
                     connection.execute("BEGIN IMMEDIATE")
                     row = connection.execute(
@@ -432,7 +445,9 @@ class HistoryRepository:
                     ).fetchone()
                     if row is None:
                         return False
-                    _row_to_query(row)
+                    query = _row_to_query(row)
+                    if transaction_hook is not None:
+                        transaction_hook(connection, query)
                     cursor = connection.execute(
                         """
                         UPDATE recent_queries
@@ -459,7 +474,7 @@ class HistoryRepository:
         if not isinstance(preserve_position, bool):
             raise TypeError("preserve_position must be a boolean")
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 with connection:
                     if preserve_position:
                         cursor = connection.execute(
@@ -499,7 +514,7 @@ class HistoryRepository:
         """Update only an existing query; never recreate history after clearing."""
 
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 with connection:
                     updated = self._update_position(connection, position)
                     if not updated:
@@ -535,7 +550,7 @@ class HistoryRepository:
             raise ValueError("gallery position must belong to active_query_id")
 
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 with connection:
                     actual_active_id = active_query_id
                     position_saved = gallery_position is None
@@ -568,7 +583,7 @@ class HistoryRepository:
         if query_id is not None:
             _validate_identifier(query_id, "query_id")
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 with connection:
                     actual_id = query_id
                     if query_id is not None:
@@ -590,7 +605,7 @@ class HistoryRepository:
         """Delete query and tag history while preserving window geometry."""
 
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 with connection:
                     connection.execute(
                         "UPDATE browser_session SET active_query_id = NULL WHERE id = 1"
@@ -621,7 +636,7 @@ class HistoryRepository:
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
             raise ValueError("limit must be a non-negative integer")
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 rows = connection.execute(
                     """
                     SELECT * FROM recent_queries
@@ -638,7 +653,7 @@ class HistoryRepository:
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
             raise ValueError("limit must be a non-negative integer")
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 rows = connection.execute(
                     """
                     SELECT normalized_tag, use_count, last_used_at
@@ -661,7 +676,7 @@ class HistoryRepository:
 
     def load_session(self) -> BrowserSession:
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 row = connection.execute(
                     "SELECT * FROM browser_session WHERE id = 1"
                 ).fetchone()
@@ -690,7 +705,7 @@ class HistoryRepository:
         parameters: tuple[object, ...],
     ) -> RecentQuery | None:
         try:
-            with self._lock, closing(self._database.connect()) as connection:
+            with self._lock, closing(self._connect()) as connection:
                 row = connection.execute(statement, parameters).fetchone()
         except sqlite3.Error as exc:
             raise HistoryError(f"Unable to read recent query: {exc}") from exc

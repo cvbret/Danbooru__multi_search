@@ -18,6 +18,7 @@ from danbooru_multi_search.danbooru.client import (
     select_preferred_tls_backend,
 )
 from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError, ExecutionCheckpoint
 from danbooru_multi_search.danbooru.parsing import parse_complete_posts_response
 from danbooru_multi_search.danbooru.query_evaluator import evaluate_post_query
 from danbooru_multi_search.danbooru.query_planning import (
@@ -104,6 +105,8 @@ class _ExecutionSession:
     failure: QueryExecutionFailure | None = None
     active_request: _PageRequestIdentity | None = None
     active_task_id: str | None = None
+    uncommitted: QueryBranchPosition | None = None
+    persistence_error: str | None = None
     request_sequence: int = 0
     control_generation: int = 0
     elapsed_active_seconds: float = 0.0
@@ -171,6 +174,9 @@ class DanbooruMultiBranchExecutor(QObject):
         self._execution_counter = 0
         self._session: _ExecutionSession | None = None
         self._closed = False
+        self.before_attempt: Callable[[ExecutionCheckpoint], bool] | None = None
+        self.before_abandon: Callable[[ExecutionCheckpoint], bool] | None = None
+        self.before_publish: Callable[[ExecutionCheckpoint], bool] | None = None
         self._snapshot = QueryExecutionSnapshot(
             execution_id=0,
             state=QueryExecutionState.IDLE,
@@ -263,6 +269,77 @@ class DanbooruMultiBranchExecutor(QObject):
             self._publish(session)
         return True
 
+    def export_checkpoint(self) -> ExecutionCheckpoint:
+        if self._session is None:
+            raise CheckpointError("missing_checkpoint", "当前没有可保存的执行。")
+        return self._export_session(self._session)
+
+    def _export_session(self, session: _ExecutionSession) -> ExecutionCheckpoint:
+        elapsed = session.elapsed_active_seconds
+        if session.active_since is not None:
+            elapsed += max(0.0, self._clock.monotonic() - session.active_since)
+        return ExecutionCheckpoint(session.plan, session.limits, session.state, session.counts,
+            tuple((session.candidates or {}).values()), tuple(session.matches or {}),
+            tuple(QueryBranchProgress(i, branch.next_page, branch.successful_pages, branch.natural_end, branch.page_limited)
+                  for i, branch in enumerate(session.branches)), tuple(session.pending_branches), session.uncommitted,
+            session.failure, session.limit_reason, elapsed, session.active_since is not None, session.persistence_error)
+
+    def resume(self, checkpoint: ExecutionCheckpoint, *, binding_token: object | None = None) -> int:
+        if self._closed:
+            raise RuntimeError("The query executor has been shut down.")
+        if not isinstance(checkpoint, ExecutionCheckpoint):
+            raise CheckpointError("invalid_checkpoint", "执行检查点无效。")
+        if checkpoint.resume_reason:
+            raise CheckpointError("cannot_resume", checkpoint.resume_reason)
+        self._validate_start(checkpoint.plan, checkpoint.limits)
+        old = self._session
+        self._execution_counter += 1
+        by_id = {post.id: post for post in checkpoint.candidates}
+        session = _ExecutionSession(self._execution_counter, checkpoint.plan, checkpoint.limits,
+            [_BranchState(branch.next_page, branch.successful_pages, branch.natural_end, branch.page_limited) for branch in checkpoint.branches],
+            deque(checkpoint.pending), binding_token=binding_token, counts=checkpoint.counts,
+            candidates=by_id, matches={key: by_id[key] for key in checkpoint.matched_ids},
+            uncommitted=checkpoint.uncommitted, elapsed_active_seconds=checkpoint.elapsed_active_seconds)
+        self._session = session
+        if old is not None:
+            self._abandon_session(old)
+        self.executionBound.emit(QueryExecutionBound(session.execution_id, binding_token))
+        if not self._is_active_session(session):
+            return session.execution_id
+        self._publish(session)
+        if not self._is_active_session(session):
+            return session.execution_id
+        self._resume_active_time(session)
+        if self._is_active_session(session):
+            if session.uncommitted is not None:
+                self._submit_page(session, session.uncommitted)
+            else:
+                self._submit_next_page(session)
+        return session.execution_id
+
+    def checkpoint_failed(self, message: str) -> None:
+        session = self._session
+        if session is None or self._closed:
+            return
+        position = session.uncommitted
+        if position is None and session.pending_branches:
+            index = session.pending_branches.popleft()
+            position = QueryBranchPosition(index, session.branches[index].next_page)
+            session.uncommitted = position
+        task_id = self._invalidate_active_request(session)
+        session.control_generation += 1
+        self._cancel_continue(session)
+        self._stop_active_time(session)
+        session.state = QueryExecutionState.PARTIAL_FAILED if session.matches else QueryExecutionState.FAILED
+        session.limit_reason = None
+        session.persistence_error = message
+        if position is not None:
+            session.failure = QueryExecutionFailure(position, session.plan.remote_branches[position.branch_index].api_tags,
+                QueryExecutionErrorCode.PERSISTENCE, None, message)
+        if task_id is not None:
+            self._task_queue.cancel(task_id, message)
+        self._publish(session)
+
     def retry_failed_page(self) -> bool:
         """Retry the exact failed branch page without clearing accepted data."""
 
@@ -285,6 +362,7 @@ class DanbooruMultiBranchExecutor(QObject):
         session.failure = None
         session.limit_reason = None
         session.state = QueryExecutionState.RUNNING
+        session.persistence_error = None
         self._resume_active_time(session)
         if self._is_current_session(session):
             self._submit_page(session, position)
@@ -425,6 +503,7 @@ class DanbooruMultiBranchExecutor(QObject):
     ) -> None:
         if not self._is_active_session(session):
             return
+        session.uncommitted = position
         if self._active_time_reached(session, self._clock.monotonic()):
             self._terminate_limited(session, QueryLimitReason.TIME_LIMIT)
             return
@@ -463,6 +542,12 @@ class DanbooruMultiBranchExecutor(QObject):
             attempt_number: int,
             completion: Callable[[TaskAttemptResult], None],
         ) -> Abortable | None:
+            if not self._is_identity_current(session, identity, require_task=self.before_attempt is not None):
+                return None
+            if self.before_attempt is not None and not self.before_attempt(self._export_session(session)):
+                return None
+            if not self._is_identity_current(session, identity, require_task=self.before_attempt is not None):
+                return None
             return self._attempt_factory(request, attempt_number, completion)
 
         def completed(result: TaskFinalResult) -> None:
@@ -471,11 +556,25 @@ class DanbooruMultiBranchExecutor(QObject):
                 return
             self._task_completed(session, identity, result)
 
+        def accepted(record: TaskRecord) -> None:
+            if identity.task_id is None:
+                identity.task_id = record.identifier
+                session.active_task_id = record.identifier
+                if not session.first_page_accepted and self._is_identity_current(session, identity):
+                    session.first_page_accepted = True
+                    session.acceptance_in_progress = True
+                    try:
+                        self.firstPageAccepted.emit(QueryExecutionAccepted(session.execution_id, identity.position, record.identifier))
+                    finally:
+                        session.acceptance_in_progress = False
+            self._task_state_changed(session, identity, record)
+
         try:
             record = self._task_queue.submit(
                 TaskKind.METADATA,
                 starter,
                 completed,
+                state_listener=accepted if self.before_attempt is not None else None,
             )
         except (TaskQueueFullError, TaskQueueShutdownError) as exc:
             if self._is_identity_current(session, identity, require_task=False):
@@ -507,13 +606,8 @@ class DanbooruMultiBranchExecutor(QObject):
 
         identity.task_id = record.identifier
         session.active_task_id = record.identifier
-        record.add_listener(
-            lambda current: self._task_state_changed(
-                session,
-                identity,
-                current,
-            )
-        )
+        if self.before_attempt is None:
+            record.add_listener(lambda current: self._task_state_changed(session, identity, current))
         if not session.first_page_accepted:
             session.first_page_accepted = True
             session.acceptance_in_progress = True
@@ -724,6 +818,7 @@ class DanbooruMultiBranchExecutor(QObject):
         if next_page is not None:
             session.pending_branches.append(position.branch_index)
         session.failure = None
+        session.uncommitted = None
         session.limit_reason = None
 
         if self._active_time_reached(session, self._clock.monotonic()):
@@ -933,6 +1028,7 @@ class DanbooruMultiBranchExecutor(QObject):
     ) -> str | None:
         task_id = session.active_task_id
         if session.active_request is not None:
+            session.uncommitted = session.active_request.position
             session.active_request.completion_handled = True
         session.active_request = None
         session.active_task_id = None
@@ -943,6 +1039,11 @@ class DanbooruMultiBranchExecutor(QObject):
         task_id = self._invalidate_active_request(session)
         self._cancel_continue(session)
         self._stop_active_time(session)
+        if session.state in ACTIVE_EXECUTION_STATES:
+            session.state = QueryExecutionState.PARTIAL_CANCELLED
+            session.failure = None
+            if self.before_abandon is not None:
+                self.before_abandon(self._export_session(session))
         if task_id is not None:
             self._task_queue.cancel(
                 task_id,
@@ -993,6 +1094,12 @@ class DanbooruMultiBranchExecutor(QObject):
     ) -> bool:
         if self._session is not session or (self._closed and not allow_closed):
             return False
+        if session.first_page_accepted and self.before_publish is not None:
+            generation = session.control_generation
+            if not self.before_publish(self._export_session(session)):
+                return False
+            if self._session is not session or session.control_generation != generation:
+                return False
         snapshot = QueryExecutionSnapshot(
             execution_id=session.execution_id,
             state=session.state,
@@ -1010,6 +1117,7 @@ class DanbooruMultiBranchExecutor(QObject):
             ),
             limit_reason=session.limit_reason,
             failure=session.failure,
+            persistence_error=session.persistence_error,
         )
         self._snapshot = snapshot
         self.snapshotChanged.emit(snapshot)

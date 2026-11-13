@@ -34,11 +34,13 @@ from danbooru_multi_search.storage import Database, HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
 from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
+from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
 from danbooru_multi_search.storage.downloads import DownloadRepository
 from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
 from danbooru_multi_search.ui.downloads import DownloadUiController
 from danbooru_multi_search.ui.artist_combinations import ArtistCombinationController
 from danbooru_multi_search.ui.saved_queries import SavedQueryController
+from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
@@ -115,7 +117,7 @@ class _UiSession(QObject):
         self.image_network_factory = ImageNetworkAccessManagerFactory(
             self.image_cache_controller
         )
-        self.history_repository = HistoryRepository(database)
+        self.history_repository = HistoryRepository(database, busy_timeout_ms=0)
         scheduler = QtScheduler(self)
         self.task_queue = BoundedTaskQueue(
             TaskQueueConfig(),
@@ -200,13 +202,19 @@ class _UiSession(QObject):
             )
         else:
             resolved_screen_geometries = tuple(screen_geometries)
+        self.query_checkpoints = QueryCheckpointController(
+            QueryCheckpointRepository(database), self.history_repository, self.query_controller,
+            self.query_bridge, self.favorite_controller, self,
+        )
         self.session_controller = BrowserSessionController(
             self.history_repository,
             resolved_screen_geometries,
             self,
             m2_controller=self.query_controller,
             query_bridge=self.query_bridge,
+            checkpoint_controller=self.query_checkpoints,
         )
+        self.query_checkpoints.attach_session(self.session_controller)
         self._closed = False
         self._closing = False
         self._shutdown_errors: list[Exception] = []
@@ -220,6 +228,7 @@ class _UiSession(QObject):
         steps = (
             self.download_ui.shutdown,
             self.download_manager.begin_shutdown,
+            self.query_checkpoints.begin_shutdown,
             self.favorite_transfer.begin_shutdown,
             self.artist_combinations.shutdown,
             self.saved_queries.shutdown,
@@ -229,6 +238,7 @@ class _UiSession(QObject):
             self.detail_favorites.shutdown,
             self.query_bridge.beginClosing,
             self.favorite_transfer.shutdown,
+            self.query_checkpoints.finish_shutdown,
             self.download_manager.shutdown,
             self.appearance_controller.shutdown,
             self.query_controller.shutdown,
@@ -266,6 +276,7 @@ class _UiSession(QObject):
             and self.download_ui._closed
             and self.artist_combinations._closed
             and self.saved_queries._closed
+            and self.query_checkpoints._closed
             and self.favorite_collection._closed
             and self.favorite_controller._closed
             and self.gallery_selection._closed
@@ -339,6 +350,7 @@ def _create_qml_session(
     engine.rootContext().setContextProperty("downloadUi", session.download_ui)
     engine.rootContext().setContextProperty("artistCombinations", session.artist_combinations)
     engine.rootContext().setContextProperty("savedQueries", session.saved_queries)
+    engine.rootContext().setContextProperty("queryCheckpoints", session.query_checkpoints)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)

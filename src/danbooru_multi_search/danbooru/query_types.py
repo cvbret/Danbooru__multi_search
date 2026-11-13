@@ -51,6 +51,7 @@ class QueryExecutionErrorCode(StrEnum):
     INVALID_RESPONSE = "invalid_response"
     REQUEST_START = "request_start"
     QUEUE_REJECTED = "queue_rejected"
+    PERSISTENCE = "persistence"
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +149,7 @@ class QueryExecutionSnapshot:
     branch_progress: tuple[QueryBranchProgress, ...]
     limit_reason: QueryLimitReason | None = None
     failure: QueryExecutionFailure | None = None
+    persistence_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

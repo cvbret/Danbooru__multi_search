@@ -537,7 +537,7 @@ ApplicationWindow {
                         controller: searchController
                         tagController: tagSuggestionController
                         savedQueryController: savedQueries
-                        externalSuggestionSuppressed: root.artistSuggestionsSuppressed || root.savedQuerySuggestionsSuppressed
+                        externalSuggestionSuppressed: root.artistSuggestionsSuppressed || root.savedQuerySuggestionsSuppressed || queryCheckpoints.draftLoading
                         onSavedQueriesRequested: root.openSavedQueries()
                         onArtistCombinationsRequested: function(parentPath) { root.openArtistCombinations(parentPath) }
                         onCloseRequested: {
@@ -552,6 +552,7 @@ ApplicationWindow {
                     HistoryPanel {
                         theme: root.theme
                         sessionController: root.browserSession
+                        checkpointController: queryCheckpoints
                         onSavedQueriesRequested: root.openSavedQueries()
                     }
                 }

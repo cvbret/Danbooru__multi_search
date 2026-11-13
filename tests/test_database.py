@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 
 import pytest
 
@@ -13,8 +14,8 @@ from danbooru_multi_search.storage.database import Database, DatabaseError, Migr
 def test_database_applies_migrations_once(tmp_path):
     database = Database(tmp_path / "application.sqlite3")
 
-    assert database.initialize() == 8
-    assert database.initialize() == 8
+    assert database.initialize() == 9
+    assert database.initialize() == 9
 
     with database.connect() as connection:
         migrations = connection.execute(
@@ -39,6 +40,7 @@ def test_database_applies_migrations_once(tmp_path):
         (6, "saved_artist_combinations"),
         (7, "persistent_download_tasks"),
         (8, "saved_queries"),
+        (9, "query_execution_checkpoints"),
     ]
     assert {
         "app_metadata",
@@ -53,8 +55,51 @@ def test_database_applies_migrations_once(tmp_path):
         "download_batches",
         "download_items",
         "saved_queries",
+        "query_checkpoints",
     }.issubset(tables)
     assert tuple(session) == (1, 0, None)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_version_nine_preserves_existing_data_and_rolls_back_new_table(tmp_path, monkeypatch, fail):
+    from danbooru_multi_search.core.saved_queries import SavedQueryDraft
+    from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
+    from danbooru_multi_search.core.favorites import FavoriteCandidate, FavoriteTagCategory
+    from danbooru_multi_search.storage.favorites import FavoriteRepository
+    from danbooru_multi_search.core.downloads import DownloadRequest
+    from danbooru_multi_search.storage.downloads import DownloadRepository
+    from danbooru_multi_search.core.artist_combinations import ArtistCombinationDraft, ArtistCombinationMode
+    from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
+    from tests.test_saved_queries import precise_definition
+    migrations = database_module.MIGRATIONS
+    monkeypatch.setattr(database_module, "MIGRATIONS", migrations[:8])
+    database = Database(tmp_path / "application.sqlite3")
+    assert database.initialize() == 8
+    favorites = FavoriteRepository(database)
+    folder = favorites.create_folder("Saved")
+    favorites.add_favorite(FavoriteCandidate.for_tag("artist", FavoriteTagCategory.ARTIST), folder_id=folder.id)
+    ArtistCombinationRepository(database).create_combination(ArtistCombinationDraft("Pair", ("artist",), ArtistCombinationMode.ALL))
+    SavedQueryRepository(database).create(SavedQueryDraft("Exact", precise_definition()))
+    DownloadRepository(database).create_batch((DownloadRequest(42, "https://example.invalid/42.jpg", "jpg"),), tmp_path / "downloads")
+    HistoryRepository(database).record_accepted_definition(definition=precise_definition(), display_text="Exact", page=1, count_tag_usage=True)
+    with database.connect() as connection:
+        tables = tuple(row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations'"))
+    def capture():
+        with database.connect() as connection:
+            return {table: tuple(tuple(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY rowid")) for table in tables}
+    before = capture()
+    if fail:
+        broken = replace(migrations[8], statements=migrations[8].statements + ("INSERT INTO missing_table VALUES (1)",))
+        monkeypatch.setattr(database_module, "MIGRATIONS", migrations[:8] + (broken,))
+        with pytest.raises(DatabaseError):
+            database.initialize()
+        with database.connect() as connection:
+            assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 8
+            assert connection.execute("SELECT name FROM sqlite_master WHERE name='query_checkpoints'").fetchone() is None
+    else:
+        monkeypatch.setattr(database_module, "MIGRATIONS", migrations)
+        assert database.initialize() == database.initialize() == 9
+    assert capture() == before
 
 
 def test_database_upgrades_version_one_without_losing_existing_data(tmp_path):
@@ -79,18 +124,18 @@ def test_database_upgrades_version_one_without_losing_existing_data(tmp_path):
 
     database = Database(path)
 
-    assert database.initialize() == 8
-    assert database.initialize() == 8
+    assert database.initialize() == 9
+    assert database.initialize() == 9
     with database.connect() as connection:
         preserved = connection.execute(
             "SELECT value FROM app_metadata WHERE key = 'preserved'"
         ).fetchone()
         migration_count = connection.execute(
-            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4, 5, 6, 7, 8)"
+            "SELECT COUNT(*) AS count FROM schema_migrations WHERE version IN (2, 3, 4, 5, 6, 7, 8, 9)"
         ).fetchone()["count"]
 
     assert preserved["value"] == "yes"
-    assert migration_count == 7
+    assert migration_count == 8
 
 
 def test_version_three_schema_enforces_single_session_and_query_constraints(tmp_path):
@@ -197,8 +242,8 @@ def test_version_two_rows_migrate_to_standard_definitions_without_data_loss(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 8
-    assert database.initialize() == 8
+    assert database.initialize() == 9
+    assert database.initialize() == 9
 
     repository = HistoryRepository(database)
     query = repository.get_query(query_id)
@@ -281,8 +326,8 @@ def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
             )
 
     monkeypatch.setattr(database_module, "MIGRATIONS", original_migrations)
-    assert database.initialize() == 8
-    assert database.initialize() == 8
+    assert database.initialize() == 9
+    assert database.initialize() == 9
 
     preserved_query = repository.get_query(query.id)
     session = repository.load_session()
@@ -320,7 +365,7 @@ def test_version_three_upgrades_to_favorites_without_losing_browsing_data(
     assert [(tag.normalized_tag, tag.use_count) for tag in tags] == [("cat", 1)]
     assert metadata["value"] == "yes"
     assert favorite_counts == (0, 0, 0)
-    assert versions == (1, 2, 3, 4, 5, 6, 7, 8)
+    assert versions == (1, 2, 3, 4, 5, 6, 7, 8, 9)
     assert foreign_key_errors == []
 
 

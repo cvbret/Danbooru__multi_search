@@ -58,6 +58,8 @@ from danbooru_multi_search.storage.artist_combinations import ArtistCombinationR
 from danbooru_multi_search.ui.artist_combinations import ArtistCombinationController
 from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
 from danbooru_multi_search.ui.saved_queries import SavedQueryController
+from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
+from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
@@ -305,6 +307,7 @@ def _create_window(tmp_path):
     transfer = FavoriteTransferController(database.path, favorites)
     combinations = ArtistCombinationController(ArtistCombinationRepository(database), favorites, bridge)
     saved_queries = SavedQueryController(SavedQueryRepository(database), bridge, favorites)
+    checkpoints = QueryCheckpointController(QueryCheckpointRepository(database), session._repository, core, bridge, favorites)
     settings_controller = SettingsController(
         SettingsStore(tmp_path / "settings.json"), AppSettings()
     )
@@ -332,6 +335,7 @@ def _create_window(tmp_path):
     context.setContextProperty("downloadUi", download_ui)
     context.setContextProperty("artistCombinations", combinations)
     context.setContextProperty("savedQueries", saved_queries)
+    context.setContextProperty("queryCheckpoints", checkpoints)
     context.setContextProperty("favoriteCollection", collection)
     context.setContextProperty("favoriteController", favorites)
     context.setContextProperty("gallerySelection", selection)
@@ -359,6 +363,7 @@ def _create_window(tmp_path):
         "download_manager": download_manager,
         "combinations": combinations,
         "saved_queries": saved_queries,
+        "checkpoints": checkpoints,
         "selection": selection,
         "detail_favorites": detail_favorites,
         "qml_warnings": qml_warnings,
@@ -378,6 +383,8 @@ def _close_window(values) -> None:
     values["detail_favorites"].shutdown()
     values["bridge"].beginClosing()
     values["core"].shutdown()
+    values["checkpoints"].begin_shutdown()
+    values["checkpoints"].finish_shutdown()
     values["session"].begin_shutdown()
     values["detail_navigation"].shutdown()
     values["appearance"].shutdown()

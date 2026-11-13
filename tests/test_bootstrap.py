@@ -9,7 +9,7 @@ def test_initialize_runtime_creates_settings_and_database(tmp_path):
     runtime = initialize_runtime(data_root=tmp_path)
 
     assert runtime.settings_created is True
-    assert runtime.database_version == 8
+    assert runtime.database_version == 9
     assert runtime.platform.services.paths.resolve() == runtime.paths
     assert runtime.paths.settings_file.is_file()
     assert runtime.paths.database_file.is_file()
@@ -20,5 +20,5 @@ def test_initialize_runtime_creates_settings_and_database(tmp_path):
 
     second_runtime = initialize_runtime(data_root=tmp_path)
     assert second_runtime.settings_created is False
-    assert second_runtime.database_version == 8
+    assert second_runtime.database_version == 9
 

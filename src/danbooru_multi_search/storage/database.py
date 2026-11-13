@@ -319,6 +319,21 @@ MIGRATIONS = (
             )""",
         ),
     ),
+    Migration(
+        version=9,
+        name="query_execution_checkpoints",
+        statements=(
+            """CREATE TABLE query_checkpoints (
+                history_id INTEGER PRIMARY KEY REFERENCES recent_queries(id) ON DELETE CASCADE,
+                owner TEXT NOT NULL CHECK (length(owner) = 32),
+                view_revision INTEGER NOT NULL CHECK (typeof(view_revision) = 'integer' AND view_revision >= 0),
+                revision INTEGER NOT NULL CHECK (typeof(revision) = 'integer' AND revision >= 0),
+                version INTEGER NOT NULL CHECK (version = 1),
+                source TEXT NOT NULL,
+                checkpoint_json TEXT NOT NULL
+            )""",
+        ),
+    ),
 )
 
 
@@ -332,12 +347,12 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def connect(self) -> sqlite3.Connection:
+    def connect(self, *, busy_timeout_ms: int = 5000) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path, timeout=10)
+        connection = sqlite3.connect(self.path, timeout=busy_timeout_ms / 1000)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
         connection.execute("PRAGMA journal_mode = WAL")
         return connection
 

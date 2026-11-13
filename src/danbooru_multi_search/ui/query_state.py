@@ -92,6 +92,7 @@ _FAILURE_TEXT = {
     QueryExecutionErrorCode.INVALID_RESPONSE: "响应数据无效",
     QueryExecutionErrorCode.REQUEST_START: "请求无法启动",
     QueryExecutionErrorCode.QUEUE_REJECTED: "任务队列暂时无法接受请求",
+    QueryExecutionErrorCode.PERSISTENCE: "检查点保存失败，查询已停止",
 }
 
 
@@ -312,6 +313,10 @@ class M2QueryBridgeController(QObject):
 
     @Property(str, notify=errorChanged)
     def failureErrorText(self) -> str:
+        if self._command_error is not None and self._command_error.code == "persistence":
+            return self._command_error.message
+        if self._snapshot is not None and self._snapshot.persistence_error is not None:
+            return self._snapshot.persistence_error
         failure = self._failure()
         return _FAILURE_TEXT.get(failure.error_code, "") if failure is not None else ""
 
@@ -739,6 +744,27 @@ class M2QueryBridgeController(QObject):
             parent_path=path,
         )
 
+    def resumeCheckpoint(self, checkpoint) -> int | None:
+        if self._closing:
+            return False
+        original_operation = self._controller.operation_id
+        if not self.loadDraftDefinition(checkpoint.definition):
+            return False
+        if self._closing or self.draft_definition != checkpoint.definition or self._controller.operation_id != original_operation:
+            return False
+        try:
+            operation_id = self._controller.resume_checkpoint(checkpoint)
+        except Exception as exc:
+            self._set_exception_error(exc)
+            return False
+        if self._closing or self._controller.operation_id != operation_id:
+            return False
+        self._reset_new_operation_state()
+        self._snapshot = self._controller.executor.snapshot
+        self._command_error = None
+        self._emit_all()
+        return operation_id
+
     @Slot(result=bool)
     def executeStandard(self) -> bool:
         return self._execute(QueryMode.STANDARD, True)
@@ -1105,7 +1131,9 @@ class M2QueryBridgeController(QObject):
         self._emit_all()
 
     def _diagnostic_for_exception(self, exc: Exception) -> QueryInputDiagnostic:
-        if isinstance(exc, QueryInputError):
+        if getattr(exc, "code", None) == "persistence":
+            diagnostic = QueryInputDiagnostic("persistence", str(exc), "query")
+        elif isinstance(exc, QueryInputError):
             diagnostic = exc.diagnostic
         elif isinstance(exc, QueryParseError):
             diagnostic = QueryInputDiagnostic(
@@ -1267,6 +1295,8 @@ class M2QueryBridgeController(QObject):
         failure_code = (
             snapshot.failure.error_code if snapshot.failure is not None else None
         )
+        if snapshot.persistence_error is not None:
+            failure_code = QueryExecutionErrorCode.PERSISTENCE
         return (
             processed.source_snapshot is snapshot
             and processed.visible_count == summary.visible_count

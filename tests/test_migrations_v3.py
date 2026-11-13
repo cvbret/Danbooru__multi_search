@@ -89,7 +89,7 @@ def test_current_query_changes_do_not_change_historical_migration(
         patch.setattr(query_serialization, "QUERY_DEFINITION_VERSION", 900)
         patch.setattr(query_types, "DEFAULT_CANDIDATE_LIMIT", 3)
         patch.setattr(tag_syntax, "METATAG_NAMES", frozenset({"cat", "dog"}))
-        assert database.initialize() == 8
+        assert database.initialize() == 9
         with database.connect() as connection:
             row = connection.execute(
                 "SELECT * FROM recent_queries WHERE id = 17"

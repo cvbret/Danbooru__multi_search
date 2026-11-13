@@ -10,6 +10,7 @@ from enum import StrEnum
 from PySide6.QtCore import QObject, Signal
 
 from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
+from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError, ExecutionCheckpoint, QueryCheckpoint, source_identity
 from danbooru_multi_search.danbooru.query_definition import (
     GalleryQueryDefinition,
     QueryMode,
@@ -60,6 +61,7 @@ class GalleryQueryOrigin(StrEnum):
     LATEST = "latest"
     HISTORY = "history"
     REFRESH = "refresh"
+    CHECKPOINT = "checkpoint"
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +132,7 @@ class DanbooruM2QueryController(QObject):
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
+        self._base_url = base_url
         self._executor = executor or DanbooruMultiBranchExecutor(
             base_url,
             parent=self,
@@ -279,6 +282,36 @@ class DanbooruM2QueryController(QObject):
             limits=definition.limits,
             origin=GalleryQueryOrigin.HISTORY,
         )
+
+    @property
+    def checkpoint_source(self) -> str:
+        return source_identity(self._base_url)
+
+    def capture_checkpoint(self, execution: ExecutionCheckpoint | None = None) -> QueryCheckpoint:
+        operation = self._current_operation
+        if operation is None:
+            raise CheckpointError("missing_checkpoint", "当前没有可保存的查询。")
+        return QueryCheckpoint(self.checkpoint_source, operation.definition, operation.runtime_filter,
+                               self._executor.export_checkpoint() if execution is None else execution)
+
+    def resume_checkpoint(self, checkpoint: QueryCheckpoint) -> int:
+        """Restore the original plan, candidates, clock reference and quotas."""
+        self._ensure_open()
+        if not isinstance(checkpoint, QueryCheckpoint) or checkpoint.source != source_identity(self._base_url):
+            raise CheckpointError("source_changed", "当前 API 来源与检查点不同，不能续扫。")
+        if checkpoint.execution.resume_reason:
+            raise CheckpointError("cannot_resume", checkpoint.execution.resume_reason)
+        self._operation_counter += 1
+        prepared = _PreparedOperation(self._operation_counter, checkpoint.definition, checkpoint.runtime_filter,
+            checkpoint.definition.normalized_expression or ("最新作品" if checkpoint.definition.mode is QueryMode.LATEST else "近期热门"),
+            GalleryQueryOrigin.CHECKPOINT, (), checkpoint.execution.plan, object())
+        self._pending_operation = prepared
+        try:
+            self._executor.resume(checkpoint.execution, binding_token=prepared.binding_token)
+        finally:
+            if self._pending_operation is prepared:
+                self._pending_operation = None
+        return prepared.operation_id
 
     def refresh(self) -> int:
         self._ensure_open()
@@ -665,7 +698,7 @@ class DanbooruM2QueryController(QObject):
             query_tags=operation.query_tags,
             accepted_at=accepted_at,
             count_tag_usage=(
-                operation.origin != GalleryQueryOrigin.REFRESH
+                operation.origin not in {GalleryQueryOrigin.REFRESH, GalleryQueryOrigin.CHECKPOINT}
                 and bool(operation.query_tags)
             ),
         )
@@ -760,6 +793,8 @@ class DanbooruM2QueryController(QObject):
         failure_code = (
             snapshot.failure.error_code if snapshot.failure is not None else None
         )
+        if snapshot.persistence_error is not None:
+            failure_code = QueryExecutionErrorCode.PERSISTENCE
         event = GalleryResultEvent(
             operation_id=operation.operation_id,
             execution_id=execution_id,
@@ -807,6 +842,7 @@ class DanbooruM2QueryController(QObject):
             snapshot.branch_progress,
             snapshot.limit_reason,
             snapshot.failure,
+            snapshot.persistence_error,
         )
 
     def _clock_utc(self) -> datetime:

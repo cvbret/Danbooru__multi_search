@@ -6,6 +6,7 @@ Item {
     id: panel
     property QtObject theme: AppTheme {}
     required property var sessionController
+    required property var checkpointController
     signal savedQueriesRequested()
 
     ColumnLayout {
@@ -47,8 +48,10 @@ Item {
 
             delegate: ItemDelegate {
                 id: historyRow
+                objectName: "historyRow_" + historyKey
                 required property int index
                 required property int historyId
+                required property string historyKey
                 required property string modeText
                 required property string expressionText
                 required property string ratingText
@@ -62,7 +65,10 @@ Item {
                 width: historyList.width
                 height: historyContent.implicitHeight + 20
                 highlighted: historyId === sessionController.activeHistoryId
-                onClicked: sessionController.selectHistory(index)
+                onClicked: {
+                    sessionController.selectHistory(index)
+                    panel.checkpointController.selectHistory(historyKey)
+                }
 
                 background: Rectangle {
                     radius: 8
@@ -146,6 +152,22 @@ Item {
             text: qsTr("重新执行历史查询")
             enabled: sessionController.canRestoreSelected
             onClicked: sessionController.restoreSelected()
+        }
+        Label {
+            objectName: "checkpointMessage"
+            Layout.fillWidth: true
+            text: panel.checkpointController.messageText
+            color: theme.secondaryText
+            wrapMode: Text.Wrap
+        }
+        ActionButton {
+            objectName: "resumeCheckpointButton"
+            Layout.fillWidth: true
+            text: qsTr("继续扫描历史查询")
+            enabled: panel.checkpointController.canResume
+            property string pressedToken: ""
+            onPressed: pressedToken = panel.checkpointController.selectionToken
+            onClicked: { panel.checkpointController.resumeSelected(pressedToken); pressedToken = "" }
         }
     }
 }

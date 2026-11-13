@@ -48,6 +48,7 @@ SESSION_SAVE_DELAY_MS = 500
 
 class RecentQueryRole(IntEnum):
     IDENTIFIER = int(Qt.ItemDataRole.UserRole) + 1
+    HISTORY_KEY = IDENTIFIER + 18
     MODE_VALUE = IDENTIFIER + 6
     MODE_TEXT = IDENTIFIER + 7
     EXPRESSION_TEXT = IDENTIFIER + 8
@@ -99,6 +100,7 @@ _FAILURE_REASON_TEXT = {
     "invalid_response": "响应数据无效",
     "request_start": "请求无法启动",
     "queue_rejected": "任务队列暂时无法接受请求",
+    "persistence": "检查点保存失败",
 }
 
 
@@ -108,6 +110,7 @@ class RecentQueryListModel(QAbstractListModel):
     _ROLE_NAMES = {
         RecentQueryRole.IDENTIFIER: QByteArray(b"historyId"),
         RecentQueryRole.MODE_VALUE: QByteArray(b"modeValue"),
+        RecentQueryRole.HISTORY_KEY: QByteArray(b"historyKey"),
         RecentQueryRole.MODE_TEXT: QByteArray(b"modeText"),
         RecentQueryRole.EXPRESSION_TEXT: QByteArray(b"expressionText"),
         RecentQueryRole.RATING_TEXT: QByteArray(b"ratingText"),
@@ -175,6 +178,7 @@ class RecentQueryListModel(QAbstractListModel):
         values = {
             RecentQueryRole.IDENTIFIER: item.id,
             RecentQueryRole.MODE_VALUE: mode_value,
+            RecentQueryRole.HISTORY_KEY: str(item.id),
             RecentQueryRole.MODE_TEXT: _MODE_TEXT.get(mode_value, mode_value),
             RecentQueryRole.EXPRESSION_TEXT: expression_text,
             RecentQueryRole.RATING_TEXT: _RATING_TEXT.get(
@@ -261,11 +265,13 @@ class BrowserSessionController(QObject):
         *,
         m2_controller: DanbooruM2QueryController,
         query_bridge: M2QueryBridgeController,
+        checkpoint_controller=None,
     ) -> None:
         super().__init__(parent)
         self._repository = repository
         self._m2_controller = m2_controller
         self._query_bridge = query_bridge
+        self._checkpoint_controller = checkpoint_controller
         self._posts_model = m2_controller.posts_model
         self._history_model = RecentQueryListModel(self)
         self._notice_text = ""
@@ -681,7 +687,12 @@ class BrowserSessionController(QObject):
                 self._pending_history_id = None
                 self.selectionChanged.emit()
 
-    def _restore_selected_m2(self) -> None:
+    def resumeCheckpoint(self, checkpoint, history_id: int) -> bool:
+        if self._closed or self._pending_history_id != history_id:
+            return False
+        return bool(self._restore_selected_m2(checkpoint))
+
+    def _restore_selected_m2(self, checkpoint=None):
         if self._closed or self._pending_history_id is None:
             return
         selected_id = self._pending_history_id
@@ -743,7 +754,7 @@ class BrowserSessionController(QObject):
             )
             if execute is None:
                 execute = self._query_bridge.reexecuteLoadedHistory
-            returned = execute(query.display_text)
+            returned = execute(query.display_text) if checkpoint is None else self._query_bridge.resumeCheckpoint(checkpoint)
         except Exception as exc:
             if self._m2_restore_token is token:
                 self._invalidate_m2_restore(cancel=False)
@@ -809,6 +820,7 @@ class BrowserSessionController(QObject):
             )
         self._m2_restore_token = bound
         self._finish_m2_restore_if_displayed()
+        return True
 
     @Slot(object)
     def _m2_query_accepted(self, value: object) -> None:
@@ -855,7 +867,7 @@ class BrowserSessionController(QObject):
                     view_generation=0,
                 )
         try:
-            query = self._repository.record_accepted_definition(
+            query = self._checkpoint_controller.record_accepted(value) if self._checkpoint_controller is not None else self._repository.record_accepted_definition(
                 definition=value.definition,
                 display_text=value.display_text,
                 page=1,
@@ -863,6 +875,8 @@ class BrowserSessionController(QObject):
                 used_at=value.accepted_at,
             )
         except (HistoryError, TypeError, ValueError) as exc:
+            if self._checkpoint_controller is not None:
+                self._checkpoint_controller.persistence_failed(exc)
             self._m2_remove_mapping(identity, clear_display=True)
             if value.origin == GalleryQueryOrigin.HISTORY:
                 self._discard_unbound_m2_history_restore()
@@ -878,7 +892,7 @@ class BrowserSessionController(QObject):
             return
         token = self._m2_restore_token
         if (
-            value.origin == GalleryQueryOrigin.HISTORY
+            value.origin in {GalleryQueryOrigin.HISTORY, GalleryQueryOrigin.CHECKPOINT}
             and token is not None
             and token.kind == "history"
         ):
@@ -1134,11 +1148,13 @@ class BrowserSessionController(QObject):
                 )
                 token_matches_target = True
         try:
-            query = self._repository.record_view_definition(
+            query = self._checkpoint_controller.record_view(source.history_id, event) if self._checkpoint_controller is not None else self._repository.record_view_definition(
                 source_query_id=source.history_id,
                 definition=event.definition,
             )
         except (HistoryError, TypeError, ValueError) as exc:
+            if self._checkpoint_controller is not None:
+                self._checkpoint_controller.persistence_failed(exc)
             self._m2_remove_mapping(
                 identity,
                 clear_display=event.applied_to_gallery,
@@ -1184,11 +1200,13 @@ class BrowserSessionController(QObject):
         if link is None:
             return
         try:
-            updated = self._repository.update_result_summary(
+            updated = self._checkpoint_controller.record_result(link.history_id, event) if self._checkpoint_controller is not None else self._repository.update_result_summary(
                 link.history_id,
                 event.summary,
             )
         except (HistoryError, TypeError, ValueError) as exc:
+            if self._checkpoint_controller is not None:
+                self._checkpoint_controller.persistence_failed(exc)
             self._m2_remove_mapping(identity, clear_display=True)
             self._set_notice(f"查询结果摘要保存失败：{exc}")
             return
