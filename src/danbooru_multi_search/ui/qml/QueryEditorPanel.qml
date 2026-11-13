@@ -8,6 +8,7 @@ Item {
     objectName: "queryEditorPanel"
     required property var controller
     required property var tagController
+    required property var savedQueryController
     property var selectedPath: null
     property string selectedKind: ""
     property var confirmedArtists: []
@@ -18,6 +19,7 @@ Item {
     property int observedEditorRevision: -1
     signal closeRequested()
     signal artistCombinationsRequested(var parentPath)
+    signal savedQueriesRequested()
 
     function parentPathForInsert() {
         if ((selectedKind === "and" || selectedKind === "or")
@@ -341,6 +343,13 @@ Item {
                 objectName: "openQueryArtistCombinationsButton"
                 text: qsTr("收藏画师 / 常用组合")
                 onClicked: panel.artistCombinationsRequested(panel.parentPathForInsert())
+            }
+
+            ActionButton {
+                objectName: "openSavedQueriesButton"
+                text: qsTr("保存常用查询")
+                onPressed: panel.savedQueryController.captureDraft()
+                onClicked: panel.savedQueriesRequested()
             }
 
             Label {

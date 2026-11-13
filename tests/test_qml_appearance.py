@@ -165,6 +165,7 @@ def test_appearance_qml_resources_and_effect_module_are_in_bundle_contract():
         "FavoritesPage.qml", "FavoriteObjectCard.qml", "FavoriteConfirmDialog.qml",
         "FavoriteTransferDialog.qml",
         "ArtistCombinationPanel.qml",
+        "SavedQueryPanel.qml",
         "DownloadsPage.qml", "DownloadRequestDialog.qml",
     ):
         assert name in QML_FILES

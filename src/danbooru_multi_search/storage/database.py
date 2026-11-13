@@ -305,6 +305,20 @@ MIGRATIONS = (
             "CREATE INDEX download_items_batch_position ON download_items(batch_id, position)",
         ),
     ),
+    Migration(
+        version=8,
+        name="saved_queries",
+        statements=(
+            """CREATE TABLE saved_queries (
+                id TEXT PRIMARY KEY NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0 AND typeof(revision) = 'integer'),
+                name TEXT NOT NULL CHECK (length(name) > 0),
+                normalized_name TEXT NOT NULL UNIQUE CHECK (length(normalized_name) > 0),
+                definition_version INTEGER NOT NULL CHECK (definition_version = 1),
+                definition_json TEXT NOT NULL CHECK (length(definition_json) > 0)
+            )""",
+        ),
+    ),
 )
 
 

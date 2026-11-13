@@ -33,10 +33,12 @@ from danbooru_multi_search.tasks import (
 from danbooru_multi_search.storage import Database, HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
+from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
 from danbooru_multi_search.storage.downloads import DownloadRepository
 from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
 from danbooru_multi_search.ui.downloads import DownloadUiController
 from danbooru_multi_search.ui.artist_combinations import ArtistCombinationController
+from danbooru_multi_search.ui.saved_queries import SavedQueryController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
@@ -166,6 +168,9 @@ class _UiSession(QObject):
         self.artist_combinations = ArtistCombinationController(
             ArtistCombinationRepository(database), self.favorite_controller, self.query_bridge, self
         )
+        self.saved_queries = SavedQueryController(
+            SavedQueryRepository(database), self.query_bridge, self.favorite_controller, self
+        )
         self.download_ui = DownloadUiController(
             self.download_manager, self.download_manager._repository, self.settings_controller,
             self.query_controller.posts_model, self.gallery_selection, self.detail_controller,
@@ -217,6 +222,7 @@ class _UiSession(QObject):
             self.download_manager.begin_shutdown,
             self.favorite_transfer.begin_shutdown,
             self.artist_combinations.shutdown,
+            self.saved_queries.shutdown,
             self.favorite_collection.shutdown,
             self.favorite_controller.shutdown,
             self.gallery_selection.shutdown,
@@ -259,6 +265,7 @@ class _UiSession(QObject):
             and self.download_manager.closed
             and self.download_ui._closed
             and self.artist_combinations._closed
+            and self.saved_queries._closed
             and self.favorite_collection._closed
             and self.favorite_controller._closed
             and self.gallery_selection._closed
@@ -331,6 +338,7 @@ def _create_qml_session(
     engine.rootContext().setContextProperty("favoriteTransfer", session.favorite_transfer)
     engine.rootContext().setContextProperty("downloadUi", session.download_ui)
     engine.rootContext().setContextProperty("artistCombinations", session.artist_combinations)
+    engine.rootContext().setContextProperty("savedQueries", session.saved_queries)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)

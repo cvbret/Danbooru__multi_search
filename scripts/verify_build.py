@@ -32,6 +32,7 @@ EXPECTED_QML_MEMBERS = (
     "danbooru_multi_search/ui/qml/FavoritesPage.qml",
     "danbooru_multi_search/ui/qml/FavoriteTransferDialog.qml",
     "danbooru_multi_search/ui/qml/ArtistCombinationPanel.qml",
+    "danbooru_multi_search/ui/qml/SavedQueryPanel.qml",
     "danbooru_multi_search/ui/qml/DownloadsPage.qml",
     "danbooru_multi_search/ui/qml/DownloadRequestDialog.qml",
     "danbooru_multi_search/ui/qml/FavoriteObjectCard.qml",

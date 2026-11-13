@@ -6,10 +6,17 @@ Item {
     id: panel
     property QtObject theme: AppTheme {}
     required property var sessionController
+    signal savedQueriesRequested()
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 16
+
+        ActionButton {
+            objectName: "openHistorySavedQueriesButton"
+            text: qsTr("常用查询")
+            onClicked: panel.savedQueriesRequested()
+        }
 
         RowLayout {
             Layout.fillWidth: true

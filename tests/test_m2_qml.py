@@ -56,6 +56,8 @@ from danbooru_multi_search.storage import HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
 from danbooru_multi_search.ui.artist_combinations import ArtistCombinationController
+from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
+from danbooru_multi_search.ui.saved_queries import SavedQueryController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
@@ -302,6 +304,7 @@ def _create_window(tmp_path):
     collection = FavoriteCollectionController(favorites._repository, favorites, detail_navigation)
     transfer = FavoriteTransferController(database.path, favorites)
     combinations = ArtistCombinationController(ArtistCombinationRepository(database), favorites, bridge)
+    saved_queries = SavedQueryController(SavedQueryRepository(database), bridge, favorites)
     settings_controller = SettingsController(
         SettingsStore(tmp_path / "settings.json"), AppSettings()
     )
@@ -328,6 +331,7 @@ def _create_window(tmp_path):
     context.setContextProperty("favoriteTransfer", transfer)
     context.setContextProperty("downloadUi", download_ui)
     context.setContextProperty("artistCombinations", combinations)
+    context.setContextProperty("savedQueries", saved_queries)
     context.setContextProperty("favoriteCollection", collection)
     context.setContextProperty("favoriteController", favorites)
     context.setContextProperty("gallerySelection", selection)
@@ -354,6 +358,7 @@ def _create_window(tmp_path):
         "download_ui": download_ui,
         "download_manager": download_manager,
         "combinations": combinations,
+        "saved_queries": saved_queries,
         "selection": selection,
         "detail_favorites": detail_favorites,
         "qml_warnings": qml_warnings,
@@ -365,6 +370,7 @@ def _close_window(values) -> None:
     values["download_manager"].shutdown()
     values["transfer"].begin_shutdown()
     values["combinations"].shutdown()
+    values["saved_queries"].shutdown()
     values["transfer"].shutdown()
     values["collection"].shutdown()
     values["favorites"].shutdown()

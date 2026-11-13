@@ -62,7 +62,32 @@ ApplicationWindow {
     }
 
     property bool artistSuggestionsSuppressed: false
+    property bool savedQuerySuggestionsSuppressed: false
     signal queryEditorRequested()
+
+    function openSavedQueries() {
+        savedQuerySuggestionsSuppressed = true
+        tagSuggestionController.closeSuggestions()
+        savedQueryPanel.open()
+    }
+
+    SavedQueryPanel {
+        id: savedQueryPanel
+        controller: savedQueries
+        theme: root.theme
+        onDismissed: Qt.callLater(function() { root.savedQuerySuggestionsSuppressed = false })
+    }
+
+    Connections {
+        target: savedQueries
+        function onDraftLoaded() {
+            root.showPage("browse")
+            root.queryEditorRequested()
+            if (root.compactLayout)
+                queryDrawer.open()
+            savedQueryPanel.close()
+        }
+    }
 
     function openArtistCombinations(parentPath) {
         artistSuggestionsSuppressed = true
@@ -511,7 +536,9 @@ ApplicationWindow {
                         theme: root.theme
                         controller: searchController
                         tagController: tagSuggestionController
-                        externalSuggestionSuppressed: root.artistSuggestionsSuppressed
+                        savedQueryController: savedQueries
+                        externalSuggestionSuppressed: root.artistSuggestionsSuppressed || root.savedQuerySuggestionsSuppressed
+                        onSavedQueriesRequested: root.openSavedQueries()
                         onArtistCombinationsRequested: function(parentPath) { root.openArtistCombinations(parentPath) }
                         onCloseRequested: {
                             if (root.compactLayout)
@@ -525,6 +552,7 @@ ApplicationWindow {
                     HistoryPanel {
                         theme: root.theme
                         sessionController: root.browserSession
+                        onSavedQueriesRequested: root.openSavedQueries()
                     }
                 }
             }
