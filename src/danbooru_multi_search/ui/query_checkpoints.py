@@ -39,6 +39,8 @@ class QueryCheckpointController(QObject):
         self._error = ""
         self._closed = self._closing = self._draft_loading = False
         self._failing_identities: set[tuple[int | None, int | None, int]] = set()
+        self._retired_executions: set[tuple[int | None, int | None]] = set()
+        self._maintenance_owner: str | None = None
         self._deferred = None
         self._resuming = None
         controller.executor.before_attempt = self.persist_execution
@@ -141,7 +143,8 @@ class QueryCheckpointController(QObject):
         return self._controller.operation_id, self._controller.execution_id, self._controller.view_generation
 
     def _check_write(self):
-        occupied = self._favorites._external_write is not None if self._closing else self._favorites.busy
+        own_maintenance = self._maintenance_owner is not None and self._favorites._external_write == self._maintenance_owner and not self._favorites._busy
+        occupied = self._favorites._external_write is not None and not own_maintenance if self._closing else self._favorites.busy and not own_maintenance
         if self._closed or occupied:
             raise CheckpointError("storage_busy", "收藏正在导入，检查点暂时无法保存，查询已停止。")
 
@@ -176,6 +179,8 @@ class QueryCheckpointController(QObject):
     def record_view(self, source_id: int, event: GalleryViewDefinitionChanged) -> RecentQuery | None:
         self._check_write()
         identity = (event.operation_id, event.execution_id, event.view_generation)
+        if identity[:2] in self._retired_executions:
+            return self._history.record_view_definition(source_query_id=source_id, definition=event.definition)
         source = self._leases.get((event.operation_id, event.execution_id, event.view_generation - 1))
         if source is None or source.history_id != source_id:
             raise CheckpointError("stale_checkpoint", "原查询的检查点归属已经失效。")
@@ -189,6 +194,8 @@ class QueryCheckpointController(QObject):
         identity = (event.operation_id, event.execution_id, event.view_generation)
         if identity in self._failing_identities:
             return True
+        if identity[:2] in self._retired_executions:
+            return self._history.update_result_summary(history_id, event.summary)
         if identity in self._leases and self._leases[identity].history_id != history_id:
             raise CheckpointError("stale_checkpoint", "结果与检查点的历史归属不同。")
         checkpoint = self._controller.capture_checkpoint()
@@ -222,6 +229,11 @@ class QueryCheckpointController(QObject):
     def persist_execution(self, execution: ExecutionCheckpoint) -> bool:
         """Synchronous barrier: True alone authorizes the network starter."""
         if self._identity() in self._failing_identities:
+            return True
+        if self._identity()[:2] in self._retired_executions:
+            if execution.active:
+                self.persistence_failed(CheckpointError("cleared_checkpoint", "该执行的检查点已清理，请从头执行查询。"))
+                return False
             return True
         if self._closing:
             checkpoint = self._controller.capture_checkpoint(execution)
@@ -262,6 +274,37 @@ class QueryCheckpointController(QObject):
         if self._deferred is None and identity in self._leases:
             checkpoint = self._controller.capture_checkpoint()
             self._deferred = (identity, checkpoint, self._summary(checkpoint))
+
+    def set_maintenance_owner(self, owner: str | None) -> None:
+        self._maintenance_owner = owner
+
+    @property
+    def current_ownership(self) -> CheckpointRecord | None:
+        return self._leases.get(self._identity())
+
+    def retire_checkpoints(self, owners: frozenset[tuple[int, str]]) -> None:
+        """Remove this execution's future checkpoint writes after confirmed cleanup."""
+        for identity, lease in tuple(self._leases.items()):
+            if (lease.history_id, lease.owner) in owners:
+                self._retired_executions.add(identity[:2])
+                del self._leases[identity]
+        if self._deferred is not None and self._deferred[0][:2] in self._retired_executions:
+            self._deferred = None
+        if self._selected is not None and (self._selected.history_id, self._selected.owner) in owners:
+            self._generation += 1
+            self._selected, self._selection_token = None, ""
+            self._message = "检查点已清理，历史条件仍可从头执行。"
+            self._error = ""
+        if not self._closed:
+            self.changed.emit()
+
+    def reconcile_ownership(self) -> None:
+        """Forget only leases which have actually disappeared or changed owner."""
+        current = {item.history_id: item.owner for item in self._repository.capture_cleanup()}
+        revoked = frozenset((lease.history_id, lease.owner) for lease in self._leases.values()
+                            if current.get(lease.history_id) != lease.owner)
+        if revoked:
+            self.retire_checkpoints(revoked)
 
     def finish_shutdown(self) -> None:
         if self._closed:

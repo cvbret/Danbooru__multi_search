@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from enum import IntEnum
-from typing import Sequence
+from typing import Callable, Sequence
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -459,8 +459,8 @@ class BrowserSessionController(QObject):
         return bool(self._query_bridge.cancel())
 
     @Slot()
-    def clearHistory(self) -> None:
-        self._clear_m2_history()
+    def clearHistory(self, expected=None, on_cleared: Callable[[], None] | None = None) -> bool:
+        return bool(self._clear_m2_history(expected, on_cleared))
 
     @Slot(int, int, int, int, bool, bool)
     def updateWindowState(
@@ -1616,7 +1616,7 @@ class BrowserSessionController(QObject):
         ):
             controller.cancel()
 
-    def _clear_m2_history(self) -> None:
+    def _clear_m2_history(self, expected=None, on_cleared: Callable[[], None] | None = None):
         if self._closed or self._clearing_history:
             return
         self._clearing_history = True
@@ -1639,7 +1639,10 @@ class BrowserSessionController(QObject):
         self._pending_history_id = None
         self._invalidate_m2_restore(cancel=False)
         try:
-            self._repository.clear_history()
+            if expected is None:
+                self._repository.clear_history()
+            else:
+                self._repository.clear_history(expected=expected)
         except HistoryError as exc:
             self._m2_clear_cutoff = previous_cutoff
             self._m2_history_epoch = previous_epoch
@@ -1657,6 +1660,8 @@ class BrowserSessionController(QObject):
             self._set_notice(f"清理历史失败：{exc}")
             return
 
+        if on_cleared is not None:
+            on_cleared()
         self._state_generation += 1
         self._scheduled_generation = self._state_generation
         self._save_timer.stop()
@@ -1762,6 +1767,7 @@ class BrowserSessionController(QObject):
             )
         ):
             self._schedule_save()
+        return True
 
     @Slot()
     def _save_timeout(self) -> None:

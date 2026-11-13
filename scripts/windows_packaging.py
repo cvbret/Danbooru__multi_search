@@ -20,7 +20,7 @@ from typing import Mapping, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_VERSION = "0.1.0"
-DATABASE_SCHEMA_VERSION = 9
+DATABASE_SCHEMA_VERSION = 10
 WINDOWS_RESOURCE_VERSION = "0.1.0.0"
 WINDOWS_RESOURCE_VERSION_TUPLE = (0, 1, 0, 0)
 PYINSTALLER_VERSION = "6.22.3"
@@ -87,6 +87,7 @@ QML_FILES = (
     "FavoriteTransferDialog.qml",
     "ArtistCombinationPanel.qml",
     "SavedQueryPanel.qml",
+    "CacheCleanupDialog.qml",
     "DownloadsPage.qml",
     "DownloadRequestDialog.qml",
     "FavoriteObjectCard.qml",

@@ -61,7 +61,7 @@ def _post(post_id: int, *, score: int = -3) -> DanbooruPost:
 
 def _database(path) -> Database:
     database = Database(path)
-    assert database.initialize() == 9
+    assert database.initialize() == 10
     return database
 
 

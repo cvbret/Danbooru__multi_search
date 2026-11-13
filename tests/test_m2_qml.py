@@ -60,6 +60,9 @@ from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
 from danbooru_multi_search.ui.saved_queries import SavedQueryController
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
 from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
+from danbooru_multi_search.storage.cache_protection import CacheProtectionRepository
+from danbooru_multi_search.ui.cache_protection import CacheProtectionController
+from danbooru_multi_search.ui.cache_cleanup import CacheCleanupController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
@@ -317,6 +320,8 @@ def _create_window(tmp_path):
     download_ui = DownloadUiController(download_manager, download_repository, settings_controller,
         core.posts_model, selection, details, tmp_path / "downloads")
     images = ImageCacheController(tmp_path / "image-cache")
+    protection = CacheProtectionController(CacheProtectionRepository(database), favorites, images)
+    cleanup = CacheCleanupController(session._repository, checkpoints._repository, checkpoints, session, favorites, images, protection)
     factory = ImageNetworkAccessManagerFactory(images)
     configure_controls_style()
     engine = QQmlApplicationEngine()
@@ -336,6 +341,7 @@ def _create_window(tmp_path):
     context.setContextProperty("artistCombinations", combinations)
     context.setContextProperty("savedQueries", saved_queries)
     context.setContextProperty("queryCheckpoints", checkpoints)
+    context.setContextProperty("cacheCleanup", cleanup)
     context.setContextProperty("favoriteCollection", collection)
     context.setContextProperty("favoriteController", favorites)
     context.setContextProperty("gallerySelection", selection)
@@ -364,6 +370,8 @@ def _create_window(tmp_path):
         "combinations": combinations,
         "saved_queries": saved_queries,
         "checkpoints": checkpoints,
+        "cache_protection": protection,
+        "cache_cleanup": cleanup,
         "selection": selection,
         "detail_favorites": detail_favorites,
         "qml_warnings": qml_warnings,
@@ -371,6 +379,7 @@ def _create_window(tmp_path):
 
 
 def _close_window(values) -> None:
+    values["cache_cleanup"].shutdown()
     values["download_ui"].shutdown()
     values["download_manager"].shutdown()
     values["transfer"].begin_shutdown()
@@ -390,6 +399,7 @@ def _close_window(values) -> None:
     values["appearance"].shutdown()
     values["tags"].shutdown()
     values["images"].shutdown()
+    values["cache_protection"].shutdown()
     values["root"].close()
     values["engine"].deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

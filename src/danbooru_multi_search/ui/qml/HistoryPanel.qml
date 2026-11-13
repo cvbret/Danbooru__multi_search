@@ -7,7 +7,9 @@ Item {
     property QtObject theme: AppTheme {}
     required property var sessionController
     required property var checkpointController
+    property bool cleanupEnabled: true
     signal savedQueriesRequested()
+    signal cleanupRequested(string kind)
 
     ColumnLayout {
         anchors.fill: parent
@@ -32,8 +34,8 @@ Item {
                 id: clearHistoryButton
                 objectName: "clearHistoryButton"
                 text: qsTr("清理历史")
-                enabled: historyList.count > 0
-                onClicked: sessionController.clearHistory()
+                enabled: historyList.count > 0 && panel.cleanupEnabled
+                onClicked: panel.cleanupRequested("history")
             }
         }
 

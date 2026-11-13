@@ -413,6 +413,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         fail_final_save,
     )
     for name, owner, attribute in (
+        ("cleanup-stop", ui_session.cache_cleanup, "shutdown"),
         ("downloads-ui", ui_session.download_ui, "shutdown"),
         ("downloads-stop", ui_session.download_manager, "begin_shutdown"),
         ("checkpoints-stop", ui_session.query_checkpoints, "begin_shutdown"),
@@ -435,6 +436,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         ("tags-closing", tags, "begin_shutdown"),
         ("tags", tags, "shutdown"),
         ("images", images, "shutdown"),
+        ("cache-protection", ui_session.cache_protection, "shutdown"),
         ("queue", queue, "shutdown"),
     ):
         original = getattr(owner, attribute)
@@ -461,6 +463,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
 
     assert reentry_count == 1
     assert events == [
+        "cleanup-stop",
         "downloads-ui",
         "downloads-stop",
         "checkpoints-stop",
@@ -483,6 +486,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         "tags-closing",
         "tags",
         "images",
+        "cache-protection",
         "queue",
     ]
     assert "simulated final save failure" in session_controller.noticeText

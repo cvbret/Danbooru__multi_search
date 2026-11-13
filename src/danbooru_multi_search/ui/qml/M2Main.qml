@@ -61,6 +61,17 @@ ApplicationWindow {
         theme: root.theme
     }
 
+    CacheCleanupDialog {
+        id: cacheCleanupDialog
+        controller: cacheCleanup
+        theme: root.theme
+    }
+
+    function requestCleanup(kind) {
+        if (cacheCleanup.prepareCleanup(kind) || cacheCleanup.noticeText.length > 0)
+            cacheCleanupDialog.open()
+    }
+
     property bool artistSuggestionsSuppressed: false
     property bool savedQuerySuggestionsSuppressed: false
     signal queryEditorRequested()
@@ -457,11 +468,19 @@ ApplicationWindow {
                 ActionButton {
                     objectName: "clearImageCacheButton"
                     text: qsTr("清理图片缓存")
-                    onClicked: imageCacheController.clearCache()
+                    onClicked: root.requestCleanup("images")
                 }
                 Item { Layout.fillWidth: true }
                 ActionButton { text: qsTr("关闭"); onClicked: imageCachePopup.close() }
             }
+            ActionButton {
+                objectName: "clearCheckpointCacheButton"
+                Layout.fillWidth: true
+                text: qsTr("清理执行检查点 / 扫描结果")
+                enabled: cacheCleanup.canWrite
+                onClicked: root.requestCleanup("checkpoints")
+            }
+            Label { Layout.fillWidth: true; text: cacheCleanup.noticeText; visible: text.length > 0; color: theme.warning; wrapMode: Text.Wrap }
         }
     }
 
@@ -553,6 +572,8 @@ ApplicationWindow {
                         theme: root.theme
                         sessionController: root.browserSession
                         checkpointController: queryCheckpoints
+                        cleanupEnabled: cacheCleanup.canWrite
+                        onCleanupRequested: function(kind) { root.requestCleanup(kind) }
                         onSavedQueriesRequested: root.openSavedQueries()
                     }
                 }

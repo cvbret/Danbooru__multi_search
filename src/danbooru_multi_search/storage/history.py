@@ -59,6 +59,15 @@ class HistoryError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class HistoryCleanupIdentity:
+    history_id: int
+    query_key: str
+    last_used_at: str
+    checkpoint_owner: str | None
+    checkpoint_view: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class RecentQuery:
     """One normalized query identity and its last restorable gallery state."""
 
@@ -601,12 +610,29 @@ class HistoryRepository:
         except sqlite3.Error as exc:
             raise HistoryError(f"Unable to change active query: {exc}") from exc
 
-    def clear_history(self) -> None:
+    @staticmethod
+    def _cleanup_identities(connection: sqlite3.Connection) -> tuple[HistoryCleanupIdentity, ...]:
+        return tuple(HistoryCleanupIdentity(row[0], row[1], row[2], row[3], row[4]) for row in connection.execute(
+            """SELECT q.id, q.query_key, q.last_used_at, c.owner, c.view_revision FROM recent_queries q
+               LEFT JOIN query_checkpoints c ON c.history_id = q.id ORDER BY q.id"""))
+
+    def capture_cleanup(self) -> tuple[HistoryCleanupIdentity, ...]:
+        try:
+            with closing(self._database.connect(busy_timeout_ms=0)) as connection:
+                connection.execute("BEGIN")
+                return self._cleanup_identities(connection)
+        except sqlite3.Error as exc:
+            raise HistoryError(f"历史清理预览无法读取：{exc}") from exc
+
+    def clear_history(self, *, expected: tuple[HistoryCleanupIdentity, ...] | None = None) -> None:
         """Delete query and tag history while preserving window geometry."""
 
         try:
-            with self._lock, closing(self._connect()) as connection:
+            with self._lock, closing(self._database.connect(busy_timeout_ms=0) if expected is not None else self._connect()) as connection:
                 with connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    if expected is not None and self._cleanup_identities(connection) != expected:
+                        raise HistoryError("历史记录归属已改变，请重新打开清理确认。")
                     connection.execute(
                         "UPDATE browser_session SET active_query_id = NULL WHERE id = 1"
                     )

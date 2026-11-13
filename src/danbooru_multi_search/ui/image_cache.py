@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 from weakref import WeakSet
+from contextlib import nullcontext
 
 from PySide6.QtCore import QIODevice, QObject, Property, QTimer, QUrl, Signal, Slot
 from PySide6.QtNetwork import (
@@ -15,6 +16,7 @@ from PySide6.QtNetwork import (
     QNetworkRequest,
 )
 from PySide6.QtQml import QQmlNetworkAccessManagerFactory
+from danbooru_multi_search.ui.protected_image_cache import ProtectedImageDiskCache, ProtectionProvider
 
 
 MIB = 1024 * 1024
@@ -136,7 +138,7 @@ class ImageCacheController(QObject):
         cache_directory: Path,
         maximum_bytes: int = DEFAULT_IMAGE_CACHE_BYTES,
         *,
-        disk_cache_factory: DiskCacheFactory = QNetworkDiskCache,
+        disk_cache_factory: DiskCacheFactory | None = None,
         maximum_bytes_saver: MaximumBytesSaver | None = None,
         parent: QObject | None = None,
     ) -> None:
@@ -148,6 +150,9 @@ class ImageCacheController(QObject):
         self._cache_directory = cache_directory
         self._maximum_bytes = maximum_bytes
         self._disk_cache_factory = disk_cache_factory
+        self._protection_provider: ProtectionProvider = lambda: nullcontext(frozenset())
+        self._redirect_observer: Callable[[str, str], None] | None = None
+        self._cache_store_allowed: Callable[[], bool] = lambda: True
         self._maximum_bytes_saver = maximum_bytes_saver
         self._cache: QNetworkDiskCache | None = None
         self._managers: WeakSet[ImageNetworkAccessManager] = WeakSet()
@@ -204,21 +209,31 @@ class ImageCacheController(QObject):
         self._status_text = message
         self.statusChanged.emit()
 
+    def configure_protection(self, provider: ProtectionProvider, redirect_observer: Callable[[str, str], None],
+                             can_store: Callable[[], bool] = lambda: True) -> None:
+        """Install loaded protection before Qt can inspect directory capacity."""
+        if self._cache is not None:
+            raise RuntimeError("Image protection must be installed before cache initialization")
+        self._protection_provider, self._redirect_observer = provider, redirect_observer
+        self._cache_store_allowed = can_store
+
     def _ensure_cache(self, parent: QObject | None = None) -> QNetworkDiskCache | None:
         if self._cache is not None or self._closed:
             return self._cache
+        if self._cache_store_allowed():
+            self._set_status("")
         try:
             self._cache_directory.mkdir(parents=True, exist_ok=True)
             if not self._cache_directory.is_dir():
                 raise OSError("image cache path is not a directory")
-            cache = self._disk_cache_factory(parent or self)
+            cache = self._disk_cache_factory(parent or self) if self._disk_cache_factory else ProtectedImageDiskCache(
+                parent or self, key=cache_key, protection=self._protection_provider, status=self._set_status, can_store=self._cache_store_allowed)
             cache.setCacheDirectory(str(self._cache_directory))
             cache.setMaximumCacheSize(self._maximum_bytes)
         except (OSError, RuntimeError, ValueError) as exc:
             self._set_status(f"图片缓存不可用：{exc}")
             return None
         self._cache = cache
-        self._set_status("")
         self.availabilityChanged.emit()
         return cache
 
@@ -253,6 +268,8 @@ class ImageCacheController(QObject):
 
     def remember_final_url(self, original: QUrl, final: QUrl) -> None:
         self._known_final_urls[cache_key(original)] = normalized_cache_url(final)
+        if self._redirect_observer is not None:
+            self._redirect_observer(cache_key(original).decode("ascii"), cache_key(final).decode("ascii"))
 
     def remove_entries(
         self,
@@ -406,6 +423,8 @@ class ImageCacheController(QObject):
         previous_bytes = self._maximum_bytes
         if maximum_bytes == previous_bytes:
             return True
+        if self._cache_store_allowed():
+            self._set_status("")
         if self._cache is not None:
             try:
                 self._cache.setMaximumCacheSize(maximum_bytes)
@@ -425,7 +444,6 @@ class ImageCacheController(QObject):
                 self._set_status(f"图片缓存上限无法保存：{exc}{rollback_error}")
                 return False
         self._maximum_bytes = maximum_bytes
-        self._set_status("")
         self.maximumBytesChanged.emit()
         self.schedule_usage_refresh()
         return True
@@ -470,6 +488,9 @@ class ImageCacheController(QObject):
         if cache is not None:
             try:
                 cache.clear()
+                if isinstance(cache, ProtectedImageDiskCache) and not cache.maintenance_ok:
+                    ok = False
+                    message = cache.last_message or self._status_text or "收藏图片保护暂不可用，已保留现有缓存。"
             except (OSError, RuntimeError) as exc:
                 ok = False
                 message = f"图片缓存无法清理：{exc}"
@@ -478,6 +499,8 @@ class ImageCacheController(QObject):
         self._automatic_reload_attempted.clear()
         self._known_final_urls.clear()
         self._clearing = False
+        if self._closed:
+            return False
         self.refreshUsage()
         self.cacheCleared.emit(ok, message)
         return ok
@@ -555,6 +578,8 @@ class ImageNetworkAccessManager(QNetworkAccessManager):
             )
         )
         reply.finished.connect(lambda tracked=reply: self._finish_reply(tracked))
+        reply.redirected.connect(lambda target, tracked=reply: self._record_redirect(tracked, target))
+        reply.metaDataChanged.connect(lambda tracked=reply: self._record_redirect(tracked, tracked.url()))
         if self._controller.closed:
             reply.abort()
             if reply.isFinished():
@@ -570,6 +595,14 @@ class ImageNetworkAccessManager(QNetworkAccessManager):
                 lambda tracked=reply: self._finish_reply(tracked),
             )
         return reply
+
+    def _record_redirect(self, reply: QNetworkReply, target: QUrl) -> None:
+        state = self._active.get(reply)
+        if state is None or not self._controller.response_generation_is_current(state.generation):
+            return
+        final = reply.url().resolved(target)
+        if _is_remote_cache_url(final) and cache_key(final) != cache_key(state.original_url):
+            self._controller.remember_final_url(state.original_url, final)
 
     def _record_progress(self, reply: QNetworkReply, received: int) -> None:
         state = self._active.get(reply)

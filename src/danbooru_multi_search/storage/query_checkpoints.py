@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 import sqlite3
 from uuid import uuid4
 
@@ -10,6 +11,13 @@ from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError, Che
 from danbooru_multi_search.storage.checkpoint_serialization import CHECKPOINT_VERSION, decode_checkpoint, encode_checkpoint
 from danbooru_multi_search.storage.database import Database
 from danbooru_multi_search.storage.query_serialization import encode_query_definition
+
+
+@dataclass(frozen=True, slots=True)
+class CheckpointCleanupIdentity:
+    history_id: int
+    owner: str
+    view_revision: int
 
 
 class QueryCheckpointRepository:
@@ -85,8 +93,19 @@ class QueryCheckpointRepository:
             connection.execute("UPDATE query_checkpoints SET owner = ?, view_revision = 0, revision = ? WHERE history_id = ?", (value.owner, value.revision, value.history_id))
             return value
 
-    def clear_checkpoints(self) -> int:
+    @staticmethod
+    def _cleanup_identities(connection: sqlite3.Connection) -> tuple[CheckpointCleanupIdentity, ...]:
+        return tuple(CheckpointCleanupIdentity(*tuple(row)) for row in connection.execute(
+            "SELECT history_id, owner, view_revision FROM query_checkpoints ORDER BY history_id"))
+
+    def capture_cleanup(self) -> tuple[CheckpointCleanupIdentity, ...]:
+        with self._connection() as connection:
+            return self._cleanup_identities(connection)
+
+    def clear_checkpoints(self, *, expected: tuple[CheckpointCleanupIdentity, ...] | None = None) -> int:
         with self._connection(write=True) as connection:
+            if expected is not None and self._cleanup_identities(connection) != expected:
+                raise CheckpointError("stale_cleanup", "检查点归属已改变，请重新打开清理确认。")
             count = connection.execute("SELECT COUNT(*) FROM query_checkpoints").fetchone()[0]
             connection.execute("DELETE FROM query_checkpoints")
             return count

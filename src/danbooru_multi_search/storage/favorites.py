@@ -492,6 +492,18 @@ class FavoriteRepository:
         with self._read_connection() as connection:
             return _collection_snapshot(connection)
 
+    def image_cache_urls(self, *, connection: sqlite3.Connection | None = None) -> frozenset[str]:
+        """Read saved post URLs in the caller's protection transaction."""
+        if connection is None:
+            with self._read_connection() as current:
+                return self.image_cache_urls(connection=current)
+        urls: set[str] = set()
+        for row in connection.execute("SELECT * FROM favorite_items WHERE object_type = 'post' ORDER BY id"):
+            item = _row_to_item(connection, row)
+            assert item.post is not None
+            urls.update(url for url in (item.post.preview_url, item.post.large_file_url, item.post.file_url) if url)
+        return frozenset(urls)
+
     def apply_collection_import(
         self,
         *,

@@ -334,6 +334,17 @@ MIGRATIONS = (
             )""",
         ),
     ),
+    Migration(
+        version=10,
+        name="image_cache_redirect_protection",
+        statements=(
+            """CREATE TABLE image_cache_redirects (
+                original_url TEXT NOT NULL,
+                final_url TEXT NOT NULL,
+                PRIMARY KEY (original_url, final_url)
+            )""",
+        ),
+    ),
 )
 
 

@@ -195,7 +195,7 @@ def _post(
 @pytest.fixture
 def database(tmp_path) -> Database:
     value = Database(tmp_path / "application.sqlite3")
-    assert value.initialize() == 9
+    assert value.initialize() == 10
     return value
 
 
