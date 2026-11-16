@@ -37,6 +37,7 @@ class AppSettings:
     background_mask: float = 0.65
     background_blur: float = 0.2
     background_brightness: float = 1.0
+    button_background_transparency: float = 0.0
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "AppSettings":
@@ -100,6 +101,7 @@ class AppSettings:
             ("background_mask", 1.0),
             ("background_blur", 1.0),
             ("background_brightness", 2.0),
+            ("button_background_transparency", 1.0),
         ):
             value = getattr(settings, name)
             if (

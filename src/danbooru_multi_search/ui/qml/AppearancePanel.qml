@@ -24,6 +24,15 @@ Popup {
                                             brightnessSlider.value)
     }
 
+    function saveButtonTransparency() {
+        controller.setButtonBackgroundTransparency(buttonTransparencySlider.value)
+        // Interaction changes the slider value. Restore its binding even when
+        // persistence fails and the confirmed controller value stays unchanged.
+        buttonTransparencySlider.value = Qt.binding(function() {
+            return panel.controller.buttonBackgroundTransparency
+        })
+    }
+
     background: Rectangle {
         color: panel.theme.surface
         border.color: panel.theme.borderStrong
@@ -65,6 +74,31 @@ Popup {
                 model: [qsTr("跟随系统"), qsTr("浅色"), qsTr("深色")]
                 currentIndex: ["system", "light", "dark"].indexOf(controller.themeMode)
                 onActivated: controller.setTheme(["system", "light", "dark"][currentIndex])
+            }
+            Label {
+                text: qsTr("按钮背景透明度 · %1%").arg(Math.round(buttonTransparencySlider.value * 100))
+                color: panel.theme.text
+                font.bold: true
+            }
+            Slider {
+                id: buttonTransparencySlider
+                objectName: "buttonBackgroundTransparencySlider"
+                Layout.fillWidth: true
+                from: 0; to: 1
+                stepSize: 0.01
+                snapMode: Slider.SnapAlways
+                value: controller.buttonBackgroundTransparency
+                onPressedChanged: { if (!pressed) panel.saveButtonTransparency() }
+                onMoved: { if (!pressed) panel.saveButtonTransparency() }
+                Accessible.name: qsTr("按钮背景透明度")
+            }
+            Label {
+                objectName: "appearanceStatus"
+                Layout.fillWidth: true
+                visible: text.length > 0
+                text: controller.statusText
+                color: panel.theme.warning
+                wrapMode: Text.Wrap
             }
             Label {
                 text: qsTr("应用背景")
@@ -132,14 +166,6 @@ Popup {
                 value: controller.backgroundBrightness
                 onPressedChanged: { if (!pressed) panel.saveAdjustments() }
                 onMoved: { if (!pressed) panel.saveAdjustments() }
-            }
-            Label {
-                objectName: "appearanceStatus"
-                Layout.fillWidth: true
-                visible: text.length > 0
-                text: controller.statusText
-                color: panel.theme.warning
-                wrapMode: Text.Wrap
             }
         }
     }

@@ -63,10 +63,14 @@ def test_appearance_csv_and_cache_updates_keep_each_others_fields(tmp_path):
     settings.set_image_cache_limit_bytes(768 * 1024 * 1024)
     assert appearance.setTheme("light")
     assert appearance.setBackgroundAdjustments(0.4, 0.3, 1.5)
+    assert appearance.setButtonBackgroundTransparency(0.7)
+    settings.set_download_directory(tmp_path / "下载")
     saved = store.load_or_default(AppSettings())
     assert saved == settings.settings
     assert saved.tag_csv_path == str(csv_path)
     assert saved.image_cache_limit_bytes == 768 * 1024 * 1024
+    assert saved.button_background_transparency == 0.7
+    assert saved.download_directory == str(tmp_path / "下载")
     assert saved.background_image_path == str(background)
     assert (saved.background_mask, saved.background_blur, saved.background_brightness) == (
         0.4, 0.3, 1.5
@@ -104,6 +108,7 @@ def test_appearance_save_failure_keeps_confirmed_settings_and_reports_error(
 ):
     appearance, settings, store, _hints = _appearance(tmp_path)
     assert appearance.setTheme("dark")
+    assert appearance.setButtonBackgroundTransparency(0.4)
     confirmed = settings.settings
 
     def fail_save(_settings):
@@ -111,6 +116,8 @@ def test_appearance_save_failure_keeps_confirmed_settings_and_reports_error(
 
     monkeypatch.setattr(store, "save", fail_save)
     assert appearance.setTheme("light") is False
+    assert appearance.setButtonBackgroundTransparency(0.8) is False
+    assert appearance.buttonBackgroundTransparency == 0.4
     assert appearance.themeMode == "dark"
     assert settings.settings == confirmed
     assert "未能保存" in appearance.statusText
@@ -142,6 +149,7 @@ def test_closed_appearance_rejects_actions_and_late_background_results(tmp_path)
     appearance.shutdown()
     appearance.shutdown()
     assert appearance.setTheme("light") is False
+    assert appearance.setButtonBackgroundTransparency(0.5) is False
     assert appearance.selectBackground(QUrl("https://example.invalid/bg.png")) is False
     hints.change(Qt.ColorScheme.Light)
     appearance.reportBackgroundResult(appearance.backgroundGeneration, "", False)

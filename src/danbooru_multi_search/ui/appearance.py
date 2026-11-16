@@ -66,6 +66,15 @@ class AppearanceController(QObject):
     def backgroundBrightness(self) -> float:
         return self._settings.settings.background_brightness
 
+    @Property(float, notify=changed)
+    def buttonBackgroundTransparency(self) -> float:
+        return self._settings.settings.button_background_transparency
+
+    @Slot(float, result=bool)
+    def setButtonBackgroundTransparency(self, value: float) -> bool:
+        """Persist only button fill transparency through the shared settings owner."""
+        return self._save(button_background_transparency=value)
+
     @Property(str, notify=statusChanged)
     def statusText(self) -> str:
         return self._status or self._background_error

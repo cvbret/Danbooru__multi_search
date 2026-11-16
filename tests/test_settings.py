@@ -28,7 +28,8 @@ def test_missing_settings_returns_default_without_writing(tmp_path):
 def test_settings_round_trip_is_atomic(tmp_path):
     path = tmp_path / "config" / "settings.json"
     store = SettingsStore(path)
-    settings = AppSettings(language="zh-CN", download_directory="下载")
+    settings = AppSettings(language="zh-CN", download_directory="下载",
+                           button_background_transparency=0.45)
 
     store.save(settings)
 
@@ -77,7 +78,14 @@ def test_version_one_settings_fill_new_defaults_and_keep_legal_old_page_size(
     assert settings.background_mask == 0.65
     assert settings.background_blur == 0.2
     assert settings.background_brightness == 1.0
+    assert settings.button_background_transparency == 0
     assert AppSettings().page_size == 40
+
+
+@pytest.mark.parametrize("value", [True, -0.01, 1.01, float("nan"), float("inf"), 10 ** 400])
+def test_button_background_transparency_rejects_invalid_values(value):
+    with pytest.raises(SettingsError, match="button_background_transparency"):
+        AppSettings.from_mapping({"button_background_transparency": value})
 
 
 @pytest.mark.parametrize("page_size", [1, 40, 200])

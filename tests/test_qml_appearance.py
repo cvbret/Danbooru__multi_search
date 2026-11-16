@@ -6,14 +6,14 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import Q_ARG, QCoreApplication, QEvent, QMetaObject, QObject, QUrl, Qt
+from PySide6.QtCore import Q_ARG, QCoreApplication, QEvent, QMetaObject, QObject, QPoint, QPointF, QUrl, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtQml import QQmlExpression
 
 from danbooru_multi_search.core.bootstrap import initialize_runtime
-from danbooru_multi_search.core.settings import AppSettings, SettingsStore
+from danbooru_multi_search.core.settings import AppSettings, SettingsError, SettingsStore
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.ui.launcher import create_qml_engine
 from danbooru_multi_search.ui.window_state import ScreenGeometry, WindowGeometry
@@ -112,6 +112,90 @@ def test_theme_switches_real_qml_and_appearance_controls_fit_minimum_window(tmp_
         APPLICATION.processEvents()
         assert choose.property("background").property("color").lightnessF() > 0.5
         assert SettingsStore(runtime.paths.settings_file).load_or_default(AppSettings()).theme == "light"
+    finally:
+        _close(engine, root, session)
+
+
+def test_button_transparency_slider_mouse_keyboard_persistence_and_failure(tmp_path, monkeypatch):
+    engine, root, session, _bridge, runtime = _window(tmp_path)
+    try:
+        root.setWidth(820)
+        root.setHeight(600)
+        root.requestActivate()
+        assert QTest.qWaitForWindowExposed(root)
+        panel = root.findChild(QObject, "appearancePanel")
+        assert QMetaObject.invokeMethod(panel, "open", Qt.ConnectionType.DirectConnection)
+        assert _wait_until(lambda: panel.property("opened"))
+        slider = root.findChild(QObject, "buttonBackgroundTransparencySlider")
+        point = slider.mapToScene(QPointF(slider.width() * 0.65, slider.height() / 2))
+        position = QPoint(round(point.x()), round(point.y()))
+        assert 0 <= position.x() < root.width() and 0 <= position.y() < root.height()
+        QTest.mouseClick(root, Qt.MouseButton.LeftButton, pos=position)
+        appearance = session.appearance_controller
+        assert _wait_until(lambda: appearance.buttonBackgroundTransparency > 0.5)
+        mouse_value = appearance.buttonBackgroundTransparency
+        slider.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+        QTest.keyClick(root, Qt.Key.Key_Right)
+        assert _wait_until(lambda: appearance.buttonBackgroundTransparency > mouse_value)
+        confirmed = appearance.buttonBackgroundTransparency
+        saved = SettingsStore(runtime.paths.settings_file).load_or_default(AppSettings())
+        assert saved.button_background_transparency == confirmed
+
+        def fail_save(_settings):
+            raise SettingsError("simulated disk failure")
+
+        monkeypatch.setattr(session.settings_controller._store, "save", fail_save)
+        QTest.keyClick(root, Qt.Key.Key_Right)
+        assert _wait_until(lambda: "simulated disk failure" in appearance.statusText)
+        assert slider.property("value") == confirmed
+        assert appearance.buttonBackgroundTransparency == confirmed
+        assert root.findChild(QObject, "appearanceStatus").property("text") == appearance.statusText
+        assert SettingsStore(runtime.paths.settings_file).load_or_default(AppSettings()) == saved
+    finally:
+        _close(engine, root, session)
+
+
+def test_action_button_transparency_changes_only_fill_and_keeps_foreground_states(tmp_path):
+    engine, root, session, _bridge, _runtime = _window(tmp_path)
+    try:
+        button = root.findChild(QObject, "chooseBackgroundButton")
+        appearance = session.appearance_controller
+        background = button.property("background")
+        content = button.property("contentItem")
+        theme = root.property("theme")
+        assert background.property("color") == theme.property("surface")
+        for mode in ("light", "dark"):
+            assert appearance.setTheme(mode)
+            for transparency in (0.5, 1.0):
+                assert appearance.setButtonBackgroundTransparency(transparency)
+                APPLICATION.processEvents()
+                assert abs(background.property("color").alphaF() - theme.property("surface").alphaF() * (1 - transparency)) < 0.001
+                assert button.property("opacity") == content.property("opacity") == 1
+                assert content.property("color").alphaF() == 1
+                button.setProperty("primary", True)
+                APPLICATION.processEvents()
+                if transparency == 1:
+                    assert content.property("color") == theme.property("text")
+                button.setProperty("primary", False)
+                button.setProperty("checkable", True)
+                button.setProperty("checked", True)
+                APPLICATION.processEvents()
+                border = QQmlExpression(engine.rootContext(), background, "border.color").evaluate()[0]
+                assert border == theme.property("accent") and border.alphaF() == 1
+                button.setProperty("checked", False)
+                button.setProperty("down", True)
+                APPLICATION.processEvents()
+                assert QQmlExpression(engine.rootContext(), background, "border.width").evaluate()[0] == 2
+                button.setProperty("down", False)
+            button.setProperty("enabled", False)
+            APPLICATION.processEvents()
+            assert content.property("color") == theme.property("subtleText")
+            button.setProperty("enabled", True)
+        assert appearance.setButtonBackgroundTransparency(0)
+        button.setProperty("primary", True)
+        APPLICATION.processEvents()
+        assert content.property("color") == theme.property("accentForeground")
+        assert background.property("color") == theme.property("accent")
     finally:
         _close(engine, root, session)
 

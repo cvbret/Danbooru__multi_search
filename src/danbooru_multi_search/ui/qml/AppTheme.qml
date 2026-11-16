@@ -3,6 +3,8 @@ import QtQuick
 QtObject {
     readonly property bool dark: typeof appearanceController === "undefined"
                                  || appearanceController.effectiveDark
+    readonly property real buttonBackgroundTransparency: typeof appearanceController === "undefined"
+                                                        ? 0 : appearanceController.buttonBackgroundTransparency
     readonly property color background: dark ? "#121419" : "#eef1f6"
     readonly property color panel: dark ? "#ec181b22" : "#efffffff"
     readonly property color surface: dark ? "#e820242c" : "#f5ffffff"
