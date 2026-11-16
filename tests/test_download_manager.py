@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, Signal
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 
 import danbooru_multi_search.danbooru.download_manager as manager_module
@@ -201,6 +202,56 @@ def test_restart_has_zero_requests_and_manual_resume_starts_from_zero_at_decided
     network.replies[0].send(b"fresh")
     final = saved.get_item(item.item_id)
     assert final.resolved_name == "321 (2).jpg" and final.attempts == 2 and final.bytes_written == 5
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Requires real Windows path handling")
+def test_windows_long_chinese_space_directory_download_survives_reopen_and_manual_resume(tmp_path):
+    from danbooru_multi_search.storage.database import Database
+    from danbooru_multi_search.storage.downloads import DownloadRepository
+    saved, manager, queue, scheduler, network = setup(tmp_path)
+    directory = tmp_path / "中文 空格 下载"
+    while len(str(directory / "321 (1).jpg").encode("utf-16-le")) // 2 <= 300:
+        directory /= "长目录 with spaces 0123456789"
+    assert directory.is_absolute()
+    directory.mkdir(parents=True)
+    original = directory / "321.JPG"
+    original.write_bytes(b"previous complete image")
+    restored = None
+    try:
+        batch = manager.enqueue_batch(works(1, identifier=321), directory, DownloadConflictPolicy.AUTO_NUMBER)
+        scheduler.run_ready()
+        running = saved.get_batch(batch.batch_id).items[0]
+        assert running.resolved_name == "321 (1).jpg" and running.attempts == 1
+        assert len(str(running.destination).encode("utf-16-le")) // 2 > 260
+        reply = network.replies[-1]
+        reply.payload = b"interrupted bytes"
+        reply.readyRead.emit()
+        partial = directory / saved.get_item(running.item_id).partial_name
+        assert partial.is_file() and len(str(partial).encode("utf-16-le")) // 2 > 260
+        manager.shutdown()
+        reopened = DownloadRepository(Database(saved._database.path))
+        restored = PersistentDownloadManager(reopened, queue, network, scheduler=scheduler)
+        paused = reopened.get_item(running.item_id)
+        assert paused.state is DownloadTaskState.AWAITING_RESUME and paused.directory == directory
+        assert paused.resolved_name == running.resolved_name and len(network.requests) == 1
+        assert restored.resume_batch(batch.batch_id)
+        scheduler.run_ready()
+        assert len(network.requests) == 2 and not network.requests[-1].hasRawHeader("Range")
+        assert reopened.get_item(running.item_id).bytes_written == 0
+        payload = b"complete original-format payload"
+        network.replies[-1].send(payload)
+        final = reopened.get_item(running.item_id)
+        assert final.state is DownloadTaskState.COMPLETED and final.attempts == 2
+        assert final.directory == directory and final.resolved_name == "321 (1).jpg"
+        assert final.destination.read_bytes() == payload and final.bytes_written == len(payload)
+        assert original.read_bytes() == b"previous complete image"
+        assert not partial.exists() and not tuple(directory.glob("*.part"))
+    finally:
+        manager.shutdown()
+        if restored is not None:
+            restored.shutdown()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        APPLICATION.processEvents()
 
 
 def test_resume_cleanup_failure_keeps_whole_batch_awaiting_resume(tmp_path, monkeypatch):

@@ -40,6 +40,32 @@ def test_current_python_keeps_virtual_environment_launcher_path(
     assert actual == expected
 
 
+def test_source_copy_excludes_validation_and_windows_build_trees_but_keeps_production(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    production = (
+        "pyproject.toml",
+        "src/danbooru_multi_search/__init__.py",
+        "src/danbooru_multi_search/ui/qml/M2Main.qml",
+        "packaging/windows/DanbooruMultiSearch.spec",
+        "scripts/check_installed_package.py",
+    )
+    excluded = (".tools", ".windows-build", ".windows-build-m3-007")
+    for name in production:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("production\n", encoding="utf-8")
+    for name in excluded:
+        path = source / name / "nested" / "artifact.bin"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"validation artifact")
+    monkeypatch.setattr(verify_build, "PROJECT_ROOT", source)
+    destination = tmp_path / "copied"
+    verify_build._copy_project(destination)
+    assert {path.relative_to(destination).as_posix() for path in destination.rglob("*") if path.is_file()} == set(production)
+    assert all((destination / name).read_text(encoding="utf-8") == "production\n" for name in production)
+    assert all(not (destination / name).exists() for name in excluded)
+
+
 def test_linux_qt_package_lists_match_and_include_runtime_libraries() -> None:
     container_script = verify_build.PROJECT_ROOT / "scripts" / "run_linux_validation.sh"
     workflow = verify_build.PROJECT_ROOT / ".github" / "workflows" / "ci.yml"

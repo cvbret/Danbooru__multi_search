@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import errno
 from pathlib import Path
+
+import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -290,6 +293,58 @@ def test_atomic_replace_failure_preserves_existing_file_and_removes_temporary(
     assert outcome.error_kind == DownloadErrorKind.FILE
     assert destination.read_bytes() == b"previous complete image"
     assert _part_files(tmp_path) == []
+
+
+@pytest.mark.parametrize("fault", ["write_enospc", "flush_enospc", "fsync_enospc", "short_write"])
+def test_write_or_sync_disk_full_and_short_write_preserve_existing_complete_file(local_http_server, tmp_path, monkeypatch, fault):
+    destination = tmp_path / "321.jpg"
+    previous = b"previous complete image"
+    destination.write_bytes(previous)
+    server = local_http_server(b"new media payload which must not replace the old file")
+    real_temporary = download_module.tempfile.NamedTemporaryFile
+    reached = []
+    class FaultyStream:
+        def __init__(self, stream):
+            self._stream = stream
+
+        def __getattr__(self, name):
+            return getattr(self._stream, name)
+
+        def write(self, payload):
+            if fault == "write_enospc":
+                reached.append(fault)
+                raise OSError(errno.ENOSPC, "No space left on device")
+            if fault == "short_write":
+                reached.append(fault)
+                return self._stream.write(payload[:1])
+            return self._stream.write(payload)
+
+        def flush(self):
+            if fault == "flush_enospc":
+                reached.append(fault)
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return self._stream.flush()
+
+    monkeypatch.setattr(download_module.tempfile, "NamedTemporaryFile", lambda *args, **kwargs: FaultyStream(real_temporary(*args, **kwargs)))
+    if fault == "fsync_enospc":
+        def fail_sync(descriptor):
+            reached.append(fault)
+            raise OSError(errno.ENOSPC, "No space left on device")
+        monkeypatch.setattr(download_module.os, "fsync", fail_sync)
+    controller = DanbooruDownloadController(queue_config=TaskQueueConfig(minimum_interval_seconds=0))
+    try:
+        outcome = _wait_for_download(controller, _post(f"{server.base_url}/image.jpg"), tmp_path)
+        assert reached == [fault]
+        assert outcome.state == DownloadState.ERROR and outcome.error_kind == DownloadErrorKind.FILE
+        assert outcome.downloaded_file is None and not outcome.succeeded
+        if fault != "short_write":
+            assert "No space left on device" in outcome.message
+        else:
+            assert "only part of the payload" in outcome.message
+        assert destination.read_bytes() == previous and _part_files(tmp_path) == []
+        assert len(server.requests) == 1
+    finally:
+        controller.shutdown()
 
 
 def test_cancel_active_download_removes_temporary_file(

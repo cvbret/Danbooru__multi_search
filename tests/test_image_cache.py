@@ -920,8 +920,9 @@ def test_qml_detail_decode_failure_retries_once_before_fallback(image_server):
         )
     )
     detail = engine.rootContext().contextProperty("detailController")
+    navigation = engine.rootContext().contextProperty("detailNavigation")
     try:
-        assert detail.openPost(0, 0.0, 0, 800.0, 600.0, 1280.0, 800.0)
+        assert navigation.openBrowsePost(0, 0.0, 0, 800.0, 600.0, 1280.0, 800.0)
         assert _wait_until(
             lambda: len(server.paths) == 2 and detail.mediaState == "success"
         )
