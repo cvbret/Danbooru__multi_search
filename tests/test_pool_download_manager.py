@@ -4,7 +4,7 @@ import pytest
 from PySide6.QtCore import QObject, Signal
 
 from danbooru_multi_search.core.downloads import DownloadError
-from danbooru_multi_search.danbooru.pool_downloads import PoolDownloadManager
+from danbooru_multi_search.app.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.danbooru.pool_pages import PoolPageRequest
 from tests.test_pool_download_repository import build, create, pool, batch
 from tests.test_favorite_controller import APPLICATION
@@ -216,7 +216,7 @@ def test_actual_metadata_service_uses_shared_queue_and_original_slot_mapping(tmp
 
 def test_restart_does_not_start_linked_files_until_existing_batch_is_manually_resumed(tmp_path):
     from tests.test_download_manager import setup
-    from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
+    from danbooru_multi_search.app.download_manager import PersistentDownloadManager
     from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
     from danbooru_multi_search.core.downloads import DownloadTaskState
     downloads, old, queue, scheduler, network = setup(tmp_path)

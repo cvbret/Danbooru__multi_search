@@ -7,11 +7,12 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 
-from danbooru_multi_search.core.downloads import DownloadConflictPolicy, DownloadError
+from danbooru_multi_search.core.downloads import DownloadError
 from danbooru_multi_search.core.pool_downloads import PoolDownloadPlan
 from danbooru_multi_search.core.pools import DanbooruPool, PoolCategory
 from danbooru_multi_search.core.settings import SettingsController, SettingsError
-from danbooru_multi_search.danbooru.pool_downloads import PoolDownloadManager
+from danbooru_multi_search.app.pool_downloads import PoolDownloadManager
+from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.ui.download_models import PoolDownloadListModel, PoolDownloadPageListModel
 from danbooru_multi_search.ui.downloads import DownloadUiController
 from danbooru_multi_search.ui.pool_reader import PoolReaderController
@@ -33,10 +34,12 @@ class PoolDownloadController(QObject):
     def __init__(
         self, manager: PoolDownloadManager, settings: SettingsController, downloads: DownloadUiController,
         browser: PoolBrowserController, reader: PoolReaderController, parent: QObject | None = None,
+        *, submission: DownloadSubmissionService,
     ) -> None:
         super().__init__(parent)
         self._manager, self._settings, self._downloads = manager, settings, downloads
         self._browser, self._reader = browser, reader
+        self._submission = submission
         self._plans = PoolDownloadListModel(self)
         self._pages = PoolDownloadPageListModel(self)
         self._intent: _Intent | None = None
@@ -192,16 +195,18 @@ class PoolDownloadController(QObject):
         self._busy = True
         self.changed.emit()
         try:
-            if self._intent is not value or not self.openRequest(token):
-                raise DownloadError("stale_download", "作品池来源已改变，尚未创建计划。")
-            parsed = DownloadConflictPolicy(policy)
-            if not value.directory.is_absolute() or value.directory.exists() and not value.directory.is_dir():
-                raise DownloadError("invalid_directory", "下载目录已不可用，请重新选择。")
-            if save_default:
-                self._settings.set_download_directory(value.directory)
-            if self._closed or self._intent is not value or not value.guard():
-                raise DownloadError("stale_download", "作品池来源已改变，尚未创建计划。")
-            plan = self._manager.start(value.pool, value.directory, parsed)
+            plan = self._submission.submit_pool(
+                self._manager,
+                value.pool,
+                value.directory,
+                policy,
+                save_default,
+                source_current=lambda: (
+                    not self._closed
+                    and self._intent is value
+                    and value.guard()
+                ),
+            )
             if self._intent is value:
                 self._intent = self._choice = None
             if not self._closed:

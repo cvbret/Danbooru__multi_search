@@ -10,9 +10,10 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 
-from danbooru_multi_search.core.downloads import MAX_DOWNLOAD_BATCH_ITEMS, DOWNLOAD_TERMINAL_STATES, DownloadConflictPolicy, DownloadError, DownloadRequest, DownloadTaskState
+from danbooru_multi_search.core.downloads import MAX_DOWNLOAD_BATCH_ITEMS, DOWNLOAD_TERMINAL_STATES, DownloadError, DownloadRequest, DownloadTaskState
 from danbooru_multi_search.core.settings import SettingsController, SettingsError
-from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
+from danbooru_multi_search.app.download_manager import PersistentDownloadManager
+from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.details import DanbooruDetailController
 from danbooru_multi_search.danbooru.models import DanbooruPost
@@ -40,11 +41,13 @@ class DownloadUiController(QObject):
     def __init__(self, manager: PersistentDownloadManager, repository: DownloadRepository,
                  settings: SettingsController, gallery: DanbooruPostListModel,
                  selection: GallerySelectionController, detail: DanbooruDetailController,
-                 default_directory: Path, parent: QObject | None = None) -> None:
+                 default_directory: Path, parent: QObject | None = None, *,
+                 submission: DownloadSubmissionService) -> None:
         super().__init__(parent)
         self._manager, self._repository, self._settings = manager, repository, settings
         self._gallery, self._selection, self._detail = gallery, selection, detail
         self._fallback_directory = default_directory
+        self._submission = submission
         self._batches = DownloadBatchListModel(self)
         self._items = DownloadItemListModel(self)
         self._selected_key = ""
@@ -346,17 +349,18 @@ class DownloadUiController(QObject):
         self._busy = True
         self.changed.emit()
         try:
-            if self._request is not value or not self._source_current(value) or self._closed:
-                raise DownloadError("stale_download", "作品来源已改变，请重新选择。")
-            parsed_policy = DownloadConflictPolicy(policy)
-            if not value.directory.is_absolute() or value.directory.exists() and not value.directory.is_dir():
-                raise DownloadError("invalid_directory", "下载目录已不可用，请重新选择文件夹。")
-            if save_default:
-                self._settings.set_download_directory(value.directory)
-            # Saving settings may be supplied by an adapter that emits callbacks.
-            if self._closed or self._request is not value or not self._source_current(value):
-                raise DownloadError("stale_download", "作品来源已改变，尚未创建下载任务。")
-            batch = self._manager.enqueue_batch(value.posts, value.directory, parsed_policy)
+            batch = self._submission.submit_posts(
+                self._manager,
+                value.posts,
+                value.directory,
+                policy,
+                save_default,
+                source_current=lambda: (
+                    not self._closed
+                    and self._request is value
+                    and self._source_current(value)
+                ),
+            )
             if self._request is value:
                 self._request, self._choice = None, None
             if not self._closed:

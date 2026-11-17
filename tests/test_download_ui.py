@@ -15,6 +15,7 @@ from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.downloads import DownloadUiController
+from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from tests.test_download_manager import setup, works
 from tests.test_download_repository import request
 
@@ -32,7 +33,8 @@ def env(tmp_path):
     favorites = FavoriteController(FavoriteRepository(repository._database))
     selection = GallerySelectionController(gallery, favorites)
     detail = DanbooruDetailController("https://example.invalid", TagTranslationStore())
-    ui = DownloadUiController(manager, repository, settings, gallery, selection, detail, default)
+    ui = DownloadUiController(manager, repository, settings, gallery, selection, detail, default,
+        submission=DownloadSubmissionService(settings))
     gallery.set_posts(works())
     yield ui, repository, manager, scheduler, network, gallery, selection, detail, settings
     ui.shutdown()
@@ -125,6 +127,7 @@ def test_setting_save_failure_keeps_old_directory_and_creates_no_download(env, t
     assert not ui.confirmRequest(token, "skip", True)
     assert settings.settings is previous and "原设置保持" in ui.errorText
     assert repository.list_batches() == () and network.requests == []
+    assert ui.openRequest(token)
 
 
 def test_source_change_during_default_save_prevents_old_download(env, tmp_path, monkeypatch):

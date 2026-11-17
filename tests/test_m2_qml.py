@@ -67,7 +67,8 @@ from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
 from danbooru_multi_search.storage.downloads import DownloadRepository
-from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
+from danbooru_multi_search.app.download_manager import PersistentDownloadManager
+from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.ui.downloads import DownloadUiController
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
@@ -81,7 +82,7 @@ from danbooru_multi_search.ui.pool_reader import PoolReaderController
 from danbooru_multi_search.storage.pool_progress import PoolProgressRepository
 from danbooru_multi_search.ui.pool_progress import PoolProgressController
 from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
-from danbooru_multi_search.danbooru.pool_downloads import PoolDownloadManager
+from danbooru_multi_search.app.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.ui.eagle import EagleController
 from danbooru_multi_search.app.eagle_runtime import EagleRuntime
@@ -341,8 +342,9 @@ def _create_window(tmp_path):
     appearance = AppearanceController(settings_controller)
     download_repository = DownloadRepository(database)
     download_manager = PersistentDownloadManager(download_repository, tags._task_queue, tags._network_manager)
+    download_submission = DownloadSubmissionService(settings_controller)
     download_ui = DownloadUiController(download_manager, download_repository, settings_controller,
-        core.posts_model, selection, details, tmp_path / "downloads")
+        core.posts_model, selection, details, tmp_path / "downloads", submission=download_submission)
     pool_reader = PoolReaderController(
         PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
         favorites, download_ui, translations, "https://example.invalid",
@@ -352,7 +354,8 @@ def _create_window(tmp_path):
     pool_download_manager = PoolDownloadManager(PoolDownloadRepository(database),
         PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
         download_manager, "https://example.invalid")
-    pool_downloads = PoolDownloadController(pool_download_manager, settings_controller, download_ui, pool_browser, pool_reader)
+    pool_downloads = PoolDownloadController(pool_download_manager, settings_controller, download_ui, pool_browser, pool_reader,
+        submission=download_submission)
     eagle_bridge = EagleWebApiBridge()
     eagle_runtime = EagleRuntime(create_eagle_backend_factory(eagle_bridge), eagle_bridge.availability, tags._task_queue)
     eagle = EagleController(eagle_runtime)

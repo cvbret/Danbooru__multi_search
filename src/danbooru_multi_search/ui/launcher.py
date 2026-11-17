@@ -39,7 +39,8 @@ from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
 from danbooru_multi_search.storage.cache_protection import CacheProtectionRepository
 from danbooru_multi_search.storage.downloads import DownloadRepository
-from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
+from danbooru_multi_search.app.download_manager import PersistentDownloadManager
+from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.ui.downloads import DownloadUiController
 from danbooru_multi_search.ui.artist_combinations import ArtistCombinationController
 from danbooru_multi_search.ui.saved_queries import SavedQueryController
@@ -60,7 +61,7 @@ from danbooru_multi_search.ui.pool_navigation import PoolNavigationController
 from danbooru_multi_search.ui.pool_reader import PoolReaderController
 from danbooru_multi_search.storage.pool_progress import PoolProgressRepository
 from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
-from danbooru_multi_search.danbooru.pool_downloads import PoolDownloadManager
+from danbooru_multi_search.app.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.ui.pool_progress import PoolProgressController
 from danbooru_multi_search.ui.eagle import EagleController
@@ -241,10 +242,12 @@ class _UiSession(QObject):
         self.saved_queries = SavedQueryController(
             SavedQueryRepository(database), self.query_bridge, self.favorite_controller, self
         )
+        self.download_submission = DownloadSubmissionService(self.settings_controller)
         self.download_ui = DownloadUiController(
             self.download_manager, self.download_manager._repository, self.settings_controller,
             self.query_controller.posts_model, self.gallery_selection, self.detail_controller,
             Path(settings.download_directory) if settings.download_directory else (runtime.paths.download_dir if runtime else temporary_path / "downloads"), self,
+            submission=self.download_submission,
         )
         self.pool_reader = PoolReaderController(
             PoolPageRequestService(danbooru_base_url, self.task_queue, self.network_manager, self),
@@ -260,6 +263,7 @@ class _UiSession(QObject):
         self.pool_downloads = PoolDownloadController(
             self.pool_download_manager, self.settings_controller, self.download_ui,
             self.pool_browser, self.pool_reader, self,
+            submission=self.download_submission,
         )
         self.pool_reader.changed.connect(self.download_ui.refresh_snapshot_source)
         self.favorite_collection.poolRequested.connect(self.pool_navigation.openFavoritePool)

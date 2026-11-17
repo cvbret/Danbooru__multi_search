@@ -1,5 +1,7 @@
 """Bounded metadata preparation; all file work belongs to the existing manager."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
@@ -11,7 +13,7 @@ from danbooru_multi_search.core.pool_downloads import (
 from danbooru_multi_search.core.pool_pages import PoolPageBatch
 from danbooru_multi_search.core.pool_progress import normalize_api_source
 from danbooru_multi_search.core.pools import DanbooruPool, PoolPageReference
-from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
+from danbooru_multi_search.app.download_manager import PersistentDownloadManager
 from danbooru_multi_search.danbooru.pool_pages import PoolPageRequest, PoolPageRequestService
 from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
 from danbooru_multi_search.tasks.qt_scheduling import QtScheduler

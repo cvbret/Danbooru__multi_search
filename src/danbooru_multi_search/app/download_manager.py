@@ -38,10 +38,17 @@ class PersistentDownloadManager(QObject):
     batchChanged = Signal(object)
     errorOccurred = Signal(str)
 
-    def __init__(self, repository: DownloadRepository, task_queue: BoundedTaskQueue,
-                 network_manager: QNetworkAccessManager, *, scheduler: Scheduler | None = None,
-                 timeout_ms: int = 15000, maximum_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
-                 parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        repository: DownloadRepository,
+        task_queue: BoundedTaskQueue,
+        network_manager: QNetworkAccessManager,
+        *,
+        scheduler: Scheduler | None = None,
+        timeout_ms: int = 15000,
+        maximum_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent)
         if type(timeout_ms) is not int or timeout_ms <= 0 or type(maximum_bytes) is not int or maximum_bytes <= 0:
             raise ValueError("download timeout and size limits must be positive integers")
@@ -81,12 +88,20 @@ class PersistentDownloadManager(QObject):
     def halted(self) -> bool:
         return self._halted
 
-    def enqueue_download(self, post: DanbooruPost, directory: Path,
-                         policy: DownloadConflictPolicy = DownloadConflictPolicy.SKIP) -> DownloadBatchSnapshot:
+    def enqueue_download(
+        self,
+        post: DanbooruPost,
+        directory: Path,
+        policy: DownloadConflictPolicy = DownloadConflictPolicy.SKIP,
+    ) -> DownloadBatchSnapshot:
         return self.enqueue_batch((post,), directory, policy)
 
-    def enqueue_batch(self, posts: Sequence[DanbooruPost], directory: Path,
-                      policy: DownloadConflictPolicy = DownloadConflictPolicy.SKIP) -> DownloadBatchSnapshot:
+    def enqueue_batch(
+        self,
+        posts: Sequence[DanbooruPost],
+        directory: Path,
+        policy: DownloadConflictPolicy = DownloadConflictPolicy.SKIP,
+    ) -> DownloadBatchSnapshot:
         if self._closed or self._closing or self._halted:
             raise DownloadError("manager_unavailable", self._error or "下载管理器已经关闭。")
         if not isinstance(posts, Sequence) or isinstance(posts, (str, bytes)) or not 1 <= len(posts) <= MAX_DOWNLOAD_BATCH_ITEMS:

@@ -9,9 +9,9 @@ from PySide6.QtCore import QCoreApplication, QEvent, QObject, Signal
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 from PySide6.QtTest import QSignalSpy
 
-import danbooru_multi_search.danbooru.download_manager as manager_module
+import danbooru_multi_search.app.download_manager as manager_module
 from danbooru_multi_search.core.downloads import DownloadConflictPolicy, DownloadedFile, DownloadError, DownloadTaskState
-from danbooru_multi_search.danbooru.download_manager import PersistentDownloadManager
+from danbooru_multi_search.app.download_manager import PersistentDownloadManager
 from danbooru_multi_search.tasks import BoundedTaskQueue, TaskAttemptResult, TaskKind, TaskQueueConfig
 from tests.test_download_repository import repository, request
 from tests.test_favorite_controller import APPLICATION, post

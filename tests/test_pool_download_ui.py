@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, QUrl, Signal
 from danbooru_multi_search.core.downloads import DownloadError
 from danbooru_multi_search.core.settings import AppSettings, SettingsController, SettingsError, SettingsStore
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
+from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from tests.test_pool_download_manager import harness
 
 
@@ -28,7 +29,8 @@ def env(tmp_path):
     store.save(initial)
     value.settings = SettingsController(store, initial)
     value.ui = PoolDownloadController(value.manager, value.settings,
-        SimpleNamespace(defaultDirectory=str(tmp_path)), value.browser, value.reader)
+        SimpleNamespace(defaultDirectory=str(tmp_path)), value.browser, value.reader,
+        submission=DownloadSubmissionService(value.settings))
     value.ui.setSourceVisible('browser', True)
     yield value
     value.ui.shutdown()
@@ -77,6 +79,7 @@ def test_default_save_failure_keeps_confirmed_settings_and_creates_no_plan(env, 
     assert not env.ui.confirmRequest(token, 'auto_number', True)
     assert '无法保存设置' in env.ui.errorText
     assert env.settings.settings is previous and env.repo.summaries() == ()
+    assert env.ui.openRequest(token)
 
 
 def test_confirmation_snapshots_pool_and_survives_later_navigation(env):

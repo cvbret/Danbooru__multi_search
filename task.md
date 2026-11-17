@@ -4,7 +4,7 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第二轮结构整改
 - 当前里程碑：`第二轮结构整改完成`
-- 当前主要任务：`R5-001 收藏文件传输应用流程`
+- 当前主要任务：`R5-002 普通下载与整池下载应用流程`
 - 当前状态：待提交
 - 执行状态：用户于 2026-11-17 要求生成整改方案并即刻实施；按第 45 节分批整改，M5 后续功能暂不扩展。
 - 最后更新：2026-11-17
@@ -2923,7 +2923,7 @@ M2 里程碑回归检查与提交。
 
 ### 45.2 当前任务 R5-001
 
-- 状态：待提交；起点为 `f8ca0497724c3640e3187899d78629da0c5a4e7e`，从干净工作树开始。目标是完成收藏文件导入/导出用例的职责迁移，删除存储层中的旧作业实现。
+- 状态：已完成；起点为 `f8ca0497724c3640e3187899d78629da0c5a4e7e`，从干净工作树开始。目标是完成收藏文件导入/导出用例的职责迁移，删除存储层中的旧作业实现。
 - 负责人：developer 编码及直接检查；reviewer 独立审查和聚焦验证；intergrator 在允许后精确提交；主 Agent 维护范围、状态和后续批次。
 - 准确生产/打包范围 5 个路径：新增 `src/danbooru_multi_search/app/favorite_transfer.py`；修改 `storage/favorite_transfer.py`、`ui/favorite_transfer.py`、`packaging/windows/DanbooruMultiSearch.spec`；删除 `storage/favorite_transfer_jobs.py`。包内短路径沿用 `src/danbooru_multi_search/` 前缀。不修改 schema、原数据格式、共享占用状态或其他用例。
 - 准确测试范围 5 个路径：新增 `tests/test_favorite_transfer_service.py`、删除 `tests/test_favorite_transfer_jobs.py`；修改 `tests/test_favorite_transfer_controller.py`、`tests/test_qml_favorite_transfer.py`、`tests/test_favorite_transfer.py`。旧 jobs 测试迁移，保留行为断言并更新实际实现引用；兼容入口检查覆盖同一类身份和纯服务实际导入链。
@@ -2933,3 +2933,18 @@ M2 里程碑回归检查与提交。
 - 开发已冻结上述准确 10 个代码/打包/测试路径，另含本记录。服务、三个专用辅助及不可变请求/执行流程已迁入应用模块；存储模块保留唯一编解码/字节读写实现和同一服务类的按需入口，UI 只修改实际导入归属。旧 jobs 及旧测试路径已删除，生产/打包没有旧引用；无额外范围修改。
 - 开发直接选择 46 个不同场景通过（30+15+1），覆盖所有取消位置、独立仓库、关闭等待、公开类身份及三种冷导入顺序、预览事务、五项真实 QML 操作、原子文件失败/残留路径、文件上限、超过 1000 条收藏导出、正式 M2 导入持锁关闭及 spec。8 个现存代码/打包/测试文件空白与 Python 语法检查通过；没有执行完整回归或构建。独立静态审查暂无新增阻断，现等待最终聚焦验证。
 - reviewer 最终独立选择 23 项全部通过，7.89 秒，覆盖六种步骤取消、错误/残留路径、三种冷导入顺序及同类身份/实际执行、唯一字节读写、版本/绑定/事务回滚、同步/替换失败、后台独享仓库、发布后释放占用、晚到预览取消、原子写入中关闭、正式导入持锁关闭、实际 QML 确认和 spec。允许上述准确 10 个代码/打包/测试路径及本记录共 11 个路径提交，无剩余阻断；未执行全量回归、构建、原生界面、真实服务或 Linux。`.tools/pytest-r5-001-reviewer*` 保留且不提交。
+- 本地提交：`dd5e5305e47282d3c368b57a1cf7b9da8d6466cb`（`refactor(favorites): move file transfer workflow into app`）。按重命名两端核对准确 11 个路径；Git 将旧测试识别为新测试的重命名，默认显示 10 条记录。提交后工作树与暂存区干净，未推送。
+
+### 45.3 当前任务 R5-002
+
+- 状态：待提交；起点 `dd5e5305e47282d3c368b57a1cf7b9da8d6466cb`，从干净工作树开始。目标为普通下载与整池下载的应用协调及确认提交流程迁移，删除已无消费者的两个旧内部模块。
+- 负责人：developer 实现及直接检查；reviewer 独立核对和聚焦验证；intergrator 在允许后精确本地提交；主 Agent 维护范围与状态。
+- 准确生产/打包范围 9 个路径：新增 `src/danbooru_multi_search/app/download_manager.py`、`app/pool_downloads.py`、`app/download_submission.py`；修改 `ui/downloads.py`、`ui/pool_downloads.py`、`ui/launcher.py`、`packaging/windows/DanbooruMultiSearch.spec`；删除 `danbooru/download_manager.py`、`danbooru/pool_downloads.py`。包内短路径沿用同一 src 前缀。两个旧协调模块没有包级公开导出，迁移全部消费者后不保留转发。
+- 准确测试范围 7 个路径：新增 `tests/test_download_submission.py`；修改 `tests/test_download_manager.py`、`tests/test_pool_download_manager.py`、`tests/test_download_ui.py`、`tests/test_pool_download_ui.py`、`tests/test_m2_qml.py`、`tests/test_windows_packaging.py`。现有下载/整池 QML 及正式关闭测试可选择直接相关节点执行，不预先改动这些文件。
+- 两个管理器进入 app，保留明确的 Qt 运行时职责，不依赖 UI。无 Qt/UI 的 `DownloadSubmissionService` 统一普通/整池的来源检查、冲突策略和目录校验、可选默认目录保存、保存后来源复查及建立批次/计划；通过只查询来源是否仍有效的回调保持身份检查，后端接口只包含实际需要的操作。launcher 注入同一个提交服务；UI 保留捕获作品/作品池、来源令牌、按下/确认身份、选择目录、忙碌/错误/列表及信号。
+- 保留确认前零任务/网络、设置失败保留原请求、同步通知后旧身份不能提交；整池批次和原始页位关联继续由现有仓库在同一事务内提交。保留 ID/代次分别核对、批量取消先使全部运行守卫失效、存储失败后停止后续调度、已经提交的正式文件保留、恢复补登记不重建批次及手动恢复策略。
+- `core` 规则、仓库事务、文件命名/归属/原子提交、`danbooru/download.py` 的流式请求及 CLI 公开入口、阅读器共享的 `danbooru/pool_pages.py` 均保留原实现；不修改 schema 或 QML。停止整池准备不取消已有普通下载；关闭先停止本任务请求，等待导入完成后保存暂停记录，维持正式会话的最后保存顺序。
+- 验收只选择新提交服务纯导入及实际提交、设置失败/通知期间来源变化、普通队列容量/同步接受/整批取消/文件提交后数据库失败与恢复、整池有界准备/提交后恢复/持锁关闭、必要真实 QML 确认和新打包路径。已通过的 R4/R5-001/M4 集合不重复，完整回归与构建继续留在结构整改里程碑。
+- 开发冻结准确 9 个生产/打包和 7 个测试路径，另含本记录。两个旧模块已删除且生产/打包无旧引用；3 个新应用模块没有 UI 导入。调度/文件回调/关闭正文保持既有行为，launcher 和手工 M2 装配共用一个提交服务。14 个现存代码/打包/测试文件语法及空白检查通过，新打包模块实际存在且导入清单无重复。
+- 本轮 51 个不同聚焦场景全部通过（18+18+15）：提交流程/来源身份/设置失败及保留原确认、两个管理器的队列容量/取消/25000 页准备/文件已提交但数据库失败/恢复关联/持锁暂停、真实 QML 宽窄窗口/正式关闭/手工装配/CLI/spec。没有执行全量回归或构建；底层 core/storage/流式请求/阅读器请求/CLI 实现/schema/QML 未修改。独立静态审查暂无阻断，等待最终聚焦验证。
+- reviewer 最终独立选择 25 项全部通过，50.11 秒：纯提交服务冷导入和实际保存、两种来源设置失败/回调失效及 UI 保留原请求、批量取消同步回调/共享容量/正式文件提交后数据库失败停止后续/零网络重启和手动恢复、25000 页有界整池/提交后补登记/关联等待手动恢复/持锁关闭、普通 QML 与宽窄池 QML、正式活动下载关闭且保留查询历史、旧 CLI 下载、spec 和手工 M2 装配。准确 9 个生产/打包、7 个测试及本记录共 17 个路径获准提交，无剩余阻断。仅使用受控本地服务和离屏界面，`.tools/pytest-r5-002-reviewer*` 保留且不提交，未执行完整测试或构建。
