@@ -345,6 +345,27 @@ MIGRATIONS = (
             )""",
         ),
     ),
+    Migration(
+        version=11,
+        name="pool_reading_progress",
+        statements=(
+            """CREATE TABLE pool_reading_progress (
+                source TEXT NOT NULL,
+                pool_id INTEGER NOT NULL CHECK (typeof(pool_id) = 'integer' AND pool_id > 0),
+                post_id INTEGER NOT NULL CHECK (typeof(post_id) = 'integer' AND post_id > 0),
+                page_number INTEGER NOT NULL CHECK (typeof(page_number) = 'integer' AND page_number BETWEEN 1 AND 25000),
+                updated_at TEXT NOT NULL,
+                offset REAL NOT NULL CHECK (offset BETWEEN 0 AND 10000000),
+                viewport_width REAL NOT NULL CHECK (viewport_width BETWEEN 0 AND 100000),
+                viewport_height REAL NOT NULL CHECK (viewport_height BETWEEN 0 AND 100000),
+                zoom REAL NOT NULL CHECK (zoom BETWEEN 0.05 AND 8),
+                mode TEXT NOT NULL CHECK (mode IN ('continuous', 'single')),
+                scale_mode TEXT NOT NULL CHECK (scale_mode IN ('fit-width', 'fit-window', 'manual')),
+                revision INTEGER NOT NULL CHECK (typeof(revision) = 'integer' AND revision >= 0),
+                PRIMARY KEY (source, pool_id)
+            )""",
+        ),
+    ),
 )
 
 

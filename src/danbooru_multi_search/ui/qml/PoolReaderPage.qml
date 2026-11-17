@@ -12,19 +12,28 @@ Item {
     property bool positioning: false
 
     function positionPage(number) {
-        if (!visible || controller.mode !== "continuous") return
+        if (!visible) return
         positioning = true
         const revision = controller.revision
+        const session = controller.readingSession
         Qt.callLater(function() {
-            if (page.visible && controller.active && controller.mode === "continuous"
+            if (page.visible && controller.active && session === controller.readingSession
                     && revision === controller.revision && number === controller.currentPage) {
-                pages.forceLayout()
-                pages.positionViewAtIndex(number - 1, ListView.Beginning)
-                pages.currentIndex = number - 1
-                const row = pages.itemAtIndex(number - 1)
-                if (row) pages.contentY = row.y + controller.scrollOffset
+                if (controller.mode === "continuous") pages.forceLayout()
+                const plan = controller.preparePosition(body.width, body.height, session, revision)
+                if (plan.valid) {
+                    if (controller.mode === "continuous") {
+                        pages.forceLayout()
+                        pages.positionViewAtIndex(number - 1, ListView.Beginning)
+                        pages.currentIndex = number - 1
+                        const row = pages.itemAtIndex(number - 1)
+                        if (row) pages.contentY = row.y + plan.offset
+                    }
+                    controller.confirmPosition(session, revision)
+                }
             }
-            page.positioning = false
+            if (session === controller.readingSession && revision === controller.revision)
+                page.positioning = false
         })
     }
     Connections {
@@ -40,6 +49,24 @@ Item {
             ActionButton { objectName: "readerContinuousButton"; text: qsTr("连续阅读"); checkable: true; checked: controller.mode === "continuous"; onClicked: controller.setMode("continuous", controller.revision) }
             ActionButton { objectName: "readerSingleButton"; text: qsTr("单页阅读"); checkable: true; checked: controller.mode === "single"; onClicked: controller.setMode("single", controller.revision) }
             ActionButton { objectName: "readerDirectoryButton"; text: qsTr("页面目录"); onClicked: directory.open() }
+            ActionButton {
+                objectName: "readerRestartButton"; text: qsTr("从第一页重新开始")
+                property int pressedRevision: -1
+                onPressed: pressedRevision = controller.revision
+                onClicked: controller.restartFromBeginning(pressedRevision)
+            }
+            ActionButton {
+                objectName: "readerRetryProgressButton"
+                text: qsTr("重试读取 / 保存进度")
+                visible: controller.progressStatus.length > 0
+                property var pressedAction: null
+                onPressed: pressedAction = {"session": controller.readingSession, "revision": controller.revision}
+                onClicked: {
+                    if (pressedAction && pressedAction.session === controller.readingSession
+                            && pressedAction.revision === controller.revision) controller.retryProgress()
+                    pressedAction = null
+                }
+            }
             ActionButton { objectName: "readerPreviousButton"; text: qsTr("上一页"); enabled: controller.currentPage > 1; onClicked: controller.goToPage(controller.currentPage - 1, controller.revision) }
             Label { height: 40; verticalAlignment: Text.AlignVCenter; text: qsTr("%1 / %2 页").arg(controller.totalPages ? controller.currentPage : 0).arg(controller.totalPages); color: theme.text }
             ActionButton { objectName: "readerNextButton"; text: qsTr("下一页"); enabled: controller.currentPage < controller.totalPages; onClicked: controller.goToPage(controller.currentPage + 1, controller.revision) }
@@ -80,6 +107,9 @@ Item {
         }
         Label { Layout.fillWidth: true; visible: text.length > 0; text: controller.errorText || downloadUi.errorText; color: theme.error; wrapMode: Text.Wrap }
         Item {
+            id: body
+            onWidthChanged: if (page.visible && controller) controller.changeViewport(width, height, controller.readingSession)
+            onHeightChanged: if (page.visible && controller) controller.changeViewport(width, height, controller.readingSession)
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 140
             ListView {
                 id: pages

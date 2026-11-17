@@ -26,6 +26,12 @@ class PoolReaderController(QObject):
     positionRequested = Signal(int)
     detailRequested = Signal(object, str)
     downloadPrepared = Signal(str)
+    sessionEnding = Signal()
+    sessionOpened = Signal(object, int)
+    positionChanged = Signal()
+    layoutReady = Signal(float, float, int)
+    retryProgressRequested = Signal()
+    restartRequested = Signal()
 
     def __init__(
         self, pages: PoolPageRequestService, favorites: FavoriteController,
@@ -40,6 +46,11 @@ class PoolReaderController(QObject):
         self._revision = 0
         self._page = 1
         self._scroll_offset = 0.0
+        self._reading_session = 0
+        self._position_pending = True
+        self._viewport_width = 0.0
+        self._viewport_height = 0.0
+        self._progress_status = ""
         self._mode = ReaderMode.CONTINUOUS
         self._zoom = 1.0
         self._scale_mode = "fit-width"
@@ -95,7 +106,36 @@ class PoolReaderController(QObject):
 
     @Property(str, notify=changed)
     def errorText(self) -> str:
-        return self._error or self._favorites.noticeText
+        return self._error or self._progress_status or self._favorites.noticeText
+
+    @Property(str, notify=changed)
+    def progressStatus(self) -> str:
+        return self._progress_status
+
+    @Property(int, notify=changed)
+    def readingSession(self) -> int:
+        return self._reading_session
+
+    @property
+    def current_pool(self) -> DanbooruPool | None:
+        return self._model.pool
+
+    @property
+    def position_ready(self) -> bool:
+        return not self._position_pending
+
+    @property
+    def lifecycle_generation(self) -> int:
+        return self._generation
+
+    @property
+    def viewport_size(self) -> tuple[float, float]:
+        return self._viewport_width, self._viewport_height
+
+    def set_progress_status(self, message: str) -> None:
+        if not self._closed and message != self._progress_status:
+            self._progress_status = message
+            self.changed.emit()
 
     @Property("QVariantMap", notify=changed)
     def current(self) -> dict:
@@ -113,7 +153,13 @@ class PoolReaderController(QObject):
         """Open a series at page one; this does not persist reading progress."""
         if self._closed or pool.category is not PoolCategory.SERIES or pool.is_deleted:
             return False
+        previous_generation = self._generation
+        self.sessionEnding.emit()
+        if self._closed or self._generation != previous_generation:
+            return False
         self._generation += 1
+        self._reading_session += 1
+        self._position_pending = True
         generation = self._generation
         self._revision += 1
         self._active = False
@@ -131,6 +177,11 @@ class PoolReaderController(QObject):
         if self._closed or generation != self._generation:
             return False
         self._model.update(slots, set())
+        if self._closed or generation != self._generation:
+            return False
+        self.sessionOpened.emit(pool, self._reading_session)
+        if self._closed or generation != self._generation:
+            return False
         self.changed.emit()
         return not self._closed and generation == self._generation
 
@@ -142,6 +193,8 @@ class PoolReaderController(QObject):
         generation = self._generation
         self._revision += 1
         self._active = active
+        if active:
+            self._position_pending = True
         self._pages.cancel_current()
         self._intent = None
         self._request_id = ""
@@ -273,6 +326,7 @@ class PoolReaderController(QObject):
         self._page = page
         if position:
             self._scroll_offset = 0.0
+            self._position_pending = True
         generation = self._generation
         self._sync_media()
         self.changed.emit()
@@ -291,8 +345,89 @@ class PoolReaderController(QObject):
     @Slot(int, float)
     def rememberScroll(self, page: int, offset: float) -> None:
         """Keep only the in-memory continuous anchor while visiting details."""
-        if not self._closed and self._active and page == self._page and math.isfinite(offset):
+        if (not self._closed and self._active and not self._position_pending
+                and page == self._page and math.isfinite(offset)):
+            self._scroll_offset = max(0.0, offset)
+            self.positionChanged.emit()
+
+    def restore_position(self, page: int, offset: float, session: int) -> bool:
+        """Apply a loaded record without starting requests before activation."""
+        if self._closed or session != self._reading_session or not 1 <= page <= self.totalPages:
+            return False
+        self._page, self._scroll_offset = page, offset
+        self._position_pending = True
+        self._revision += 1
+        revision = self._revision
+        self.changed.emit()
+        if self._closed or session != self._reading_session or revision != self._revision:
+            return False
+        if self._active:
+            self._sync_media()
+            self.positionRequested.emit(page)
+            self._pump()
+        return True
+
+    def begin_progress_restore(self, session: int) -> bool:
+        """Block writes before any progress-loading status notification."""
+        if self._closed or session != self._reading_session:
+            return False
+        self._position_pending = True
+        self._revision += 1
+        return True
+
+    @Slot(float, float, int)
+    def changeViewport(self, width: float, height: float, session: int) -> None:
+        if (self._closed or not self._active or session != self._reading_session
+                or not 0 < width <= 100000 or not 0 < height <= 100000):
+            return
+        width_changed = abs(self._viewport_width - width) > 0.5
+        height_changed = abs(self._viewport_height - height) > 0.5
+        if not width_changed and not height_changed:
+            return
+        self._viewport_width, self._viewport_height = width, height
+        if width_changed or (height_changed and self._scale_mode == "fit-window"):
+            self._scroll_offset = 0
+        self._position_pending = True
+        self._revision += 1
+        revision = self._revision
+        self.changed.emit()
+        if not self._closed and self._active and session == self._reading_session and revision == self._revision:
+            self.positionRequested.emit(self._page)
+
+    def apply_restore_offset(self, offset: float, session: int) -> None:
+        if not self._closed and session == self._reading_session and self._position_pending:
             self._scroll_offset = offset
+
+    @Slot(float, float, int, int, result="QVariantMap")
+    def preparePosition(self, width: float, height: float, session: int, revision: int) -> dict:
+        if (self._closed or not self._active or session != self._reading_session
+                or revision != self._revision or not 0 < width <= 100000 or not 0 < height <= 100000):
+            return {"valid": False}
+        self._viewport_width, self._viewport_height = width, height
+        self.layoutReady.emit(width, height, session)
+        return {"valid": not self._closed and session == self._reading_session and revision == self._revision,
+                "offset": self._scroll_offset}
+
+    @Slot(int, int)
+    def confirmPosition(self, session: int, revision: int) -> None:
+        if self._closed or not self._active or session != self._reading_session or revision != self._revision:
+            return
+        self._position_pending = False
+        self.positionChanged.emit()
+
+    @Slot(int, result=bool)
+    def restartFromBeginning(self, revision: int) -> bool:
+        if self._closed or not self._active or revision != self._revision:
+            return False
+        self.restartRequested.emit()
+        if self._closed or not self._active or revision != self._revision:
+            return False
+        return self.goToPage(1, revision)
+
+    @Slot()
+    def retryProgress(self) -> None:
+        if not self._closed:
+            self.retryProgressRequested.emit()
 
     @Slot(str, int, result=bool)
     def setMode(self, mode: str, revision: int) -> bool:
@@ -303,6 +438,7 @@ class PoolReaderController(QObject):
         except ValueError:
             return False
         self._mode = selected
+        self._position_pending = True
         self._revision += 1
         generation, current_revision = self._generation, self._revision
         self.changed.emit()

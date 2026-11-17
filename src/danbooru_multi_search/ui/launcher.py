@@ -56,6 +56,8 @@ from danbooru_multi_search.danbooru.pool_pages import PoolPageRequestService
 from danbooru_multi_search.ui.pools import PoolBrowserController
 from danbooru_multi_search.ui.pool_navigation import PoolNavigationController
 from danbooru_multi_search.ui.pool_reader import PoolReaderController
+from danbooru_multi_search.storage.pool_progress import PoolProgressRepository
+from danbooru_multi_search.ui.pool_progress import PoolProgressController
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
@@ -202,6 +204,7 @@ class _UiSession(QObject):
             self.favorite_controller, self.download_ui, self.translation_store, danbooru_base_url, self,
         )
         self.pool_navigation.attach_reader(self.pool_reader)
+        self.pool_progress = PoolProgressController(PoolProgressRepository(database), self.pool_reader, danbooru_base_url, self)
         self.pool_reader.changed.connect(self.download_ui.refresh_snapshot_source)
         self.favorite_collection.poolRequested.connect(self.pool_navigation.openFavoritePool)
         self.tag_controller = DanbooruTagSuggestionController(
@@ -257,6 +260,7 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.pool_progress.begin_shutdown,
             self.pool_reader.shutdown,
             self.pool_navigation.shutdown,
             self.pool_browser.shutdown,
@@ -273,6 +277,7 @@ class _UiSession(QObject):
             self.detail_favorites.shutdown,
             self.query_bridge.beginClosing,
             self.favorite_transfer.shutdown,
+            self.pool_progress.finish_shutdown,
             self.query_checkpoints.finish_shutdown,
             self.download_manager.shutdown,
             self.appearance_controller.shutdown,
@@ -310,6 +315,7 @@ class _UiSession(QObject):
             and self.pool_navigation._closed
             and self.pool_browser._closed
             and self.pool_reader._closed
+            and self.pool_progress._closed
             and self.favorite_transfer.shutdown_completed
             and self.download_manager.closed
             and self.download_ui._closed

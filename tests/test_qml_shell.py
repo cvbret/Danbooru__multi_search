@@ -530,6 +530,7 @@ def test_active_import_finishes_before_m2_cancel_and_final_history_save(tmp_path
     from danbooru_multi_search.storage.database import Database
     from danbooru_multi_search.storage.favorites import FavoriteRepository
     from danbooru_multi_search.storage.favorite_transfer import FavoriteTransferService
+    from tests.test_pool_reader import pool, slots
 
     application = QGuiApplication.instance() or QGuiApplication([])
     runtime = initialize_runtime(tmp_path / "application")
@@ -558,15 +559,22 @@ def test_active_import_finishes_before_m2_cancel_and_final_history_save(tmp_path
     try:
         assert bridge.applyAdvancedText("cat") and bridge.executeStandard()
         assert _wait_until(lambda: len(manager.requests) == 1)
+        reading_pool = pool(ids=(11, 12, 13))
+        assert session.pool_reader.open_pool(reading_pool, slots(reading_pool, (1, 2, 3)))
+        engine.rootObjects()[0].setProperty("activePage", "reader")
+        assert _wait_until(lambda: session.pool_reader.position_ready)
         token = transfer.beginImportSelection()
         assert transfer.acceptImportFile(QUrl.fromLocalFile(str(source_path)), token)
         assert _wait_until(lambda: not transfer.busy)
         assert transfer.confirmImport(transfer.preview["token"])
         assert _wait_until(entered.is_set)
+        assert session.pool_reader.goToPage(2, session.pool_reader.revision)
+        assert _wait_until(lambda: session.pool_reader.position_ready)
         original_query_shutdown = session.query_controller.shutdown
         checked = []
         def query_shutdown():
             assert transfer.shutdown_completed
+            assert session.pool_progress._closed
             assert len(FavoriteRepository(runtime.database).list_favorites()) == 1
             checked.append(True)
             original_query_shutdown()
@@ -577,6 +585,9 @@ def test_active_import_finishes_before_m2_cancel_and_final_history_save(tmp_path
         releaser.join()
         assert checked == [True]
         assert session.shutdown_completed
+        reading = session.pool_progress._repository.get("https://example.invalid", 7)
+        assert reading.page_number == 2 and reading.post_id == 12
+        assert not session.pool_progress._timer.isActive()
         stored = session.history_repository.latest_query()
         assert stored.result_summary.state == QueryExecutionState.PARTIAL_CANCELLED
         assert manager.replies[0].abort_count == 1

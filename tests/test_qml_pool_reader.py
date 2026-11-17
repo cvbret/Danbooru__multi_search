@@ -14,8 +14,21 @@ from tests.test_qml_favorites import click, wait, item, find
 from tests.m2_qml_harness import close_m2_qml_test_engine
 
 
-def start_reader(*, narrow=False, variants=None, omitted=()):
-    engine, root, bridge, session, network = window()
+def start_reader(*, narrow=False, variants=None, omitted=(), data_root=None, identifiers=None):
+    if data_root is None:
+        engine, root, bridge, session, network = window()
+    else:
+        from danbooru_multi_search.core.bootstrap import initialize_runtime
+        from tests.m2_qml_harness import create_m2_qml_test_engine
+        from tests.test_pool_requests import FakeManager
+        network = FakeManager()
+        engine, bridge = create_m2_qml_test_engine(
+            APPLICATION, danbooru_base_url="https://example.invalid", network_manager=network,
+            runtime=initialize_runtime(data_root),
+        )
+        root, session = engine.rootObjects()[0], bridge.parent()
+        root.requestActivate()
+        assert QTest.qWaitForWindowExposed(root)
     if narrow:
         root.setWidth(820)
         root.setHeight(600)
@@ -24,9 +37,10 @@ def start_reader(*, narrow=False, variants=None, omitted=()):
     click(root, item(root, "favoritesNavigationButton"))
     assert wait(lambda: session.favorite_collection.loadedCount == 1)
     key = str(session.favorite_collection._model.items[0].id)
-    pool = FakeReply(json.dumps(pool_mapping(7, post_ids=tuple(range(1, 82)))).encode())
+    ids = identifiers or tuple(range(1, 82))
+    pool = FakeReply(json.dumps(pool_mapping(7, post_ids=ids)).encode())
     rows = [raw_post(number, preview_file_url=IMAGE, large_file_url=IMAGE,
-                     file_url=f"http://127.0.0.1:1/{number}.png") for number in range(1, 41) if number not in omitted]
+                     file_url=f"http://127.0.0.1:1/{number}.png") for number in dict.fromkeys(ids[:40]) if number not in omitted]
     for row in rows:
         row.update((variants or {}).get(row["id"], {}))
     pages = FakeReply(json.dumps(rows).encode())
@@ -165,5 +179,70 @@ def test_directory_browsing_current_actions_and_far_detail_return_keep_actual_an
         assert wait(lambda: reader.active and find(root, "readerPage_50") is not None)
         assert wait(lambda: abs(continuous.property("contentY") - item(root, "readerPage_50").y() - offset) < 2)
         assert reader.currentPage == 50 and len(network.requests) == 3
+    finally:
+        close_m2_qml_test_engine(engine)
+
+
+def test_persistent_reader_reopens_by_post_and_actual_offset_then_restarts_and_resizes(tmp_path):
+    from danbooru_multi_search.storage.pool_progress import PoolProgressRepository
+    engine, root, bridge, session, network = start_reader(data_root=tmp_path)
+    try:
+        reader = session.pool_reader
+        item(root, "readerJumpInput").setProperty("text", "3")
+        click(root, item(root, "readerJumpButton"))
+        assert wait(lambda: reader.currentPage == 3 and reader.position_ready and find(root, "readerPage_3") is not None)
+        view = item(root, "readerContinuousList")
+        view.setProperty("contentY", view.property("contentY") + 35)
+        assert wait(lambda: reader.scrollOffset > 20)
+        store = session.pool_progress._repository
+        assert wait(lambda: (stored := store.get("https://example.invalid", 7)) is not None and stored.page_number == 3 and stored.offset > 20)
+        saved = store.get("https://example.invalid", 7)
+    finally:
+        close_m2_qml_test_engine(engine)
+    ids = (1, 2, 4, 5, 3) + tuple(range(6, 82))
+    engine, root, bridge, session, network = start_reader(data_root=tmp_path, identifiers=ids)
+    try:
+        reader = session.pool_reader
+        assert wait(lambda: reader.currentPage == 5 and reader.position_ready and find(root, "readerPage_5") is not None)
+        view = item(root, "readerContinuousList")
+        assert wait(lambda: abs(view.property("contentY") - item(root, "readerPage_5").y() - saved.offset) < 2)
+        assert session.pool_progress._repository.get(saved.source, 7).post_id == 3
+        root.setWidth(820)
+        root.setHeight(600)
+        assert wait(lambda: reader.position_ready and reader.viewport_size[0] < saved.viewport_width)
+        assert reader.currentPage == 5 and reader.scrollOffset == 0
+        click(root, item(root, "readerRestartButton"))
+        assert wait(lambda: reader.currentPage == 1 and reader.position_ready)
+        assert wait(lambda: (stored := session.pool_progress._repository.get(saved.source, 7)).page_number == 1 and stored.post_id == 1)
+        assert reader.scrollOffset == 0 and len(network.requests) == 2
+    finally:
+        close_m2_qml_test_engine(engine)
+
+
+def test_reader_progress_read_error_can_be_retried_by_real_minimum_window_button(tmp_path, monkeypatch):
+    from danbooru_multi_search.core.bootstrap import initialize_runtime
+    from danbooru_multi_search.core.pool_progress import PoolProgressError
+    from danbooru_multi_search.storage.pool_progress import PoolProgressRepository
+    from tests.test_pool_progress import progress
+    runtime = initialize_runtime(tmp_path)
+    store = PoolProgressRepository(runtime.database)
+    saved = store.save(progress(source="https://example.invalid", post_id=3), expected=None)
+    original = PoolProgressRepository.get
+    with monkeypatch.context() as failed:
+        def read_error(*args):
+            raise PoolProgressError("storage_error", "simulated read failure")
+        failed.setattr(PoolProgressRepository, "get", read_error)
+        engine, root, bridge, session, network = start_reader(narrow=True, data_root=tmp_path)
+        assert wait(lambda: session.pool_reader.position_ready)
+        QTest.qWait(450)
+        assert session.pool_reader.currentPage == 1
+        assert original(store, saved.source, 7) == saved
+    try:
+        button = item(root, "readerRetryProgressButton")
+        assert button.property("visible")
+        click(root, button)
+        assert wait(lambda: session.pool_reader.currentPage == 3 and session.pool_reader.position_ready)
+        assert not session.pool_reader.progressStatus
+        assert original(store, saved.source, 7).post_id == 3
     finally:
         close_m2_qml_test_engine(engine)

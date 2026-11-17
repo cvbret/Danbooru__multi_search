@@ -7,6 +7,13 @@ from typing import Any
 # Public names are grouped by their owning module so importing the package
 # does not load network, Qt, or storage implementations before they are used.
 _EXPORT_GROUPS = {
+    "danbooru_multi_search.core.pool_progress": (
+        "PoolProgressError", "PoolReadingProgress", "ResolvedPoolPosition",
+        "normalize_api_source", "resolve_pool_progress",
+    ),
+    "danbooru_multi_search.storage.pool_progress": (
+        "PoolProgressRepository",
+    ),
     "danbooru_multi_search.storage.database": (
         "Database",
         "DatabaseError",
@@ -91,6 +98,12 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "PoolProgressError",
+    "PoolReadingProgress",
+    "ResolvedPoolPosition",
+    "normalize_api_source",
+    "resolve_pool_progress",
+    "PoolProgressRepository",
     "BrowserSession",
     "Database",
     "DatabaseError",
