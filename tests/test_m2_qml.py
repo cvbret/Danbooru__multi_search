@@ -77,6 +77,7 @@ from danbooru_multi_search.danbooru.pools import PoolRequestService
 from danbooru_multi_search.danbooru.pool_pages import PoolPageRequestService
 from danbooru_multi_search.ui.pools import PoolBrowserController
 from danbooru_multi_search.ui.pool_navigation import PoolNavigationController
+from danbooru_multi_search.ui.pool_reader import PoolReaderController
 from danbooru_multi_search.ui.appearance import AppearanceController
 from danbooru_multi_search.ui.launcher import configure_controls_style
 from danbooru_multi_search.ui.image_cache import (
@@ -333,6 +334,13 @@ def _create_window(tmp_path):
     download_manager = PersistentDownloadManager(download_repository, tags._task_queue, tags._network_manager)
     download_ui = DownloadUiController(download_manager, download_repository, settings_controller,
         core.posts_model, selection, details, tmp_path / "downloads")
+    pool_reader = PoolReaderController(
+        PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
+        favorites, download_ui, translations, "https://example.invalid",
+    )
+    pool_navigation.attach_reader(pool_reader)
+    pool_reader.changed.connect(download_ui.refresh_snapshot_source)
+    collection.poolRequested.connect(pool_navigation.openFavoritePool)
     images = ImageCacheController(tmp_path / "image-cache")
     protection = CacheProtectionController(CacheProtectionRepository(database), favorites, images)
     cleanup = CacheCleanupController(session._repository, checkpoints._repository, checkpoints, session, favorites, images, protection)
@@ -362,6 +370,7 @@ def _create_window(tmp_path):
     context.setContextProperty("detailFavorites", detail_favorites)
     context.setContextProperty("poolBrowser", pool_browser)
     context.setContextProperty("poolNavigation", pool_navigation)
+    context.setContextProperty("poolReader", pool_reader)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
     assert engine.rootObjects(), [error.toString() for error in engine.warnings()]
     root = engine.rootObjects()[0]
@@ -392,11 +401,13 @@ def _create_window(tmp_path):
         "detail_favorites": detail_favorites,
         "pool_browser": pool_browser,
         "pool_navigation": pool_navigation,
+        "pool_reader": pool_reader,
         "qml_warnings": qml_warnings,
     }
 
 
 def _close_window(values) -> None:
+    values["pool_reader"].shutdown()
     values["pool_navigation"].shutdown()
     values["pool_browser"].shutdown()
     values["cache_cleanup"].shutdown()

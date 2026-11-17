@@ -46,6 +46,23 @@ def pending(ui, gallery):
     return token
 
 
+def test_snapshot_guard_survives_directory_selection_and_final_confirmation(env, tmp_path):
+    ui, repository, _manager, _scheduler, network, gallery, _selection, _detail, settings = env
+    source = {"current": True}
+    work = gallery.posts[0]
+    token = ui.capture_snapshot(work, guard=lambda: source["current"])
+    assert token and ui.openRequest(token)
+    choice = ui.beginDirectorySelection("request")
+    source["current"] = False
+    assert not ui.acceptDirectory(QUrl.fromLocalFile(str(tmp_path)), choice)
+    assert not ui.confirmRequest(token, "skip", False)
+    assert repository.list_batches() == () and network.requests == []
+    source["current"] = True
+    token = ui.capture_snapshot(work, guard=lambda: source["current"])
+    assert ui.confirmRequest(token, "skip", False)
+    assert repository.get_batch(repository.list_batches()[0]).items[0].request.post_id == work.id
+
+
 def seed(repository, tmp_path, count=2):
     return tuple(repository.create_batch((request(index + 10),), tmp_path) for index in range(count))
 

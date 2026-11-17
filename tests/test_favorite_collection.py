@@ -26,6 +26,24 @@ def collection(tmp_path):
     return repository, shared, controller, navigation, browse
 
 
+def test_saved_series_pool_entry_preserves_selection_and_return_position(tmp_path):
+    repository, shared, controller, navigation, browse = collection(tmp_path)
+    saved = repository.add_favorite(FavoriteCandidate.for_pool(7, "series"))
+    controller.setActive(True)
+    controller.setSelected(str(saved.id), True, controller.generation)
+    requested = []
+    controller.poolRequested.connect(requested.append)
+    assert controller.openItem(str(saved.id), controller.generation, 321, 0, 800, 400, -20)
+    assert requested == ["7"] and not navigation.detail_controller.isOpen
+    plan = controller.takeRestorePlan(800, 400, 0, 1000)
+    assert plan["available"] and plan["contentY"] == 321
+    assert controller.selectedCount == 1 and controller.isSelected(str(saved.id))
+    assert browse.posts[0].id == 999
+    controller.shutdown()
+    shared.shutdown()
+    navigation.shutdown()
+
+
 def test_more_than_one_thousand_loads_and_select_loaded_means_loaded_only(tmp_path):
     repository, shared, controller, *_ = collection(tmp_path)
     repository.add_favorites(tuple(FavoriteCandidate.for_pool(i, f"Pool {i}") for i in range(1, 1052)))

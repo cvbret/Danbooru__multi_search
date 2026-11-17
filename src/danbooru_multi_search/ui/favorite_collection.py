@@ -34,6 +34,7 @@ class FavoriteCollectionController(QObject):
 
     changed = Signal()
     confirmationChanged = Signal()
+    poolRequested = Signal(str)
     PAGE_SIZE = 200
 
     def __init__(self, repository, favorites: FavoriteController,
@@ -342,9 +343,14 @@ class FavoriteCollectionController(QObject):
     @Slot(str, int, float, int, float, float, float, result=bool)
     def openItem(self, key: str, generation: int, content_y: float, index: int, width: float, height: float, anchor_offset: float = 0.0):
         item = self._model.by_key(key)
-        if not self._current(generation) or item is None or item.post is None or not all(math.isfinite(value) for value in (content_y, width, height, anchor_offset)):
+        if not self._current(generation) or item is None or not all(math.isfinite(value) for value in (content_y, width, height, anchor_offset)):
+            return False
+        if item.post is None and item.identity.object_type is not FavoriteObjectType.POOL:
             return False
         self._return_snapshot = (key, generation, content_y, index, width, height, frozenset(self._selected), anchor_offset)
+        if item.identity.object_type is FavoriteObjectType.POOL:
+            self.poolRequested.emit(item.identity.object_key)
+            return self._current(generation)
         return self._navigation.open_saved_post(item.post, source_page="favorites")
 
     @Slot(float, float, float, float, result="QVariantMap")

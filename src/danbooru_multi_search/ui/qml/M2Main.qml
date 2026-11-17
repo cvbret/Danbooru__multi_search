@@ -659,7 +659,7 @@ ApplicationWindow {
         anchors.top: pageNavigation.bottom
         anchors.bottom: parent.bottom
         anchors.margins: 20
-        currentIndex: detailController.isOpen ? 3 : (root.activePage === "favorites" ? 1 : root.activePage === "downloads" ? 2 : root.activePage === "pool" ? 4 : 0)
+        currentIndex: detailController.isOpen ? 3 : (root.activePage === "favorites" ? 1 : root.activePage === "downloads" ? 2 : root.activePage === "pool" ? 4 : root.activePage === "reader" ? 5 : 0)
 
         Item {
             id: galleryPage
@@ -926,6 +926,12 @@ ApplicationWindow {
             cacheController: imageCacheController
             theme: root.theme
         }
+
+        PoolReaderPage {
+            controller: poolReader
+            navigation: poolNavigation
+            theme: root.theme
+        }
     }
 
     PoolMembershipPanel {
@@ -940,6 +946,16 @@ ApplicationWindow {
         function onMembershipsRequested() { poolMembershipPanel.open() }
         function onPoolPageRequested() { root.activePage = "pool"; queryDrawer.close() }
         function onSourceRestored() { root.activePage = detailNavigation.sourcePage }
+        function onReaderPageRequested() { root.activePage = "reader"; queryDrawer.close() }
+        function onSourcePageRequested(pageName) {
+            root.activePage = pageName
+            if (pageName === "favorites") favoritesPage.scheduleRestorePosition()
+        }
+    }
+
+    Connections {
+        target: poolReader
+        function onDownloadPrepared(token) { downloadRequestDialog.showRequest(token) }
     }
 
     Connections {

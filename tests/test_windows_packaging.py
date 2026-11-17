@@ -151,6 +151,9 @@ def test_pyinstaller_spec_is_onedir_windowed_amd64_with_project_resources() -> N
         "danbooru_multi_search.platform.windows_wallpaper",
         "danbooru_multi_search.core.pools",
         "danbooru_multi_search.core.pool_pages",
+        "danbooru_multi_search.core.pool_reader",
+        "danbooru_multi_search.ui.pool_reader_models",
+        "danbooru_multi_search.ui.pool_reader",
         "danbooru_multi_search.danbooru.pool_post_parsing",
         "danbooru_multi_search.danbooru.pool_pages",
         "danbooru_multi_search.ui.pool_models",
@@ -418,6 +421,8 @@ def test_verify_onedir_requires_qml_runtime_and_plugins_in_exact_directories(
         "QueryStatusBar.qml",
         "HistoryPanel.qml",
         "PoolPage.qml",
+        "PoolReaderPage.qml",
+        "PoolReaderItem.qml",
         "PoolMembershipPanel.qml",
     ),
 )

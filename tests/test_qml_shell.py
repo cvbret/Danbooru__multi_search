@@ -347,6 +347,9 @@ def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
     assert ui_session.pool_browser._memberships._queue is shared_queue
     assert ui_session.pool_browser._pages._queue is shared_queue
     assert ui_session.pool_browser._pages._manager is ui_session.network_manager
+    assert ui_session.pool_reader._pages._queue is shared_queue
+    assert ui_session.pool_reader._pages is not ui_session.pool_browser._pages
+    assert ui_session.pool_reader._pages._manager is ui_session.network_manager
     assert executor.owns_queue is False
     assert tag_controller._owns_queue is False
     assert executor._network_manager is ui_session.network_manager

@@ -65,6 +65,15 @@ class PoolBrowserController(QObject):
     def model(self):
         return self._model
 
+    @property
+    def current_pool(self) -> DanbooruPool | None:
+        """Expose the confirmed pool for an independent reader session."""
+        return self._pool
+
+    @property
+    def loaded_slots(self) -> tuple[PoolPageSlot, ...]:
+        return self._model.slots
+
     @Property(int, notify=changed)
     def generation(self) -> int:
         return self._generation

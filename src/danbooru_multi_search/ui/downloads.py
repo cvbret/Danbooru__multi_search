@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from collections.abc import Callable
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -28,6 +29,7 @@ class _Request:
     source_revision: int
     selection_revision: int
     directory: Path
+    guard: Callable[[], bool] | None = None
 
 
 class DownloadUiController(QObject):
@@ -236,7 +238,18 @@ class DownloadUiController(QObject):
             return ""
         return self._prepare((self._detail.current_post,), "detail", revision, -1)
 
-    def _prepare(self, posts, source: str, revision: int, selection_revision: int) -> str:
+    def capture_snapshot(self, post: DanbooruPost, *, guard: Callable[[], bool]) -> str:
+        """Prepare an explicit saved work; recheck its source through confirmation."""
+        if not isinstance(post, DanbooruPost) or not guard():
+            return ""
+        return self._prepare((post,), "snapshot", -1, -1, guard=guard)
+
+    def refresh_snapshot_source(self) -> None:
+        """Publish invalidation after a reader changes page or leaves its source."""
+        self._source_changed()
+
+    def _prepare(self, posts, source: str, revision: int, selection_revision: int,
+                 *, guard: Callable[[], bool] | None = None) -> str:
         if self._closed or self._busy:
             return ""
         self._request, self._choice = None, None
@@ -252,7 +265,7 @@ class DownloadUiController(QObject):
                     raise DownloadError("missing_original", f"作品 #{post.id} 没有原文件地址，不能用预览图代替。")
                 DownloadRequest(post.id, post.download_url, post.file_ext)
             token = uuid4().hex
-            value = _Request(token, tuple(posts), source, revision, selection_revision, Path(self.defaultDirectory))
+            value = _Request(token, tuple(posts), source, revision, selection_revision, Path(self.defaultDirectory), guard)
             if not self._source_current(value):
                 raise DownloadError("stale_download", "作品来源已改变，请重新选择。")
             self._request = value
@@ -422,6 +435,8 @@ class DownloadUiController(QObject):
     def _source_current(self, value: _Request) -> bool:
         if self._closed:
             return False
+        if value.source == "snapshot":
+            return value.guard is not None and value.guard()
         if value.source == "detail":
             return self._detail.isOpen and value.source_revision == self._detail_revision and self._detail.current_post is value.posts[0]
         if value.source == "selection":

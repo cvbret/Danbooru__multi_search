@@ -9,6 +9,7 @@ Rectangle {
     required property int actionRevision
     property QtObject theme: AppTheme {}
     signal selectionRequested(string key, bool desired, int revision)
+    signal openRequested(string key, int revision)
     color: theme.card
     radius: theme.radius
     border.color: selected ? theme.accent : theme.border
@@ -45,6 +46,15 @@ Rectangle {
             wrapMode: Text.WrapAnywhere
         }
         Item { Layout.fillHeight: true }
+        ActionButton {
+            objectName: "openFavoritePool_" + card.rowData.favoriteKey
+            visible: card.rowData.objectType === "pool"
+            text: qsTr("打开系列作品池")
+            Layout.fillWidth: true
+            property var pressedAction: null
+            onPressed: pressedAction = {"key": card.rowData.favoriteKey, "revision": card.actionRevision}
+            onClicked: { if (pressedAction) card.openRequested(pressedAction.key, pressedAction.revision); pressedAction = null }
+        }
         Label {
             Layout.fillWidth: true
             text: card.rowData.objectType === "pool" ? qsTr("已保存的系列作品池信息") : qsTr("已保存的标签")

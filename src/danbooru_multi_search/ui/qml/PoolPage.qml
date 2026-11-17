@@ -22,6 +22,14 @@ Item {
                 onClicked: navigation.returnToSource(pressedToken)
             }
             ActionButton { objectName: "poolReloadButton"; text: qsTr("重新读取"); onClicked: controller.retryWindow() }
+            ActionButton {
+                objectName: "poolReadButton"; text: qsTr("开始阅读")
+                visible: controller.poolInfo.category === "series"
+                enabled: (controller.poolInfo.postCount || 0) > 0
+                property int pressedGeneration: -1
+                onPressed: pressedGeneration = controller.generation
+                onClicked: navigation.enterReader(pressedGeneration)
+            }
             ActionButton { objectName: "poolCancelButton"; text: qsTr("取消请求"); visible: controller.busy; onClicked: controller.cancel() }
             ActionButton {
                 objectName: "poolFavoriteButton"

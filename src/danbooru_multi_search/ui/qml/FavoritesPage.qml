@@ -305,6 +305,10 @@ Item {
                         actionRevision: page.controller.generation
                         theme: page.theme
                         onSelectionRequested: function(key, desired, revision) { page.controller.setSelected(key, desired, revision) }
+                        onOpenRequested: function(key, revision) {
+                            page.controller.openItem(key, revision, grid.contentY, rowLoader.index,
+                                grid.width, grid.height, rowLoader.y - grid.contentY)
+                        }
                     }
                 }
             }
