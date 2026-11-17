@@ -51,6 +51,10 @@ from danbooru_multi_search.ui.gallery_selection import GallerySelectionControlle
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.ui.appearance import AppearanceController
 from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
+from danbooru_multi_search.danbooru.pools import PoolRequestService
+from danbooru_multi_search.danbooru.pool_pages import PoolPageRequestService
+from danbooru_multi_search.ui.pools import PoolBrowserController
+from danbooru_multi_search.ui.pool_navigation import PoolNavigationController
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
@@ -172,6 +176,14 @@ class _UiSession(QObject):
         self.favorite_collection = FavoriteCollectionController(
             self.favorite_controller._repository, self.favorite_controller, self.detail_navigation, self
         )
+        self.pool_browser = PoolBrowserController(
+            PoolRequestService(danbooru_base_url, task_queue=self.task_queue, network_manager=self.network_manager, parent=self),
+            PoolRequestService(danbooru_base_url, task_queue=self.task_queue, network_manager=self.network_manager, parent=self),
+            PoolPageRequestService(danbooru_base_url, self.task_queue, self.network_manager, self),
+            self.favorite_controller, self,
+        )
+        self.pool_navigation = PoolNavigationController(self.pool_browser, self.detail_navigation, self)
+        self.query_executor.executionBound.connect(lambda event: self.pool_navigation.invalidate())
         self.favorite_transfer = FavoriteTransferController(database.path, self.favorite_controller, self)
         self.artist_combinations = ArtistCombinationController(
             ArtistCombinationRepository(database), self.favorite_controller, self.query_bridge, self
@@ -237,6 +249,8 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.pool_navigation.shutdown,
+            self.pool_browser.shutdown,
             self.cache_cleanup.shutdown,
             self.download_ui.shutdown,
             self.download_manager.begin_shutdown,
@@ -284,6 +298,8 @@ class _UiSession(QObject):
             and self.session_controller.events_detached
             and self.detail_controller._shutdown
             and self.detail_navigation._closed
+            and self.pool_navigation._closed
+            and self.pool_browser._closed
             and self.favorite_transfer.shutdown_completed
             and self.download_manager.closed
             and self.download_ui._closed
@@ -367,6 +383,8 @@ def _create_qml_session(
     engine.rootContext().setContextProperty("savedQueries", session.saved_queries)
     engine.rootContext().setContextProperty("queryCheckpoints", session.query_checkpoints)
     engine.rootContext().setContextProperty("cacheCleanup", session.cache_cleanup)
+    engine.rootContext().setContextProperty("poolBrowser", session.pool_browser)
+    engine.rootContext().setContextProperty("poolNavigation", session.pool_navigation)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)

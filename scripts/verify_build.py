@@ -39,6 +39,8 @@ EXPECTED_QML_MEMBERS = (
     "danbooru_multi_search/ui/qml/FavoriteObjectCard.qml",
     "danbooru_multi_search/ui/qml/FavoriteConfirmDialog.qml",
     "danbooru_multi_search/ui/qml/DetailPage.qml",
+    "danbooru_multi_search/ui/qml/PoolPage.qml",
+    "danbooru_multi_search/ui/qml/PoolMembershipPanel.qml",
     "danbooru_multi_search/ui/qml/ImageViewer.qml",
     "danbooru_multi_search/ui/qml/QueryEditorPanel.qml",
     "danbooru_multi_search/ui/qml/QueryFilterPanel.qml",

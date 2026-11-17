@@ -26,6 +26,13 @@ class GalleryViewSnapshot:
     window_height: float
 
 
+@dataclass(frozen=True, slots=True)
+class DetailReturnState:
+    post: DanbooruPost
+    source_page: str
+    gallery_snapshot: GalleryViewSnapshot | None
+
+
 class DetailNavigationController(QObject):
     """Keep page-return behavior outside work metadata and media presentation."""
 
@@ -55,6 +62,26 @@ class DetailNavigationController(QObject):
     @property
     def gallery_snapshot(self) -> GalleryViewSnapshot | None:
         return self._gallery_snapshot
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    def capture_return_state(self) -> DetailReturnState | None:
+        """Retain a detail's outer source before temporarily visiting a pool."""
+        post = self._detail_controller.current_post
+        if self._closed or not self._detail_controller.isOpen or post is None:
+            return None
+        return DetailReturnState(post, self._source_page, self._gallery_snapshot)
+
+    def restore_return_state(self, state: DetailReturnState, *, expected_generation: int) -> bool:
+        """Reopen using a fresh media generation only while navigation is current."""
+        if (
+            self._closed or self._generation != expected_generation
+            or not isinstance(state, DetailReturnState)
+        ):
+            return False
+        return self._open(state.post, state.source_page, state.gallery_snapshot)
 
     @Property(str, notify=sourceChanged)
     def sourcePage(self) -> str:

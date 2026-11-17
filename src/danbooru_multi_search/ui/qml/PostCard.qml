@@ -17,6 +17,8 @@ Rectangle {
     signal favoriteRequested(string key, bool desired, int revision)
     signal detailRequested(string key, int revision, int row)
     property bool downloadActionVisible: false
+    property bool selectionActionVisible: true
+    property bool mediaActive: true
     property bool downloadEnabled: false
     property string downloadReason: ""
     signal downloadRequested(string key, int revision)
@@ -50,7 +52,7 @@ Rectangle {
         Qt.callLater(function() {
             if (token !== thumbnailRebuildToken)
                 return
-            thumbnailLoader.active = card.previewUrl.length > 0
+            thumbnailLoader.active = card.mediaActive && card.previewUrl.length > 0
         })
     }
 
@@ -88,6 +90,7 @@ Rectangle {
 
     Component.onCompleted: rebuildThumbnail()
     onPreviewUrlChanged: rebuildThumbnail()
+    onMediaActiveChanged: rebuildThumbnail()
     Component.onDestruction: {
         ++thumbnailRebuildToken
         thumbnailLoader.active = false
@@ -123,6 +126,7 @@ Rectangle {
         z: 2
 
         CheckBox {
+            visible: card.selectionActionVisible
             objectName: "postSelect_" + card.selectionKey
             checked: card.selected
             Accessible.name: qsTr("选择作品 #%1").arg(card.postKey)

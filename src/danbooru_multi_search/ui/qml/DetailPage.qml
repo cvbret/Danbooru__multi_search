@@ -18,6 +18,7 @@ Item {
     signal importTagsRequested()
     signal addTagToQueryRequested(string tagName)
     signal downloadPrepared(string token)
+    signal poolsRequested(string key, int revision)
 
     function syncMedia() {
         if (controller.mediaUrl.length === 0) {
@@ -126,6 +127,13 @@ Item {
             objectName: "detailActions"
             Layout.fillWidth: true
             spacing: 8
+            ActionButton {
+                objectName: "detailPoolsButton"
+                text: qsTr("所属作品池")
+                property var pressedAction: null
+                onPressed: pressedAction = {"key": poolNavigation.detailPostKey, "revision": poolNavigation.detailRevision}
+                onClicked: { if (pressedAction) page.poolsRequested(pressedAction.key, pressedAction.revision); pressedAction = null }
+            }
             ActionButton {
                 objectName: "detailDownloadButton"
                 text: qsTr("下载原文件")

@@ -150,6 +150,14 @@ class FavoriteController(QObject):
             lambda: (FavoriteCandidate.for_tag(name, category),), desired, guard
         )
 
+    def set_pool(
+        self, pool_id: int, name: str, desired: bool, *, guard: Callable[[], bool],
+    ) -> bool:
+        """Share confirmed series-pool facts with the existing collection."""
+        return self._change(
+            lambda: (FavoriteCandidate.for_pool(pool_id, name),), desired, guard,
+        )
+
     def observe_items(self, items: tuple[FavoriteItem, ...]) -> None:
         """Accept facts already read successfully in a consistent collection page."""
 

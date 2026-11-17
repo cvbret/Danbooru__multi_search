@@ -93,6 +93,8 @@ QML_FILES = (
     "FavoriteObjectCard.qml",
     "FavoriteConfirmDialog.qml",
     "DetailPage.qml",
+    "PoolPage.qml",
+    "PoolMembershipPanel.qml",
     "ImageViewer.qml",
     "QueryEditorPanel.qml",
     "QueryFilterPanel.qml",

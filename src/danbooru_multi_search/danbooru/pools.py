@@ -21,6 +21,7 @@ from danbooru_multi_search.core.pools import (
     pool_identifier,
     pool_pagination,
 )
+from danbooru_multi_search.core.pool_pages import PoolPageBatch
 from danbooru_multi_search.danbooru.client import DEFAULT_TIMEOUT_MS, USER_AGENT
 from danbooru_multi_search.danbooru.pool_parsing import (
     MAX_POOL_RESPONSE_BYTES,
@@ -41,7 +42,7 @@ from danbooru_multi_search.tasks.queue import (
     TaskQueueShutdownError,
 )
 
-PoolValue = DanbooruPool | PoolMembershipPage
+PoolValue = DanbooruPool | PoolMembershipPage | PoolPageBatch
 PoolResponseParser = Callable[[bytes], PoolValue]
 
 

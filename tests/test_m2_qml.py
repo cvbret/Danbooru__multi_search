@@ -73,6 +73,10 @@ from danbooru_multi_search.ui.gallery_selection import GallerySelectionControlle
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from danbooru_multi_search.storage.database import Database
 from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
+from danbooru_multi_search.danbooru.pools import PoolRequestService
+from danbooru_multi_search.danbooru.pool_pages import PoolPageRequestService
+from danbooru_multi_search.ui.pools import PoolBrowserController
+from danbooru_multi_search.ui.pool_navigation import PoolNavigationController
 from danbooru_multi_search.ui.appearance import AppearanceController
 from danbooru_multi_search.ui.launcher import configure_controls_style
 from danbooru_multi_search.ui.image_cache import (
@@ -307,6 +311,16 @@ def _create_window(tmp_path):
     selection = GallerySelectionController(core.posts_model, favorites)
     detail_favorites = DetailFavoritesController(details, favorites)
     collection = FavoriteCollectionController(favorites._repository, favorites, detail_navigation)
+    pool_browser = PoolBrowserController(
+        PoolRequestService("https://example.invalid", task_queue=tags._task_queue,
+                           network_manager=tags._network_manager),
+        PoolRequestService("https://example.invalid", task_queue=tags._task_queue,
+                           network_manager=tags._network_manager),
+        PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
+        favorites,
+    )
+    pool_navigation = PoolNavigationController(pool_browser, detail_navigation)
+    executor.executionBound.connect(lambda event: pool_navigation.invalidate())
     transfer = FavoriteTransferController(database.path, favorites)
     combinations = ArtistCombinationController(ArtistCombinationRepository(database), favorites, bridge)
     saved_queries = SavedQueryController(SavedQueryRepository(database), bridge, favorites)
@@ -346,6 +360,8 @@ def _create_window(tmp_path):
     context.setContextProperty("favoriteController", favorites)
     context.setContextProperty("gallerySelection", selection)
     context.setContextProperty("detailFavorites", detail_favorites)
+    context.setContextProperty("poolBrowser", pool_browser)
+    context.setContextProperty("poolNavigation", pool_navigation)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
     assert engine.rootObjects(), [error.toString() for error in engine.warnings()]
     root = engine.rootObjects()[0]
@@ -374,11 +390,15 @@ def _create_window(tmp_path):
         "cache_cleanup": cleanup,
         "selection": selection,
         "detail_favorites": detail_favorites,
+        "pool_browser": pool_browser,
+        "pool_navigation": pool_navigation,
         "qml_warnings": qml_warnings,
     }
 
 
 def _close_window(values) -> None:
+    values["pool_navigation"].shutdown()
+    values["pool_browser"].shutdown()
     values["cache_cleanup"].shutdown()
     values["download_ui"].shutdown()
     values["download_manager"].shutdown()

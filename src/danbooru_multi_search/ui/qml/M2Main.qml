@@ -130,6 +130,8 @@ ApplicationWindow {
     function showPage(pageName) {
         if (detailController.isOpen)
             return
+        if (pageName !== "pool")
+            poolNavigation.invalidate()
         queryDrawer.close()
         activePage = pageName
         if (pageName === "favorites")
@@ -318,6 +320,10 @@ ApplicationWindow {
     }
 
     function returnToGallery() {
+        if (detailNavigation.sourcePage === "pool") {
+            poolNavigation.returnToPool()
+            return
+        }
         if (!detailNavigation.closeDetail())
             return
         if (detailNavigation.sourcePage === "favorites") {
@@ -354,7 +360,8 @@ ApplicationWindow {
     }
 
     function addDetailTagToDraft(tagName) {
-        if (detailNavigation.sourcePage === "favorites") {
+        if (detailNavigation.sourcePage === "favorites" || detailNavigation.sourcePage === "pool") {
+            poolNavigation.invalidate()
             detailNavigation.closeDetail()
             root.activePage = "browse"
             if (root.compactLayout)
@@ -652,7 +659,7 @@ ApplicationWindow {
         anchors.top: pageNavigation.bottom
         anchors.bottom: parent.bottom
         anchors.margins: 20
-        currentIndex: detailController.isOpen ? 3 : (root.activePage === "favorites" ? 1 : root.activePage === "downloads" ? 2 : 0)
+        currentIndex: detailController.isOpen ? 3 : (root.activePage === "favorites" ? 1 : root.activePage === "downloads" ? 2 : root.activePage === "pool" ? 4 : 0)
 
         Item {
             id: galleryPage
@@ -898,12 +905,13 @@ ApplicationWindow {
         DownloadsPage { controller: downloadUi; theme: root.theme }
 
         DetailPage {
-            backLabel: detailNavigation.sourcePage === "favorites" ? qsTr("返回收藏") : qsTr("返回画廊")
+            backLabel: detailNavigation.sourcePage === "pool" ? qsTr("返回作品池") : detailNavigation.sourcePage === "favorites" ? qsTr("返回收藏") : qsTr("返回画廊")
             theme: root.theme
             controller: detailController
             favorites: detailFavorites
             downloads: downloadUi
             onDownloadPrepared: function(token) { downloadRequestDialog.showRequest(token) }
+            onPoolsRequested: function(key, revision) { poolNavigation.requestDetailMemberships(key, revision) }
             complexQueryActionsEnabled: true
             onBackRequested: root.returnToGallery()
             onImportTagsRequested: tagCsvDialog.open()
@@ -911,6 +919,27 @@ ApplicationWindow {
                 root.addDetailTagToDraft(tagName)
             }
         }
+
+        PoolPage {
+            controller: poolBrowser
+            navigation: poolNavigation
+            cacheController: imageCacheController
+            theme: root.theme
+        }
+    }
+
+    PoolMembershipPanel {
+        id: poolMembershipPanel
+        controller: poolBrowser
+        navigation: poolNavigation
+        theme: root.theme
+    }
+
+    Connections {
+        target: poolNavigation
+        function onMembershipsRequested() { poolMembershipPanel.open() }
+        function onPoolPageRequested() { root.activePage = "pool"; queryDrawer.close() }
+        function onSourceRestored() { root.activePage = detailNavigation.sourcePage }
     }
 
     Connections {
