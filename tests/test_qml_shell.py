@@ -350,6 +350,9 @@ def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
     assert ui_session.pool_reader._pages._queue is shared_queue
     assert ui_session.pool_reader._pages is not ui_session.pool_browser._pages
     assert ui_session.pool_reader._pages._manager is ui_session.network_manager
+    assert ui_session.pool_download_manager._service._queue is shared_queue
+    assert ui_session.pool_download_manager._service is not ui_session.pool_reader._pages
+    assert ui_session.pool_download_manager._downloads is ui_session.download_manager
     assert executor.owns_queue is False
     assert tag_controller._owns_queue is False
     assert executor._network_manager is ui_session.network_manager
@@ -372,6 +375,7 @@ def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
     assert shared_queue.is_shutdown is True
     assert shared_queue.has_work is False
     assert ui_session.shutdown_completed is True
+    assert ui_session.pool_download_manager._closed and ui_session.pool_downloads._closed
     _close_engine(engine)
 
 
@@ -563,6 +567,14 @@ def test_active_import_finishes_before_m2_cancel_and_final_history_save(tmp_path
         assert session.pool_reader.open_pool(reading_pool, slots(reading_pool, (1, 2, 3)))
         engine.rootObjects()[0].setProperty("activePage", "reader")
         assert _wait_until(lambda: session.pool_reader.position_ready)
+        from tests.test_pool_requests import FakeManager, FakeReply
+        from danbooru_multi_search.core.downloads import DownloadConflictPolicy
+        pool_network = FakeManager()
+        pool_reply = FakeReply()
+        pool_network.replies.append(pool_reply)
+        session.pool_download_manager._service._manager = pool_network
+        download_plan = session.pool_download_manager.start(reading_pool, tmp_path / 'downloads', DownloadConflictPolicy.SKIP)
+        assert _wait_until(lambda: len(pool_network.requests) == 1)
         token = transfer.beginImportSelection()
         assert transfer.acceptImportFile(QUrl.fromLocalFile(str(source_path)), token)
         assert _wait_until(lambda: not transfer.busy)
@@ -575,6 +587,7 @@ def test_active_import_finishes_before_m2_cancel_and_final_history_save(tmp_path
         def query_shutdown():
             assert transfer.shutdown_completed
             assert session.pool_progress._closed
+            assert session.pool_download_manager._closed
             assert len(FavoriteRepository(runtime.database).list_favorites()) == 1
             checked.append(True)
             original_query_shutdown()
@@ -588,6 +601,9 @@ def test_active_import_finishes_before_m2_cancel_and_final_history_save(tmp_path
         reading = session.pool_progress._repository.get("https://example.invalid", 7)
         assert reading.page_number == 2 and reading.post_id == 12
         assert not session.pool_progress._timer.isActive()
+        assert session.pool_download_manager.repository.get(download_plan.plan_id).state.value == 'paused'
+        assert pool_reply.abort_count == 1 and len(pool_network.requests) == 1
+        assert session.download_manager._repository.list_batches() == ()
         stored = session.history_repository.latest_query()
         assert stored.result_summary.state == QueryExecutionState.PARTIAL_CANCELLED
         assert manager.replies[0].abort_count == 1

@@ -9,6 +9,8 @@ Dialog {
     required property var controller
     property QtObject theme: AppTheme {}
     property string requestToken: ""
+    property string summaryText: qsTr("将下载 %1 项作品的原始文件。").arg(controller.pending.count)
+    property string explanationText: qsTr("确认后保存下载任务。文件保持原始格式，取消此窗口不会创建任务。")
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(600, parent ? parent.width - 32 : 600)
@@ -45,8 +47,8 @@ Dialog {
         ColumnLayout {
             width: parent.width
             spacing: 16
-            Label { Layout.fillWidth: true; text: qsTr("将下载 %1 项作品的原始文件。").arg(dialog.controller.pending.count); font.bold: true; color: theme.text; wrapMode: Text.Wrap }
-            Label { Layout.fillWidth: true; text: qsTr("确认后保存下载任务。文件保持原始格式，取消此窗口不会创建任务。"); color: theme.secondaryText; wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: dialog.summaryText; font.bold: true; color: theme.text; wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: dialog.explanationText; color: theme.secondaryText; wrapMode: Text.Wrap }
             Label { text: qsTr("本次下载目录"); font.bold: true; color: theme.text }
             Label { objectName: "downloadRequestDirectory"; Layout.fillWidth: true; text: dialog.controller.pending.directory; color: theme.secondaryText; wrapMode: Text.WrapAnywhere }
             ActionButton {

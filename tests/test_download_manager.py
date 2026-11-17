@@ -90,6 +90,31 @@ def works(count=3, identifier=1):
     return tuple(replace(post(identifier + index, url=f"https://example.invalid/{identifier + index}.jpg"), file_ext="jpg") for index in range(count))
 
 
+def test_register_committed_pool_batch_is_idempotent_and_keeps_normal_file_pipeline(tmp_path):
+    from danbooru_multi_search.core.downloads import DownloadRequest
+    saved, manager, queue, scheduler, network = setup(tmp_path)
+    batch = saved.create_batch((DownloadRequest(9, 'https://example.invalid/9.png', 'png', '00003'),), tmp_path / 'files')
+    manager.schedule_persisted_batch(batch.batch_id)
+    manager.schedule_persisted_batch(batch.batch_id)
+    scheduler.run_ready()
+    assert len(network.requests) == 1
+    network.replies[0].send(b'original')
+    assert (tmp_path / 'files' / '00003_9.png').read_bytes() == b'original'
+    assert saved.get_batch(batch.batch_id).items[0].state is DownloadTaskState.COMPLETED
+    manager.shutdown()
+
+
+def test_committed_batch_notification_shutdown_prevents_its_first_request(tmp_path):
+    saved, manager, queue, scheduler, network = setup(tmp_path)
+    batch = saved.create_batch((request(),), tmp_path)
+    manager.batchChanged.connect(lambda _batch: manager.begin_shutdown())
+    manager.schedule_persisted_batch(batch.batch_id)
+    scheduler.run_ready()
+    assert not network.requests
+    manager.shutdown()
+    assert saved.get_batch(batch.batch_id).items[0].state is DownloadTaskState.AWAITING_RESUME
+
+
 def test_capacity_backpressure_keeps_all_persistent_waiting_items_and_shared_queue(tmp_path):
     saved, manager, queue, scheduler, network = setup(tmp_path, capacity=1)
     foreign = queue.submit(TaskKind.METADATA, lambda _number, _done: FakeAbortable(), lambda result: None)

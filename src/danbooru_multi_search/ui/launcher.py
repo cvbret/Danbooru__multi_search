@@ -57,6 +57,9 @@ from danbooru_multi_search.ui.pools import PoolBrowserController
 from danbooru_multi_search.ui.pool_navigation import PoolNavigationController
 from danbooru_multi_search.ui.pool_reader import PoolReaderController
 from danbooru_multi_search.storage.pool_progress import PoolProgressRepository
+from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
+from danbooru_multi_search.danbooru.pool_downloads import PoolDownloadManager
+from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.ui.pool_progress import PoolProgressController
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
@@ -205,6 +208,15 @@ class _UiSession(QObject):
         )
         self.pool_navigation.attach_reader(self.pool_reader)
         self.pool_progress = PoolProgressController(PoolProgressRepository(database), self.pool_reader, danbooru_base_url, self)
+        self.pool_download_manager = PoolDownloadManager(
+            PoolDownloadRepository(database),
+            PoolPageRequestService(danbooru_base_url, self.task_queue, self.network_manager, self),
+            self.download_manager, danbooru_base_url, self,
+        )
+        self.pool_downloads = PoolDownloadController(
+            self.pool_download_manager, self.settings_controller, self.download_ui,
+            self.pool_browser, self.pool_reader, self,
+        )
         self.pool_reader.changed.connect(self.download_ui.refresh_snapshot_source)
         self.favorite_collection.poolRequested.connect(self.pool_navigation.openFavoritePool)
         self.tag_controller = DanbooruTagSuggestionController(
@@ -260,6 +272,8 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.pool_downloads.shutdown,
+            self.pool_download_manager.begin_shutdown,
             self.pool_progress.begin_shutdown,
             self.pool_reader.shutdown,
             self.pool_navigation.shutdown,
@@ -277,6 +291,7 @@ class _UiSession(QObject):
             self.detail_favorites.shutdown,
             self.query_bridge.beginClosing,
             self.favorite_transfer.shutdown,
+            self.pool_download_manager.finish_shutdown,
             self.pool_progress.finish_shutdown,
             self.query_checkpoints.finish_shutdown,
             self.download_manager.shutdown,
@@ -316,6 +331,8 @@ class _UiSession(QObject):
             and self.pool_browser._closed
             and self.pool_reader._closed
             and self.pool_progress._closed
+            and self.pool_downloads._closed
+            and self.pool_download_manager._closed
             and self.favorite_transfer.shutdown_completed
             and self.download_manager.closed
             and self.download_ui._closed
@@ -402,6 +419,7 @@ def _create_qml_session(
     engine.rootContext().setContextProperty("poolBrowser", session.pool_browser)
     engine.rootContext().setContextProperty("poolNavigation", session.pool_navigation)
     engine.rootContext().setContextProperty("poolReader", session.pool_reader)
+    engine.rootContext().setContextProperty("poolDownloads", session.pool_downloads)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)

@@ -366,6 +366,30 @@ MIGRATIONS = (
             )""",
         ),
     ),
+    Migration(
+        version=12,
+        name="pool_download_preparation",
+        statements=(
+            """CREATE TABLE pool_download_plans (
+                id TEXT PRIMARY KEY NOT NULL, source TEXT NOT NULL, pool_id INTEGER NOT NULL,
+                name TEXT NOT NULL, total INTEGER NOT NULL CHECK(typeof(total)='integer' AND total BETWEEN 1 AND 25000),
+                directory TEXT NOT NULL, policy TEXT NOT NULL CHECK(policy IN ('skip','overwrite','auto_number')),
+                state TEXT NOT NULL CHECK(state IN ('preparing','paused','ready')),
+                generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(generation)='integer' AND generation >= 0),
+                message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+            )""",
+            """CREATE TABLE pool_download_pages (
+                plan_id TEXT NOT NULL REFERENCES pool_download_plans(id) ON DELETE CASCADE,
+                page_number INTEGER NOT NULL CHECK(typeof(page_number)='integer' AND page_number BETWEEN 1 AND 25000),
+                post_id INTEGER NOT NULL CHECK(typeof(post_id)='integer' AND post_id > 0),
+                state TEXT NOT NULL CHECK(state IN ('waiting','ready','enqueued','deleted','unavailable','not_returned','failed')),
+                source_url TEXT, file_ext TEXT, message TEXT NOT NULL DEFAULT '',
+                item_id TEXT UNIQUE REFERENCES download_items(id), batch_id TEXT REFERENCES download_batches(id),
+                PRIMARY KEY(plan_id,page_number)
+            )""",
+            "CREATE INDEX pool_download_pages_work ON pool_download_pages(plan_id,state,page_number)",
+        ),
+    ),
 )
 
 

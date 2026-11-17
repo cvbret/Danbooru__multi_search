@@ -8,6 +8,8 @@ Item {
     required property var controller
     required property var navigation
     required property var cacheController
+    signal poolDownloadRequested(string token)
+    onVisibleChanged: poolDownloads.setSourceVisible("browser", visible)
     property QtObject theme: AppTheme {}
     ColumnLayout {
         anchors.fill: parent
@@ -31,6 +33,14 @@ Item {
                 onClicked: navigation.enterReader(pressedGeneration)
             }
             ActionButton { objectName: "poolCancelButton"; text: qsTr("取消请求"); visible: controller.busy; onClicked: controller.cancel() }
+            ActionButton {
+                objectName: "poolDownloadAllButton"; text: qsTr("下载整个作品池")
+                visible: controller.poolInfo.category === "series"
+                enabled: (controller.poolInfo.postCount || 0) > 0
+                property string pressedToken: ""
+                onPressed: pressedToken = poolDownloads.capturePool("browser", String(controller.generation))
+                onClicked: { if (pressedToken.length) page.poolDownloadRequested(pressedToken) }
+            }
             ActionButton {
                 objectName: "poolFavoriteButton"
                 visible: controller.poolInfo.category === "series"

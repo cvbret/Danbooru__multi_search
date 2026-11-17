@@ -199,6 +199,16 @@ class DownloadUiController(QObject):
     def selectBatch(self, key: str) -> bool:
         if self._closed or not any(item.batch_id == key for item in self._batches.items):
             return False
+        return self._select_batch(key)
+
+    @Slot(str, result=bool)
+    def openPersistedBatch(self, key: str) -> bool:
+        """Open an explicitly linked persistent batch without scanning older history."""
+        if self._closed or not self._active or not isinstance(key, str) or re.fullmatch(r"[0-9a-f]{32}", key) is None:
+            return False
+        return self._select_batch(key)
+
+    def _select_batch(self, key: str) -> bool:
         self._selected_key = key
         self._batch_action = None
         self._load_generation += 1

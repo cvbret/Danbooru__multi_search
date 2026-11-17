@@ -7,6 +7,7 @@ Item {
     id: page
     objectName: "downloadsPage"
     required property var controller
+    signal poolDownloadsRequested()
     property QtObject theme: AppTheme {}
 
     FolderDialog {
@@ -27,6 +28,7 @@ Item {
             Layout.fillWidth: true
             Label { Layout.fillWidth: true; text: qsTr("下载管理"); font.pixelSize: 25; font.bold: true; color: theme.text }
             ActionButton { objectName: "refreshDownloadsButton"; text: qsTr("刷新记录"); onClicked: page.controller.reload() }
+            ActionButton { objectName: "showPoolDownloadsButton"; text: qsTr("整池下载准备"); onClicked: page.poolDownloadsRequested() }
         }
         Label { Layout.fillWidth: true; text: qsTr("未完成任务需要手动从头恢复。切换页面不会取消已经确认的下载。"); color: theme.secondaryText; wrapMode: Text.Wrap }
         Flow {

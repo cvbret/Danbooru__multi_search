@@ -67,6 +67,21 @@ def seed(repository, tmp_path, count=2):
     return tuple(repository.create_batch((request(index + 10),), tmp_path) for index in range(count))
 
 
+def test_explicit_link_opens_batch_older_than_visible_first_page_without_loading_all(env, tmp_path, monkeypatch):
+    ui, repository, _manager, _scheduler, _network, *_rest = env
+    records = seed(repository, tmp_path, 51)
+    ui.setActive(True)
+    visible = {row.batch_id for row in ui.batchesModel.items}
+    target = next(record for record in records if record.batch_id not in visible)
+    assert len(visible) == 50 and not ui.selectBatch(target.batch_id)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('explicit link must not scan history')
+    monkeypatch.setattr(repository, 'read_batch_summaries', forbidden)
+    assert ui.openPersistedBatch(target.batch_id)
+    assert ui.selectedBatchKey == target.batch_id and ui.itemsModel.items == target.items
+    assert len(ui.batchesModel.items) == 50
+
+
 def test_folder_rejection_and_request_cancel_write_no_settings_tasks_or_requests(env, tmp_path):
     ui, repository, _manager, _scheduler, network, gallery, _selection, _detail, settings = env
     previous = settings.settings

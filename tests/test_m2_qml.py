@@ -80,6 +80,9 @@ from danbooru_multi_search.ui.pool_navigation import PoolNavigationController
 from danbooru_multi_search.ui.pool_reader import PoolReaderController
 from danbooru_multi_search.storage.pool_progress import PoolProgressRepository
 from danbooru_multi_search.ui.pool_progress import PoolProgressController
+from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
+from danbooru_multi_search.danbooru.pool_downloads import PoolDownloadManager
+from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.ui.appearance import AppearanceController
 from danbooru_multi_search.ui.launcher import configure_controls_style
 from danbooru_multi_search.ui.image_cache import (
@@ -342,6 +345,10 @@ def _create_window(tmp_path):
     )
     pool_navigation.attach_reader(pool_reader)
     pool_progress = PoolProgressController(PoolProgressRepository(database), pool_reader, "https://example.invalid")
+    pool_download_manager = PoolDownloadManager(PoolDownloadRepository(database),
+        PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
+        download_manager, "https://example.invalid")
+    pool_downloads = PoolDownloadController(pool_download_manager, settings_controller, download_ui, pool_browser, pool_reader)
     pool_reader.changed.connect(download_ui.refresh_snapshot_source)
     collection.poolRequested.connect(pool_navigation.openFavoritePool)
     images = ImageCacheController(tmp_path / "image-cache")
@@ -374,6 +381,7 @@ def _create_window(tmp_path):
     context.setContextProperty("poolBrowser", pool_browser)
     context.setContextProperty("poolNavigation", pool_navigation)
     context.setContextProperty("poolReader", pool_reader)
+    context.setContextProperty("poolDownloads", pool_downloads)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
     assert engine.rootObjects(), [error.toString() for error in engine.warnings()]
     root = engine.rootObjects()[0]
@@ -406,11 +414,15 @@ def _create_window(tmp_path):
         "pool_navigation": pool_navigation,
         "pool_reader": pool_reader,
         "pool_progress": pool_progress,
+        "pool_download_manager": pool_download_manager,
+        "pool_downloads": pool_downloads,
         "qml_warnings": qml_warnings,
     }
 
 
 def _close_window(values) -> None:
+    values["pool_downloads"].shutdown()
+    values["pool_download_manager"].begin_shutdown()
     values["pool_progress"].begin_shutdown()
     values["pool_reader"].shutdown()
     values["pool_navigation"].shutdown()
@@ -422,6 +434,7 @@ def _close_window(values) -> None:
     values["combinations"].shutdown()
     values["saved_queries"].shutdown()
     values["transfer"].shutdown()
+    values["pool_download_manager"].finish_shutdown()
     values["pool_progress"].finish_shutdown()
     values["collection"].shutdown()
     values["favorites"].shutdown()

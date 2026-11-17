@@ -67,6 +67,24 @@ ApplicationWindow {
         theme: root.theme
     }
 
+    DownloadRequestDialog {
+        id: poolDownloadRequestDialog
+        objectName: "poolDownloadRequestDialog"
+        controller: poolDownloads
+        theme: root.theme
+        title: qsTr("下载整个系列作品池")
+        summaryText: qsTr("按原始页序准备 %1 个页面。部分作品可能缺失或没有原文件。").arg(controller.pending.count)
+        explanationText: qsTr("确认后分批读取元数据并加入下载。文件名包含五位原页码与作品编号，缺失页面保留空缺页号。取消窗口不会创建计划。")
+    }
+    PoolDownloadPanel {
+        id: poolDownloadPanel; controller: poolDownloads; downloads: downloadUi; theme: root.theme
+        onBatchRequested: function(key) { root.showPage("downloads"); downloadUi.openPersistedBatch(key) }
+    }
+    Connections {
+        target: poolDownloads
+        function onQueued(key) { root.showPage("downloads"); poolDownloadPanel.showRecords() }
+    }
+
     function requestCleanup(kind) {
         if (cacheCleanup.prepareCleanup(kind) || cacheCleanup.noticeText.length > 0)
             cacheCleanupDialog.open()
@@ -902,7 +920,7 @@ ApplicationWindow {
             theme: root.theme
         }
 
-        DownloadsPage { controller: downloadUi; theme: root.theme }
+        DownloadsPage { controller: downloadUi; theme: root.theme; onPoolDownloadsRequested: poolDownloadPanel.showRecords() }
 
         DetailPage {
             backLabel: detailNavigation.sourcePage === "pool" ? qsTr("返回作品池") : detailNavigation.sourcePage === "favorites" ? qsTr("返回收藏") : qsTr("返回画廊")
@@ -921,6 +939,7 @@ ApplicationWindow {
         }
 
         PoolPage {
+            onPoolDownloadRequested: function(token) { poolDownloadRequestDialog.showRequest(token) }
             controller: poolBrowser
             navigation: poolNavigation
             cacheController: imageCacheController
@@ -928,6 +947,7 @@ ApplicationWindow {
         }
 
         PoolReaderPage {
+            onPoolDownloadRequested: function(token) { poolDownloadRequestDialog.showRequest(token) }
             controller: poolReader
             navigation: poolNavigation
             theme: root.theme

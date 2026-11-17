@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QAbstractListModel, QByteArray, QModelIndex, Property, Qt, Signal
 
 from danbooru_multi_search.core.downloads import DOWNLOAD_TERMINAL_STATES, DownloadTaskState
+from danbooru_multi_search.core.pool_downloads import PoolDownloadState
 
 
 STATE_TEXT = {"waiting": "等待下载", "running": "下载中", "retry_wait": "等待自动重试",
@@ -109,3 +110,36 @@ class DownloadItemListModel(_Rows):
                 "attemptsText": f"累计尝试 {item.attempts} 次", "reasonText": ERROR_TEXT.get(item.error_code, "下载未能完成" if item.state is DownloadTaskState.FAILED else ""),
                 "detailText": item.message, "canCancel": item.state not in DOWNLOAD_TERMINAL_STATES,
                 "canRetry": item.state in {DownloadTaskState.FAILED, DownloadTaskState.CANCELLED, DownloadTaskState.AWAITING_RESUME}}
+
+
+class PoolDownloadListModel(_Rows):
+    names = ("planKey", "generationKey", "titleText", "summaryText")
+
+    @staticmethod
+    def key(item):
+        return item.plan.plan_id
+
+    def mapping(self, row):
+        item = self.items[row]
+        plan = item.plan
+        state = {PoolDownloadState.PREPARING: "正在准备", PoolDownloadState.PAUSED: "准备已暂停",
+                 PoolDownloadState.READY: "准备完成（文件状态见批次）"}[plan.state]
+        return {"planKey": plan.plan_id, "generationKey": str(plan.generation),
+                "titleText": f"{plan.name} · {state}",
+                "summaryText": f"已读取 {item.prepared}/{plan.total} 页面 · 已加入下载 {item.enqueued} · 未获得原文件 {item.unavailable}"}
+
+
+class PoolDownloadPageListModel(_Rows):
+    names = ("pageKey", "titleText", "reasonText")
+
+    @staticmethod
+    def key(item):
+        return item.reference.page_number
+
+    def mapping(self, row):
+        item = self.items[row]
+        labels = {"waiting": "尚未读取", "ready": "原文件已准备，等待加入下载", "enqueued": "已加入下载批次",
+                  "deleted": "作品已删除", "unavailable": "原文件不可用", "not_returned": "未返回或无法访问", "failed": "元数据读取失败"}
+        return {"pageKey": str(item.reference.page_number),
+                "titleText": f"第 {item.reference.page_number} 页 · 作品 #{item.reference.post_id} · {labels[item.state.value]}",
+                "reasonText": item.message}

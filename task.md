@@ -4,9 +4,9 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第 4 阶段 Danbooru 漫画阅读器
 - 当前里程碑：`M4 漫画阅读器完成`
-- 当前主要任务：`M4-004 阅读进度保存与恢复`
-- 当前状态：已完成
-- 执行状态：M4-004 已完成，继续准备 M4-005 完整作品池按页序下载。
+- 当前主要任务：`M4-005 完整作品池按页序下载`
+- 当前状态：待提交
+- 执行状态：M4-004 已完成，继续 M4-005。
 - 最后更新：2026-11-17
 
 ## 1. 阶段进度
@@ -2755,3 +2755,38 @@ M2 里程碑回归检查与提交。
 - 新增批准的最新 schema 断言与 Windows 打包常量已同步为 11，对应正式 headless/offscreen 入口、收藏/传输辅助、v3 历史规则和失败打包样本均定向通过；旧 v10 专项固定迁移截点与断言 10，v3 历史 JSON 预期不改写。
 - reviewer 独立 18 项全部通过，最终装配、按需导出/spec、版本和旧迁移断言只读核对无剩余阻断；明确允许准确 23 个实现/测试/打包文件及本记录进入提交。开发 52 与独立 18 分别记录，不相加为不同场景总数。当前状态待提交。
 - 未运行全量测试、完整构建、原生界面验收、真实站点或 Linux 验证；临时开发与独立验证数据留在 `.tools` 且不提交。M4-005 整池下载尚未实现。
+
+## 42. 当前任务 M4-005
+
+- 阶段：第 4 阶段 Danbooru 漫画阅读器；状态：进行中，2026-11-17。起点 `9f885f2bec08c6e43849ef99488715ca814ddc7c`，开始时工作树干净。
+- 目标：系列作品池确认目录与同名文件策略后，按保存的原始页序下载全部可用原文件，支持有限加载、停止准备及中断后手动继续。
+- 负责人：developer 实现与直接检查，reviewer 独立审查验证，intergrator 允许后精确提交，主 Agent 维护范围与状态。
+- 批准新增 5 个生产文件：`core/pool_downloads.py`、`storage/pool_downloads.py`、`danbooru/pool_downloads.py`、`ui/pool_downloads.py`、`ui/qml/PoolDownloadPanel.qml`，前缀均为 `src/danbooru_multi_search/`。
+- 批准修改同包 11 个文件：`storage/database.py`、`storage/downloads.py`、`storage/__init__.py`、`danbooru/download_manager.py`、`ui/download_models.py`、`ui/launcher.py`、`ui/qml/DownloadRequestDialog.qml`、`ui/qml/DownloadsPage.qml`、`ui/qml/PoolPage.qml`、`ui/qml/PoolReaderPage.qml`、`ui/qml/M2Main.qml`；以及 `packaging/windows/DanbooruMultiSearch.spec`、`scripts/windows_packaging.py`、`scripts/verify_build.py`。共 19 个生产/打包文件。
+- 关联下载批次需要能够从池页实际打开，现有 `DownloadUiController.selectBatch` 只接受已加载列表中的项目。补充批准 `ui/downloads.py` 和 `tests/test_download_ui.py`：仅提供有持久记录依据的批次打开入口和直接检查，支持尚未加载到当前列表的关联批次，不遍历全部记录；原列表动作校验保留。生产/打包范围上限增为 20 个文件。
+- 测试批准新增 `tests/test_pool_downloads.py`、`tests/test_pool_download_repository.py`、`tests/test_pool_download_manager.py`、`tests/test_pool_download_ui.py`、`tests/test_qml_pool_downloads.py`；必要修改 `tests/test_download_repository.py`、`tests/test_download_manager.py`、`tests/test_download_models.py`、`tests/test_qml_downloads.py`、`tests/test_database.py`、`tests/test_bootstrap.py`、`tests/test_cli.py`、`tests/test_favorites.py`、`tests/test_favorite_transfer.py`、`tests/test_migrations_v3.py`、`tests/test_m2_qml.py`、`tests/test_qml_shell.py`、`tests/test_windows_packaging.py`、`tests/test_build_validation.py`，以及本记录。旧迁移专项固定原截点，只更新最新版本消费者为 12。
+- 计划确认前捕获不可变池快照、API 来源和来源身份，确认前零元数据请求/零下载任务；取消目录或确认窗口不创建计划。仅系列池提供入口，主题池保持集合展示。复用既有目录和同名文件策略控件，不新增下载文件执行器。
+- v12 仅新增整池计划/页位表，记录尚未读取、已解析、缺失/失败和已关联下载项的事实；旧下载表结构及旧迁移不改。支持模型上限 25000 原页位，每次最多 40 位元数据、单个在途；每 1000 个原页位形成最多 1000 项的既有下载子批次，正常完整上限池最多 25 个子批次，不截断为 1000 项。
+- 子批次入库和原页位关联必须处于同一事务，失败整体回滚；恢复/重试只处理未关联页位，已入库项不得重复创建。仓库复用原下载批次创建实现；下载管理器仅增加已提交批次的登记调度入口并防重复，旧 enqueue/smoke 接口语义保留。批次统计不反复建立 25000 项完整对象快照。
+- 文件名使用固定五位原页码加作品编号和原始扩展名，例如 `00001_123.png`；重复作品在不同页位分别命名，缺失页面不压缩后续页号。只使用原文件地址，缺失原因可查看并手动重试未获得原文件的页位，不在下载目录新增报告或清单文件。
+- 准备与文件下载状态明确区分，加入任务不能显示成文件已下载完成。“停止准备”先使旧请求失效并取消自身元数据请求，不再新增任务；界面说明已经建立的文件下载继续，可在原下载页取消/重试。重新启动零联网，仅用户明确继续后读取未完成页位；按原计划快照续作，API 来源不符时拒绝继续。
+- 数据库忙时立即提示并停止准备，避免阻塞界面；关闭先停止准备和新建任务，沿现有导入结束顺序结算状态。失败保留已解析与已入库事实，网络整批失败暂停该窗口，不自动遍历无限重试。
+- 验收：超过 1000 位的完整页序/重复/缺失与命名，事务失败和重启防重复，停止/关闭及同步通知中的旧动作失效，零联网启动，原下载接口兼容，正常与 820×600 离线真实确认和必要资源检查。只执行相关检查；完整测试和构建待 M4-006，不运行原生界面验收、真实站点或 Linux 验证。
+- 提交编号：待完成后记录。
+
+### 42.1 实现进度
+
+- 纯模型、v12 新表、子批次与原页位同事务保存、有界准备服务已写入初稿；下载管理器新增入口仅调度已经提交的 WAITING 项，继续复用原文件下载流程。正在接入确认窗口及下载页分页展示，尚未运行本任务测试，未冻结。
+- 提前审查要求同连接事务复用、已提交批次防重复登记、通知期间停止/关闭后不再调度、重启的已有下载项保留手动恢复入口、仅取消准备服务自身请求、忙锁从连接开始立即失败，关闭待导入结束后结算。确认前以原页位数说明范围，不提前承诺全部页面均有原文件；准备完成和文件下载完成分别显示。
+- 首批 20 项通过，包含完整 25000 页、625 次最多 40 页请求、25 个子批次、1001 页中的缺失页号保留、同事务关联失败回滚、防重复入库、停止继续与重启零联网。来源检查已发现旧 `_active` 字段未维护，改由新控制器接收实际来源可见性并检查公开快照/代次；不修改旧池浏览控制器。
+- UI 提前审查要求捕获动作时把仓库读取失败显示为错误，隐藏或切换计划撤销旧动作，翻页失败保留原页码与内容，以及查看关联批次时真正切到下载页。新登记入口读取旧下载仓库从连接开始使用立即失败，避免默认等待锁。对应修正与实际界面验证继续进行。
+
+### 42.2 冻结与验证
+
+- developer 已冻结准确 37 个实现/测试文件：全部 20 个批准生产/打包文件；5 个新增整池下载测试，以及 `tests/test_download_repository.py`、`test_download_manager.py`、`test_download_ui.py`、`test_database.py`、`test_bootstrap.py`、`test_cli.py`、`test_favorites.py`、`test_favorite_transfer.py`、`test_migrations_v3.py`、`test_m2_qml.py`、`test_qml_shell.py`、`test_windows_packaging.py`。其余获准测试未修改。
+- 开发累计 67 个不同聚焦场景通过：基础 20、确认 UI/下载登记/列表外批次/M2 装配 14、正常和最小窗口真实 QML 2、最新版本/直接旧消费者/共享队列/资源 24、版本断言修正及纯导入/按需导出 4、最终中断/重启/正式关闭 3。另一次相邻停止/继续的直接回归复查不重复计数；文件空白和直接语法检查通过。
+- 最后补齐已提交但尚未登记调度的 WAITING 批次：手动继续时分页登记，已关联项不重新入库；重新启动后 AWAITING_RESUME 文件仍由原下载页显式恢复。正式 JSON 导入持写锁期间关闭时，先停止新准备，导入结束后持久暂停，同时保留 M2 查询取消和最终历史。
+- reviewer 已独立通过首批 19 项和真实 QML 2 项，最后新增中断/重启场景和关闭修改待最终复查；不重复既有集合。宽窄窗口确认前零计划/零新增请求，取消目录与确认均不创建计划，确认后保留原页序、重复命名并能查看关联批次。
+- 准备停止不取消已经加入的文件下载；准备完成不等于文件下载完成。固定五位原页号、缺失保留编号、仅使用原文件、不同 API 来源拒绝继续的规则保持。最新 schema 12，旧 v11/v10 迁移专项固定原截点。
+- `.tools/pytest-m4-005-*` 开发及独立验证数据保留且不提交。尚未执行全量测试、完整构建、原生界面验收、真实站点或 Linux 验证，M4-006 待开始。
+- 最后两条补登记/重启场景及正式导入持锁关闭的独立检查全部通过，reviewer 本任务累计 24 项通过；最终准确范围、版本/历史迁移、资源、来源跳转与关闭只读核对无剩余阻断，明确允许 37 个实现/测试/打包文件及本记录提交。开发 67 与独立 24 分别记录，当前状态待提交。

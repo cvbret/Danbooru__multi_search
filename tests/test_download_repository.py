@@ -21,6 +21,22 @@ def request(identifier=321):
     return DownloadRequest(identifier, f"https://example.invalid/{identifier}.jpg", "jpg")
 
 
+def test_connection_requests_zero_busy_timeout_before_wal_initialization(tmp_path, monkeypatch):
+    saved = repository(tmp_path)
+    connect = saved._database.connect
+    values = []
+    def check(*, busy_timeout_ms=5000):
+        values.append(busy_timeout_ms)
+        return connect(busy_timeout_ms=busy_timeout_ms)
+    monkeypatch.setattr(saved._database, 'connect', check)
+    with connect() as blocker:
+        blocker.execute('BEGIN IMMEDIATE')
+        with pytest.raises(DownloadError, match='locked'):
+            saved.create_batch((request(),), tmp_path)
+        blocker.rollback()
+    assert values == [0] and saved.list_batches() == ()
+
+
 def test_finite_batch_is_saved_in_order_before_any_runtime_work(tmp_path):
     saved = repository(tmp_path)
     batch = saved.create_batch((request(5), request(3), request(5)), tmp_path / "中文 下载")

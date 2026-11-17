@@ -109,6 +109,19 @@ class PersistentDownloadManager(QObject):
     def snapshot(self, batch_id: str) -> DownloadBatchSnapshot:
         return self._repository.get_batch(batch_id)
 
+    def schedule_persisted_batch(self, batch_id: str) -> None:
+        """Feed an already committed finite batch once, using the normal file pipeline."""
+        if self._closed or self._closing or self._halted:
+            raise DownloadError("manager_unavailable", self._error or "下载管理器已经关闭。")
+        batch = self._repository.get_batch(batch_id)
+        if not 1 <= len(batch.items) <= MAX_DOWNLOAD_BATCH_ITEMS:
+            raise DownloadError("invalid_batch", "已保存下载批次的数量无效。")
+        known = set(self._pending) | self._entries.keys()
+        self._pending.extend(item.item_id for item in batch.items
+                             if item.state is DownloadTaskState.WAITING and item.item_id not in known)
+        self.batchChanged.emit(batch)
+        self._pump()
+
     def cancel(self, item_id: str, *, expected_generation: int | None = None) -> bool:
         if self._closed or self._closing or self._halting:
             return False

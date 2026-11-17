@@ -49,18 +49,34 @@ class DownloadRepository:
             raise DownloadError("invalid_directory", "下载目录必须使用绝对路径。")
         if not isinstance(policy, DownloadConflictPolicy):
             raise DownloadError("invalid_policy", "下载重名策略无效。")
-        identifier = uuid4().hex
         with self._connection(write=True) as connection:
-            connection.execute("INSERT INTO download_batches(id, created_at) VALUES (?, ?)",
-                               (identifier, datetime.now(timezone.utc).isoformat()))
-            for position, request in enumerate(requests):
-                connection.execute(
-                    """INSERT INTO download_items(id, batch_id, position, post_id, source_url,
-                           file_ext, label, directory, policy, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')""",
-                    (uuid4().hex, identifier, position, request.post_id, request.source_url,
-                     request.file_ext, request.label, str(directory), policy.value),
-                )
-            return self._batch(connection, identifier)
+            return self.create_batch_in_transaction(connection, requests, directory, policy)
+
+    def create_batch_in_transaction(
+        self, connection: sqlite3.Connection, requests: Sequence[DownloadRequest], directory: Path,
+        policy: DownloadConflictPolicy,
+    ) -> DownloadBatchSnapshot:
+        """Insert within a caller-owned transaction; the caller commits related facts."""
+        if not connection.in_transaction:
+            raise DownloadError("invalid_batch", "创建下载批次需要已开始的事务。")
+        if (not isinstance(requests, Sequence) or not 1 <= len(requests) <= MAX_DOWNLOAD_BATCH_ITEMS
+                or not all(isinstance(value, DownloadRequest) for value in requests)):
+            raise DownloadError("invalid_batch", "下载批量必须包含 1 至 1,000 个有效原文件请求。")
+        if not isinstance(directory, Path) or not directory.is_absolute():
+            raise DownloadError("invalid_directory", "下载目录必须使用绝对路径。")
+        if not isinstance(policy, DownloadConflictPolicy):
+            raise DownloadError("invalid_policy", "下载重名策略无效。")
+        identifier = uuid4().hex
+        connection.execute("INSERT INTO download_batches(id, created_at) VALUES (?, ?)",
+                           (identifier, datetime.now(timezone.utc).isoformat()))
+        for position, request in enumerate(requests):
+            connection.execute(
+                """INSERT INTO download_items(id, batch_id, position, post_id, source_url,
+                       file_ext, label, directory, policy, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')""",
+                (uuid4().hex, identifier, position, request.post_id, request.source_url,
+                 request.file_ext, request.label, str(directory), policy.value),
+            )
+        return self._batch(connection, identifier)
 
     def get_item(self, item_id: str) -> DownloadItemSnapshot:
         with self._connection() as connection:
@@ -272,7 +288,7 @@ class DownloadRepository:
 
     def _open(self) -> sqlite3.Connection:
         try:
-            return self._database.connect()
+            return self._database.connect(busy_timeout_ms=0)
         except (sqlite3.Error, OSError) as exc:
             raise DownloadError("storage_error", f"无法打开下载记录数据库：{exc}") from exc
 

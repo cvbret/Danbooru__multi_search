@@ -7,8 +7,12 @@ Item {
     objectName: "poolReaderPage"
     required property var controller
     required property var navigation
+    signal poolDownloadRequested(string token)
     property QtObject theme: AppTheme {}
-    onVisibleChanged: controller.setActive(visible)
+    onVisibleChanged: {
+        controller.setActive(visible)
+        poolDownloads.setSourceVisible("reader", visible)
+    }
     property bool positioning: false
 
     function positionPage(number) {
@@ -46,6 +50,13 @@ Item {
         Flow {
             Layout.fillWidth: true; spacing: 8
             ActionButton { objectName: "readerBackButton"; text: qsTr("返回作品池"); onClicked: navigation.leaveReader() }
+            ActionButton {
+                objectName: "readerDownloadAllButton"; text: qsTr("下载整个作品池")
+                enabled: controller.totalPages > 0
+                property string pressedToken: ""
+                onPressed: pressedToken = poolDownloads.capturePool("reader", String(controller.readingSession))
+                onClicked: { if (pressedToken.length) page.poolDownloadRequested(pressedToken) }
+            }
             ActionButton { objectName: "readerContinuousButton"; text: qsTr("连续阅读"); checkable: true; checked: controller.mode === "continuous"; onClicked: controller.setMode("continuous", controller.revision) }
             ActionButton { objectName: "readerSingleButton"; text: qsTr("单页阅读"); checkable: true; checked: controller.mode === "single"; onClicked: controller.setMode("single", controller.revision) }
             ActionButton { objectName: "readerDirectoryButton"; text: qsTr("页面目录"); onClicked: directory.open() }
