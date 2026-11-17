@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, Property, QThread, QUrl, Qt, Signal, Slot
 
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.storage.favorite_transfer import FavoriteImportMode
 from danbooru_multi_search.app.favorite_transfer import (
     TransferOperation, TransferRequest, TransferResult, execute_transfer,
@@ -36,10 +37,12 @@ class FavoriteTransferController(QObject):
     changed = Signal()
     _dispatch = Signal(object, object)
 
-    def __init__(self, database_path: Path, favorites: FavoriteController, parent=None):
+    def __init__(self, database_path: Path, favorites: FavoriteController,
+                 access: SharedWriteAccess, parent=None):
         super().__init__(parent)
         self._database_path = Path(database_path)
         self._favorites = favorites
+        self._access = access
         self._thread: QThread | None = None
         self._worker: _TransferWorker | None = None
         self._closing_event = Event()
@@ -58,7 +61,7 @@ class FavoriteTransferController(QObject):
         self._error_code = ""
         self._residual = ""
         favorites.collectionChanged.connect(self._collection_changed)
-        favorites.busyChanged.connect(self._shared_changed)
+        access.changed.connect(self._shared_changed)
 
     @Property(bool, notify=changed)
     def busy(self):
@@ -66,7 +69,7 @@ class FavoriteTransferController(QObject):
 
     @Property(bool, notify=changed)
     def canConfirm(self):
-        return not self._closing and not self.busy and not self._favorites.busy and self._preview is not None
+        return not self._closing and not self.busy and not self._access.busy and self._preview is not None
 
     @Property(bool, notify=changed)
     def canCancel(self):
@@ -205,7 +208,7 @@ class FavoriteTransferController(QObject):
         self._residual = ""
         if operation is TransferOperation.PREVIEW:
             self._clear_preview()
-        if operation is TransferOperation.APPLY and not self._favorites.begin_external_write(request.job_id):
+        if operation is TransferOperation.APPLY and not self._access.begin_external_write(request.job_id):
             self._active = None
             self._message = "收藏写入正在进行，请稍后重新预览。"
             if not self._closing:
@@ -219,7 +222,7 @@ class FavoriteTransferController(QObject):
         if not self._closing:
             self.changed.emit()
         if self._closing:
-            self._favorites.finish_external_write(request.job_id)
+            self._access.finish_external_write(request.job_id)
             self._active = None
             return False
         if self._cancel_event.is_set():
@@ -267,7 +270,7 @@ class FavoriteTransferController(QObject):
             self._cancel_event = None
             # Successful imports publish facts and invalidate page confirmations
             # before this signal can re-enable any GUI favorite write entry.
-            self._favorites.finish_external_write(request.job_id)
+            self._access.finish_external_write(request.job_id)
             if not self._closing:
                 self.changed.emit()
 
@@ -326,7 +329,7 @@ class FavoriteTransferController(QObject):
             self._thread.quit()
             self._thread.wait()
         if self._active is not None:
-            self._favorites.finish_external_write(self._active.job_id)
+            self._access.finish_external_write(self._active.job_id)
         self._active = None
         self._cancel_event = None
         self._closed = True

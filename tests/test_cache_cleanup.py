@@ -20,8 +20,8 @@ def setup(tmp_path):
     values = build(tmp_path)
     harness, database, history, shared, bridge, repository, checkpoints, session = values
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(CacheProtectionRepository(database), shared, images)
-    cleanup = CacheCleanupController(history, repository, checkpoints, session, shared, images, protection)
+    protection = CacheProtectionController(CacheProtectionRepository(database), shared, images, access=shared._writes.access)
+    cleanup = CacheCleanupController(history, repository, checkpoints, session, shared._writes.access, images)
     harness.controller.start_standard("a", limits=QueryExecutionLimits(page_size=1))
     harness.dispatch()
     harness.succeed((_post(1, "a"),))

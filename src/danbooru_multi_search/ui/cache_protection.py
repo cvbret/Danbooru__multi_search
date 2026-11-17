@@ -7,6 +7,7 @@ from typing import Iterator
 
 from PySide6.QtCore import QObject, Slot
 
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.storage.cache_protection import CacheProtectionError, CacheProtectionRepository, CacheProtectionSnapshot
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.image_cache import ImageCacheController, cache_key, normalized_cache_url
@@ -14,11 +15,11 @@ from danbooru_multi_search.ui.image_cache import ImageCacheController, cache_key
 
 class CacheProtectionController(QObject):
     def __init__(self, repository: CacheProtectionRepository, favorites: FavoriteController,
-                 images: ImageCacheController, parent: QObject | None = None) -> None:
+                 images: ImageCacheController, parent: QObject | None = None, *,
+                 access: SharedWriteAccess) -> None:
         super().__init__(parent)
-        self._repository, self._favorites, self._images = repository, favorites, images
+        self._repository, self._images, self._access = repository, images, access
         self._closed = False
-        self._cleanup_owner: str | None = None
         self._pending_aliases: set[tuple[str, str]] = set()
         self._error = ""
         self._alias_error = ""
@@ -26,10 +27,13 @@ class CacheProtectionController(QObject):
         self.reload()
         images.configure_protection(self.protection, self.remember_redirect, self.can_store)
         favorites.collectionChanged.connect(self.reload)
-        favorites.busyChanged.connect(self._busy_changed)
+        access.changed.connect(self._busy_changed)
 
     def _occupied(self) -> bool:
-        return self._favorites._busy or self._favorites._external_write not in {None, self._cleanup_owner}
+        return (
+            self._access.local_write_active
+            or self._access.external_owner not in {None, self._access.maintenance_owner}
+        )
 
     @staticmethod
     def _keys(snapshot: CacheProtectionSnapshot) -> frozenset[bytes]:
@@ -40,9 +44,6 @@ class CacheProtectionController(QObject):
             if expanded == keys:
                 return frozenset(keys)
             keys = expanded
-
-    def set_cleanup_owner(self, owner: str | None) -> None:
-        self._cleanup_owner = owner
 
     def can_store(self) -> bool:
         return not self._closed and self._snapshot is not None and not self._error and not self._alias_error and not self._pending_aliases

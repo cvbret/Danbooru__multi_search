@@ -6,8 +6,8 @@ from collections.abc import Callable, Iterable
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from danbooru_multi_search.app.favorites import FavoriteChanges, FavoriteWriteService
 from danbooru_multi_search.core.favorites import (
-    FavoriteCandidate,
     FavoriteError,
     FavoriteIdentity,
     FavoriteItem,
@@ -30,16 +30,17 @@ class FavoriteController(QObject):
     busyChanged = Signal()
 
     def __init__(
-        self, repository: FavoriteRepository, parent: QObject | None = None
+        self, repository: FavoriteRepository, writes: FavoriteWriteService,
+        parent: QObject | None = None
     ) -> None:
         super().__init__(parent)
         self._repository = repository
+        self._writes = writes
         self._confirmed: dict[FavoriteIdentity, FavoriteItem | None] = {}
         self._observed: set[FavoriteIdentity] = set()
         self._notice = ""
-        self._busy = False
-        self._external_write: str | None = None
         self._closed = False
+        writes.access.changed.connect(self._access_changed)
 
     @Property(str, notify=noticeChanged)
     def noticeText(self) -> str:
@@ -47,43 +48,24 @@ class FavoriteController(QObject):
 
     @Property(bool, notify=busyChanged)
     def busy(self) -> bool:
-        return self._busy or self._closed or self._external_write is not None
-
-    def begin_external_write(self, token: str) -> bool:
-        """Reserve GUI favorite writes before a background import can lock SQLite."""
-
-        if not token or self.busy:
-            return False
-        self._external_write = token
-        self.busyChanged.emit()
-        if self._closed or self._external_write != token:
-            if self._external_write == token:
-                self._external_write = None
-            return False
-        return True
+        return self._closed or self._writes.access.busy
 
     def publish_external_snapshot(self, token: str, snapshot: FavoriteCollectionSnapshot) -> bool:
         """Publish committed facts while the external write reservation is held."""
 
-        if self._closed or self._external_write != token:
+        if self._closed or self._writes.access.external_owner != token:
             return False
         current = {item.identity: item for item in snapshot.favorites}
         self._observed.update(current)
         self._confirmed = {identity: current.get(identity) for identity in self._observed}
         self._set_notice("")
-        if self._closed or self._external_write != token:
+        if self._closed or self._writes.access.external_owner != token:
             return False
         self.stateChanged.emit()
-        if self._closed or self._external_write != token:
+        if self._closed or self._writes.access.external_owner != token:
             return False
         self.collectionChanged.emit()
-        return not self._closed and self._external_write == token
-
-    def finish_external_write(self, token: str) -> None:
-        if self._external_write == token:
-            self._external_write = None
-            if not self._closed:
-                self.busyChanged.emit()
+        return not self._closed and self._writes.access.external_owner == token
 
     def state(self, identity: FavoriteIdentity) -> dict[str, bool]:
         """Return cached facts; reading this value never performs database work."""
@@ -116,46 +98,50 @@ class FavoriteController(QObject):
 
     @Slot()
     def retryStates(self) -> None:
-        if self._closed or self._busy:
+        if self._closed or self._writes.access.local_write_active:
             return
         self._set_notice("")
         self.ensure(tuple(self._observed), refresh=True)
 
     def save_posts(
-        self, posts: tuple[DanbooruPost, ...], *, guard: Callable[[], bool]
+        self, posts: tuple[DanbooruPost, ...], *, guard: Callable[[], bool],
     ) -> bool:
-        return self._change(
-            lambda: tuple(FavoriteCandidate.for_post(post) for post in posts),
-            True,
-            guard,
+        return self._writes.save_posts(
+            posts,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
         )
 
     def set_post(
-        self, post: DanbooruPost, desired: bool, *, guard: Callable[[], bool]
+        self, post: DanbooruPost, desired: bool, *, guard: Callable[[], bool],
     ) -> bool:
-        def build():
-            if desired:
-                return (FavoriteCandidate.for_post(post),)
-            if not isinstance(post, DanbooruPost) or type(post.id) is not int:
-                raise FavoriteError("invalid_identifier", "作品编号必须是正整数。")
-            return (post_identity(str(post.id)),)
-
-        return self._change(build, desired, guard)
+        return self._writes.set_post(
+            post, desired,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
+        )
 
     def set_tag(
         self, name: str, category: FavoriteTagCategory, desired: bool,
         *, guard: Callable[[], bool],
     ) -> bool:
-        return self._change(
-            lambda: (FavoriteCandidate.for_tag(name, category),), desired, guard
+        return self._writes.set_tag(
+            name, category, desired,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
         )
 
     def set_pool(
         self, pool_id: int, name: str, desired: bool, *, guard: Callable[[], bool],
     ) -> bool:
-        """Share confirmed series-pool facts with the existing collection."""
-        return self._change(
-            lambda: (FavoriteCandidate.for_pool(pool_id, name),), desired, guard,
+        return self._writes.set_pool(
+            pool_id, name, desired,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
         )
 
     def observe_items(self, items: tuple[FavoriteItem, ...]) -> None:
@@ -167,87 +153,74 @@ class FavoriteController(QObject):
         self._confirmed.update((item.identity, item) for item in items)
         self.stateChanged.emit()
 
-    def create_folder(self, name: str, *, guard) -> bool:
-        def command():
-            self._repository.create_folder(name)
-            return {}
-        return self._write(command, guard)
+    def create_folder(
+        self, name: str, *, guard: Callable[[], bool],
+    ) -> bool:
+        return self._writes.create_folder(
+            name,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
+        )
 
-    def rename_folder(self, identifier: int, name: str, revision: int, *, guard) -> bool:
-        def command():
-            self._repository.rename_folder(identifier, name, expected_revision=revision)
-            return {}
-        return self._write(command, guard)
+    def rename_folder(
+        self, identifier: int, name: str, revision: int, *, guard: Callable[[], bool],
+    ) -> bool:
+        return self._writes.rename_folder(
+            identifier, name, revision,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
+        )
 
-    def move_items(self, snapshot: FavoriteMutationSnapshot, *, guard) -> bool:
-        def command():
-            self._repository.move_favorites(
-                tuple(item.id for item in snapshot.items),
-                snapshot.target_folder.id if snapshot.target_folder else None,
-                expected_revision=snapshot.revision,
-            )
-            return {}
-        return self._write(command, guard)
+    def move_items(
+        self, snapshot: FavoriteMutationSnapshot, *, guard: Callable[[], bool],
+    ) -> bool:
+        return self._writes.move_items(
+            snapshot,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
+        )
 
-    def delete_items(self, snapshot: FavoriteMutationSnapshot, *, guard) -> bool:
-        def command():
-            self._repository.delete_favorites(
-                tuple(item.id for item in snapshot.items), expected_revision=snapshot.revision
-            )
-            return {item.identity: None for item in snapshot.items}
-        return self._write(command, guard)
+    def delete_items(
+        self, snapshot: FavoriteMutationSnapshot, *, guard: Callable[[], bool],
+    ) -> bool:
+        return self._writes.delete_items(
+            snapshot,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
+        )
 
-    def delete_folder(self, snapshot: FavoriteMutationSnapshot, mode: FolderDeleteMode, *, guard) -> bool:
-        def command():
-            self._repository.delete_folder(
-                snapshot.folder.id, mode, expected_revision=snapshot.revision
-            )
-            return {item.identity: None for item in snapshot.items} if mode is FolderDeleteMode.DELETE_FAVORITES else {}
-        return self._write(command, guard)
+    def delete_folder(
+        self, snapshot: FavoriteMutationSnapshot, mode: FolderDeleteMode,
+        *, guard: Callable[[], bool],
+    ) -> bool:
+        return self._writes.delete_folder(
+            snapshot, mode,
+            guard=lambda: not self._closed and guard(),
+            publish=self._publish,
+            failed=self._write_failed,
+        )
 
-    def _change(self, build_candidates, desired: bool, guard) -> bool:
-        if type(desired) is not bool:
+    def _publish(self, values: FavoriteChanges) -> bool:
+        if self._closed:
             return False
+        self._confirmed.update(values)
+        self._set_notice("")
+        if not self._closed:
+            self.stateChanged.emit()
+        if not self._closed:
+            self.collectionChanged.emit()
+        return not self._closed
 
-        def command():
-            candidates = build_candidates()
-            if not candidates or self._closed or not guard():
-                return None
-            if desired:
-                items = self._repository.add_favorites(candidates)
-                return {item.identity: item for item in items}
-            value = candidates[0]
-            identity = value if isinstance(value, FavoriteIdentity) else value.identity
-            self._repository.delete_by_identity(identity)
-            return {identity: None}
+    def _write_failed(self, error: Exception) -> None:
+        self._set_notice(f"收藏操作失败：{error}")
 
-        return self._write(command, guard)
-
-    def _write(self, command, guard) -> bool:
-        if self.busy or not guard():
-            return False
-        self._busy = True
-        self.busyChanged.emit()
-        try:
-            if self._closed or not guard():
-                return False
-            values = command()
-            if values is None or self._closed:
-                return False
-            self._confirmed.update(values)
-            self._set_notice("")
-            if not self._closed:
-                self.stateChanged.emit()
-            if not self._closed:
-                self.collectionChanged.emit()
-            return not self._closed
-        except (FavoriteError, TypeError, ValueError) as exc:
-            self._set_notice(f"收藏操作失败：{exc}")
-            return False
-        finally:
-            self._busy = False
-            if not self._closed:
-                self.busyChanged.emit()
+    def _access_changed(self) -> None:
+        if not self._closed:
+            self.busyChanged.emit()
 
     def _set_notice(self, text: str) -> None:
         if not self._closed and text != self._notice:
@@ -256,6 +229,7 @@ class FavoriteController(QObject):
 
     def shutdown(self) -> None:
         self._closed = True
+        self._writes.access.close()
 
 
 def post_identity(key: str) -> FavoriteIdentity:

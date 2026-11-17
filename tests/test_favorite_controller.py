@@ -8,6 +8,8 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 import pytest
 from PySide6.QtGui import QGuiApplication
 
+from danbooru_multi_search.app.favorites import FavoriteWriteService
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.core.favorites import FavoriteCandidate, FavoriteError
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.storage.database import Database
@@ -32,11 +34,15 @@ def post(identifier=1, *, url=IMAGE):
     )
 
 
+def controller_for(repository):
+    return FavoriteController(repository, FavoriteWriteService(repository, SharedWriteAccess()))
+
+
 def build(tmp_path):
     database = Database(tmp_path / "favorites.sqlite3")
     database.initialize()
     repository = FavoriteRepository(database)
-    return repository, FavoriteController(repository)
+    return repository, controller_for(repository)
 
 
 def test_shared_state_is_published_after_commit_and_cancel_is_idempotent(tmp_path):
@@ -92,7 +98,7 @@ def test_external_snapshot_is_published_before_writes_are_reenabled(tmp_path):
     repository, controller = build(tmp_path)
     old = repository.add_favorite(FavoriteCandidate.for_post(post(1)))
     controller.ensure((old.identity,))
-    assert controller.begin_external_write("import")
+    assert controller._writes.access.begin_external_write("import")
     assert not controller.set_post(post(2), True, guard=lambda: True)
     repository.delete_by_identity(old.identity)
     new = repository.add_favorite(FavoriteCandidate.for_post(post(3)))
@@ -100,17 +106,17 @@ def test_external_snapshot_is_published_before_writes_are_reenabled(tmp_path):
     controller.collectionChanged.connect(lambda: events.append((controller.busy, controller.state(old.identity)["saved"], controller.state(new.identity)["saved"])))
     assert controller.publish_external_snapshot("import", repository.capture_collection())
     assert events == [(True, False, True)]
-    controller.finish_external_write("wrong-owner")
+    controller._writes.access.finish_external_write("wrong-owner")
     assert controller.busy
-    controller.finish_external_write("import")
+    controller._writes.access.finish_external_write("import")
     assert not controller.busy
 
 
 def test_external_reservation_rechecks_synchronous_close(tmp_path):
     repository, controller = build(tmp_path)
     controller.busyChanged.connect(controller.shutdown)
-    assert not controller.begin_external_write("import")
-    assert controller._external_write is None
+    assert not controller._writes.access.begin_external_write("import")
+    assert controller._writes.access.external_owner is None
     assert repository.capture_collection().revision == 0
 
 

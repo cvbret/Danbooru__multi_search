@@ -4,7 +4,7 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第二轮结构整改
 - 当前里程碑：`第二轮结构整改完成`
-- 当前主要任务：`R5-002 普通下载与整池下载应用流程`
+- 当前主要任务：`R5-003 收藏写入与共享占用`
 - 当前状态：待提交
 - 执行状态：用户于 2026-11-17 要求生成整改方案并即刻实施；按第 45 节分批整改，M5 后续功能暂不扩展。
 - 最后更新：2026-11-17
@@ -2937,7 +2937,7 @@ M2 里程碑回归检查与提交。
 
 ### 45.3 当前任务 R5-002
 
-- 状态：待提交；起点 `dd5e5305e47282d3c368b57a1cf7b9da8d6466cb`，从干净工作树开始。目标为普通下载与整池下载的应用协调及确认提交流程迁移，删除已无消费者的两个旧内部模块。
+- 状态：已完成；起点 `dd5e5305e47282d3c368b57a1cf7b9da8d6466cb`，从干净工作树开始。目标为普通下载与整池下载的应用协调及确认提交流程迁移，删除已无消费者的两个旧内部模块。
 - 负责人：developer 实现及直接检查；reviewer 独立核对和聚焦验证；intergrator 在允许后精确本地提交；主 Agent 维护范围与状态。
 - 准确生产/打包范围 9 个路径：新增 `src/danbooru_multi_search/app/download_manager.py`、`app/pool_downloads.py`、`app/download_submission.py`；修改 `ui/downloads.py`、`ui/pool_downloads.py`、`ui/launcher.py`、`packaging/windows/DanbooruMultiSearch.spec`；删除 `danbooru/download_manager.py`、`danbooru/pool_downloads.py`。包内短路径沿用同一 src 前缀。两个旧协调模块没有包级公开导出，迁移全部消费者后不保留转发。
 - 准确测试范围 7 个路径：新增 `tests/test_download_submission.py`；修改 `tests/test_download_manager.py`、`tests/test_pool_download_manager.py`、`tests/test_download_ui.py`、`tests/test_pool_download_ui.py`、`tests/test_m2_qml.py`、`tests/test_windows_packaging.py`。现有下载/整池 QML 及正式关闭测试可选择直接相关节点执行，不预先改动这些文件。
@@ -2948,3 +2948,19 @@ M2 里程碑回归检查与提交。
 - 开发冻结准确 9 个生产/打包和 7 个测试路径，另含本记录。两个旧模块已删除且生产/打包无旧引用；3 个新应用模块没有 UI 导入。调度/文件回调/关闭正文保持既有行为，launcher 和手工 M2 装配共用一个提交服务。14 个现存代码/打包/测试文件语法及空白检查通过，新打包模块实际存在且导入清单无重复。
 - 本轮 51 个不同聚焦场景全部通过（18+18+15）：提交流程/来源身份/设置失败及保留原确认、两个管理器的队列容量/取消/25000 页准备/文件已提交但数据库失败/恢复关联/持锁暂停、真实 QML 宽窄窗口/正式关闭/手工装配/CLI/spec。没有执行全量回归或构建；底层 core/storage/流式请求/阅读器请求/CLI 实现/schema/QML 未修改。独立静态审查暂无阻断，等待最终聚焦验证。
 - reviewer 最终独立选择 25 项全部通过，50.11 秒：纯提交服务冷导入和实际保存、两种来源设置失败/回调失效及 UI 保留原请求、批量取消同步回调/共享容量/正式文件提交后数据库失败停止后续/零网络重启和手动恢复、25000 页有界整池/提交后补登记/关联等待手动恢复/持锁关闭、普通 QML 与宽窄池 QML、正式活动下载关闭且保留查询历史、旧 CLI 下载、spec 和手工 M2 装配。准确 9 个生产/打包、7 个测试及本记录共 17 个路径获准提交，无剩余阻断。仅使用受控本地服务和离屏界面，`.tools/pytest-r5-002-reviewer*` 保留且不提交，未执行完整测试或构建。
+- 本地提交：`238cd044b6280880d16e2bad025c27eb96511590`（`refactor(downloads): move coordination and submission into app`）。按重命名两端核对准确 17 个路径；两个管理器被识别为重命名，默认显示 15 条记录。提交后工作树与暂存区干净，未推送。
+
+### 45.4 当前任务 R5-003
+
+- 状态：待提交；起点 `238cd044b6280880d16e2bad025c27eb96511590`，从干净工作树开始。目标为收藏写入流程迁入应用层，所有相关用例共同使用一份写入占用状态，删除重复状态及跨控制器私有字段访问。
+- 负责人：developer 编码及直接检查；reviewer 独立核对/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围和任务状态。
+- 准确生产/打包范围 11 个路径：新增 `src/danbooru_multi_search/app/write_access.py`、`app/favorites.py`；修改 `ui/favorites.py`、`ui/favorite_transfer.py`、`ui/saved_queries.py`、`ui/artist_combinations.py`、`ui/query_checkpoints.py`、`ui/cache_protection.py`、`ui/cache_cleanup.py`、`ui/launcher.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用同一 src 前缀，不修改数据库事务、格式或 QML。
+- 准确测试范围 12 个路径：新增 `tests/test_write_access.py`、`tests/test_favorite_write_service.py`；修改 `tests/test_favorite_controller.py`、`tests/test_favorite_transfer_controller.py`、`tests/test_saved_query_controller.py`、`tests/test_artist_combination_controller.py`、`tests/test_checkpoint_controller.py`、`tests/test_cache_protection.py`、`tests/test_cache_cleanup.py`、`tests/test_m2_qml.py`、`tests/test_download_ui.py`、`tests/test_windows_packaging.py`。下载 UI 测试实际直接构造收藏控制器，需要同步新依赖；其他真实 QML/正式关闭可选原节点，不预先修改其文件。
+- `SharedWriteAccess` 作为单一应用 QObject，只有一个 `changed` 通知，持有本地写入、外部 owner、维护 owner 和关闭状态；提供必要的申请/释放、只读状态及关闭操作。维护申请在通知前同时登记外部占用和维护许可，通知后重新核对本次身份/关闭；匹配释放先清维护许可，再清外部 owner，最后通知。错误 owner 不影响其他操作，关闭只禁止新写入，不清尚未释放的 owner/维护许可，不新增关闭通知。
+- `FavoriteWriteService` 接管作品/标签/作品池候选、收藏/取消、文件夹/移动/删除命令、仓库变更、revision 参数和写入占用/guard 复查；取消收藏仅依赖身份。成功事实发布及失败通知通过同步回调在释放占用之前完成，保持 `collectionChanged` 发生时仍然 busy；应用服务不导入 UI，不把数据库事务内校验挪到事务外。
+- 收藏 UI 保留已确认/观察对象、只读状态、notice、Qt 属性和事实发布，委托明确的写入命令；删除旧 `_change/_write` 业务实现、`_busy/_external_write` 及外部占用申请/释放转发入口。其他占用消费者直接使用同一 access；仍需收藏事实的消费者继续订阅事实通知。gallery/detail/pool/favorite_collection 的既有公开 UI 状态/动作接口保留。
+- launcher 创建唯一 access 及明确的仓库局部对象并注入所有消费者；画师组合不再读取收藏 UI 的私有仓库。清理原先在外部占用通知前设置的两份维护标记合并，删除各自字段和 setter。检查点最终保存仍允许自己的维护 owner、阻止外来 owner，不能改成简单检查 busy；缓存保护的占用判定仍为本地写入或外来 owner，不加入 closed。
+- 验收关注维护申请/失败/错误释放/关闭保留状态、同步通知改变身份、成功或失败发布前不释放占用、收藏事务/preview revision、导入成功与关闭、查询最后保存、缓存保护和清理、常用查询/画师组合及正式装配的共享实例。Qt 信号转发不能假设监听顺序固定，每处既有身份和关闭检查保持。只执行直接相关检查，完整回归和构建仍留在结构整改里程碑。
+- 开发已冻结准确 11 个生产/打包和 12 个测试路径，另含本记录。所有消费者使用同一 access，旧收藏写入流程、占用字段、两个维护 setter、外部占用转发及经收藏 UI 私有字段取得仓库的调用已删除。23 个代码/打包/测试文件语法和空白检查通过，两个新 app 模块无 UI 导入，spec 模块存在且无重复。
+- 本轮 79 个不同直接场景通过：基础 25 项、消费者 34 项、装配/真实 QML 20 项。基础首轮 24 项通过，唯一新断言误将既有 `stale_preview` 写作 `stale_confirmation`，只修正该断言并单项复查通过，生产错误码未改。覆盖维护/失败申请/关闭许可、真实收藏写入与发布顺序、各共享消费者、正式导入持锁关闭及最终查询保存；没有扩大 QML/schema/事务范围或执行全量回归/构建。独立静态审查暂无确定阻断，等待最终聚焦验证。
+- reviewer 最终独立选择 30 项全部通过，6.95 秒：access 状态/错误 owner/通知关闭与替换、成功失败发布前持有占用、guard/候选/身份取消/既有版本错误码、导入发布和提交后关闭、常用查询/画师/续扫通知重入、维护关闭最后保存/新查询/缓存保护、真实收藏与窄窗清理、M2 唯一实例和正式导入持锁关闭/spec。准确 11 个生产/打包、12 个测试及本记录共 24 个路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r5-003-reviewer*` 保留且不提交；未执行完整回归、构建、原生界面、真实服务或 Linux。

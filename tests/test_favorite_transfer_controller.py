@@ -12,16 +12,15 @@ from danbooru_multi_search.core.favorites import FavoriteCandidate, FavoriteIden
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.favorite_transfer import FavoriteTransferService
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
-from danbooru_multi_search.ui.favorites import FavoriteController
-from tests.test_favorite_controller import APPLICATION, post
+from tests.test_favorite_controller import APPLICATION, post, controller_for
 from tests.test_favorite_transfer_service import source_file
 from tests.test_qml_favorites import wait
 
 
 def setup_transfer(tmp_path):
     source, target = source_file(tmp_path)
-    shared = FavoriteController(FavoriteRepository(target))
-    controller = FavoriteTransferController(target.path, shared)
+    shared = controller_for(FavoriteRepository(target))
+    controller = FavoriteTransferController(target.path, shared, shared._writes.access)
     return source, target, shared, controller
 
 
@@ -266,7 +265,7 @@ def test_close_during_started_import_waits_for_commit_and_suppresses_publication
         assert controller.shutdown_completed
         assert writes == []
         assert len(FavoriteRepository(target).list_favorites()) == 1
-        assert shared._external_write is None
+        assert shared._writes.access.external_owner is None
     finally:
         release.set()
         controller.shutdown()
@@ -356,8 +355,8 @@ def test_shared_reservation_release_does_not_emit_transfer_updates_after_shutdow
     source, target, shared, controller = setup_transfer(tmp_path)
     notifications = []
     controller.changed.connect(lambda: notifications.append(True))
-    assert shared.begin_external_write("other")
+    assert shared._writes.access.begin_external_write("other")
     controller.shutdown()
     count = len(notifications)
-    shared.finish_external_write("other")
+    shared._writes.access.finish_external_write("other")
     assert len(notifications) == count

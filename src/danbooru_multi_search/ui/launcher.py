@@ -39,6 +39,8 @@ from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
 from danbooru_multi_search.storage.cache_protection import CacheProtectionRepository
 from danbooru_multi_search.storage.downloads import DownloadRepository
+from danbooru_multi_search.app.favorites import FavoriteWriteService
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.app.download_manager import PersistentDownloadManager
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.ui.downloads import DownloadUiController
@@ -183,8 +185,9 @@ class _UiSession(QObject):
             self.task_queue, self,
         )
         self.eagle = EagleController(self.eagle_runtime, self)
+        download_repository = DownloadRepository(database)
         self.download_manager = PersistentDownloadManager(
-            DownloadRepository(database), self.task_queue, self.network_manager,
+            download_repository, self.task_queue, self.network_manager,
             scheduler=scheduler, parent=self,
         )
         self.translation_store = TagTranslationStore(parent=self)
@@ -209,9 +212,13 @@ class _UiSession(QObject):
             self.translation_store,
             parent=self,
         )
-        self.favorite_controller = FavoriteController(FavoriteRepository(database), self)
+        favorite_repository = FavoriteRepository(database)
+        self.write_access = SharedWriteAccess(self)
+        self.favorite_writes = FavoriteWriteService(favorite_repository, self.write_access)
+        self.favorite_controller = FavoriteController(favorite_repository, self.favorite_writes, self)
         self.cache_protection = CacheProtectionController(
             CacheProtectionRepository(database), self.favorite_controller, self.image_cache_controller, self,
+            access=self.write_access,
         )
         self.gallery_selection = GallerySelectionController(
             self.query_controller.posts_model, self.favorite_controller, self
@@ -225,7 +232,7 @@ class _UiSession(QObject):
             parent=self,
         )
         self.favorite_collection = FavoriteCollectionController(
-            self.favorite_controller._repository, self.favorite_controller, self.detail_navigation, self
+            favorite_repository, self.favorite_controller, self.detail_navigation, self
         )
         self.pool_browser = PoolBrowserController(
             PoolRequestService(danbooru_base_url, task_queue=self.task_queue, network_manager=self.network_manager, parent=self),
@@ -235,16 +242,17 @@ class _UiSession(QObject):
         )
         self.pool_navigation = PoolNavigationController(self.pool_browser, self.detail_navigation, self)
         self.query_executor.executionBound.connect(lambda event: self.pool_navigation.invalidate())
-        self.favorite_transfer = FavoriteTransferController(database.path, self.favorite_controller, self)
+        self.favorite_transfer = FavoriteTransferController(database.path, self.favorite_controller, self.write_access, self)
         self.artist_combinations = ArtistCombinationController(
-            ArtistCombinationRepository(database), self.favorite_controller, self.query_bridge, self
+            ArtistCombinationRepository(database), self.favorite_controller, self.query_bridge, self,
+            access=self.write_access, favorite_repository=favorite_repository,
         )
         self.saved_queries = SavedQueryController(
-            SavedQueryRepository(database), self.query_bridge, self.favorite_controller, self
+            SavedQueryRepository(database), self.query_bridge, self.write_access, self
         )
         self.download_submission = DownloadSubmissionService(self.settings_controller)
         self.download_ui = DownloadUiController(
-            self.download_manager, self.download_manager._repository, self.settings_controller,
+            self.download_manager, download_repository, self.settings_controller,
             self.query_controller.posts_model, self.gallery_selection, self.detail_controller,
             Path(settings.download_directory) if settings.download_directory else (runtime.paths.download_dir if runtime else temporary_path / "downloads"), self,
             submission=self.download_submission,
@@ -291,9 +299,10 @@ class _UiSession(QObject):
             )
         else:
             resolved_screen_geometries = tuple(screen_geometries)
+        checkpoint_repository = QueryCheckpointRepository(database)
         self.query_checkpoints = QueryCheckpointController(
-            QueryCheckpointRepository(database), self.history_repository, self.query_controller,
-            self.query_bridge, self.favorite_controller, self,
+            checkpoint_repository, self.history_repository, self.query_controller,
+            self.query_bridge, self.write_access, self,
         )
         self.session_controller = BrowserSessionController(
             self.history_repository,
@@ -305,9 +314,8 @@ class _UiSession(QObject):
         )
         self.query_checkpoints.attach_session(self.session_controller)
         self.cache_cleanup = CacheCleanupController(
-            self.history_repository, self.query_checkpoints._repository, self.query_checkpoints,
-            self.session_controller, self.favorite_controller, self.image_cache_controller,
-            self.cache_protection, self,
+            self.history_repository, checkpoint_repository, self.query_checkpoints,
+            self.session_controller, self.write_access, self.image_cache_controller, self,
         )
         self._closed = False
         self._closing = False

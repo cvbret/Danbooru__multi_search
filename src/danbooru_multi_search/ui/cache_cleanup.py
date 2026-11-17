@@ -7,11 +7,10 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError
 from danbooru_multi_search.storage.history import HistoryError, HistoryRepository, HistoryCleanupIdentity
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository, CheckpointCleanupIdentity
-from danbooru_multi_search.ui.cache_protection import CacheProtectionController
-from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.image_cache import ImageCacheController
 from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
 from danbooru_multi_search.ui.session_state import BrowserSessionController
@@ -31,21 +30,21 @@ class CacheCleanupController(QObject):
 
     def __init__(self, history: HistoryRepository, checkpoints: QueryCheckpointRepository,
                  query_checkpoints: QueryCheckpointController, session: BrowserSessionController,
-                 favorites: FavoriteController, images: ImageCacheController,
-                 protection: CacheProtectionController, parent: QObject | None = None) -> None:
+                 access: SharedWriteAccess, images: ImageCacheController,
+                 parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._history, self._checkpoints = history, checkpoints
         self._query_checkpoints, self._session = query_checkpoints, session
-        self._favorites, self._images, self._protection = favorites, images, protection
+        self._access, self._images = access, images
         self._pending: _Cleanup | None = None
         self._closed = False
         self._generation = 0
         self._notice = ""
-        favorites.busyChanged.connect(self._busy_changed)
+        access.changed.connect(self._busy_changed)
 
     @Property(bool, notify=changed)
     def canWrite(self) -> bool:
-        return not self._closed and not self._favorites.busy
+        return not self._closed and not self._access.busy
 
     @Property(str, notify=changed)
     def noticeText(self) -> str:
@@ -110,11 +109,7 @@ class CacheCleanupController(QObject):
         if not self.canWrite or pending is None or not token or pending.token != token:
             return False
         owner = uuid4().hex
-        self._protection.set_cleanup_owner(owner)
-        self._query_checkpoints.set_maintenance_owner(owner)
-        if not self._favorites.begin_external_write(owner):
-            self._query_checkpoints.set_maintenance_owner(None)
-            self._protection.set_cleanup_owner(None)
+        if not self._access.begin_external_write(owner, maintenance=True):
             return False
         try:
             if self._closed or self._pending is not pending:
@@ -152,9 +147,7 @@ class CacheCleanupController(QObject):
         except (CheckpointError, HistoryError, OSError, RuntimeError, ValueError) as exc:
             return self._fail(exc)
         finally:
-            self._query_checkpoints.set_maintenance_owner(None)
-            self._protection.set_cleanup_owner(None)
-            self._favorites.finish_external_write(owner)
+            self._access.finish_external_write(owner)
 
     def _fail(self, error: Exception) -> bool:
         if not self._closed:

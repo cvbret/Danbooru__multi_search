@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.core.artist_combinations import (
     ArtistCombination, ArtistCombinationDraft, ArtistCombinationError, ArtistCombinationMode,
 )
@@ -14,6 +15,7 @@ from danbooru_multi_search.core.favorites import (
     FavoriteError, FavoriteFilter, FavoriteItem, FavoriteObjectType, FavoriteTagCategory,
 )
 from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository
+from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.query_state import M2QueryBridgeController
 
@@ -25,10 +27,12 @@ class ArtistCombinationController(QObject):
     draftApplied = Signal()
 
     def __init__(self, repository: ArtistCombinationRepository, favorites: FavoriteController,
-                 query: M2QueryBridgeController, parent: QObject | None = None) -> None:
+                 query: M2QueryBridgeController, parent: QObject | None = None, *,
+                 access: SharedWriteAccess, favorite_repository: FavoriteRepository) -> None:
         super().__init__(parent)
         self._repository = repository
-        self._favorites = favorites
+        self._access = access
+        self._favorite_repository = favorite_repository
         self._query = query
         self._artists: tuple[FavoriteItem, ...] = ()
         self._combinations: tuple[ArtistCombination, ...] = ()
@@ -40,7 +44,7 @@ class ArtistCombinationController(QObject):
         self._closed = False
         self._pending: tuple[str, ArtistCombination, int] | None = None
         favorites.collectionChanged.connect(self._collection_changed)
-        favorites.busyChanged.connect(self._busy_changed)
+        access.changed.connect(self._busy_changed)
 
     @Property(int, notify=changed)
     def generation(self) -> int:
@@ -56,7 +60,7 @@ class ArtistCombinationController(QObject):
 
     @Property(bool, notify=changed)
     def canWrite(self) -> bool:
-        return self._active and not self._closed and not self._favorites.busy
+        return self._active and not self._closed and not self._access.busy
 
     @Property(str, notify=changed)
     def errorText(self) -> str:
@@ -102,7 +106,7 @@ class ArtistCombinationController(QObject):
             values: list[FavoriteItem] = []
             filters = FavoriteFilter(object_type=FavoriteObjectType.TAG, tag_category=FavoriteTagCategory.ARTIST)
             while True:
-                page = self._favorites._repository.list_favorites(filters, limit=1000, offset=len(values))
+                page = self._favorite_repository.list_favorites(filters, limit=1000, offset=len(values))
                 values.extend(page)
                 if len(page) < 1000:
                     break
@@ -223,7 +227,7 @@ class ArtistCombinationController(QObject):
         names = []
         for key in self._selected:
             source = by_key.get(key)
-            current = self._favorites._repository.get_by_identity(source.identity) if source else None
+            current = self._favorite_repository.get_by_identity(source.identity) if source else None
             if (current is None or current.id != source.id
                     or current.identity.object_type is not FavoriteObjectType.TAG
                     or current.tag_category is not FavoriteTagCategory.ARTIST):
@@ -241,7 +245,7 @@ class ArtistCombinationController(QObject):
         if not self._current(generation) or not guard() or not self.canWrite:
             return False
         owner = uuid4().hex
-        if not self._favorites.begin_external_write(owner):
+        if not self._access.begin_external_write(owner):
             return False
         try:
             if not self._current(generation) or not guard():
@@ -254,7 +258,7 @@ class ArtistCombinationController(QObject):
         except (FavoriteError, ArtistCombinationError, ValueError) as exc:
             return self._fail(exc)
         finally:
-            self._favorites.finish_external_write(owner)
+            self._access.finish_external_write(owner)
 
     def _invalidate(self) -> None:
         self._generation += 1

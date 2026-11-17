@@ -18,7 +18,8 @@ def setup(tmp_path, expression="base"):
     ordinary = favorites.add_favorite(FavoriteCandidate.for_tag("cat", FavoriteTagCategory.GENERAL))
     combinations = ArtistCombinationRepository(favorites._database)
     bridge, core, _editor = _bridge(expression)
-    controller = ArtistCombinationController(combinations, shared, bridge)
+    controller = ArtistCombinationController(combinations, shared, bridge,
+        access=shared._writes.access, favorite_repository=favorites)
     controller.setActive(True)
     return favorites, shared, combinations, controller, bridge, core, (artist_a, artist_b, ordinary)
 
@@ -90,14 +91,14 @@ def test_external_import_occupation_blocks_all_combination_writes(tmp_path, monk
     generation, revision = select(controller, items[0])
     assert controller.prepareDeleteCombination(str(existing.combination_id), generation)
     token = controller.deleteConfirmation["token"]
-    assert shared.begin_external_write("import")
+    assert shared._writes.access.begin_external_write("import")
     def forbidden(*args, **kwargs):
         raise AssertionError("GUI must not wait for the import's SQLite write lock")
     monkeypatch.setattr(saved, "_connection", forbidden)
     assert not controller.saveSelection(generation, revision, "New", "all")
     assert not controller.renameCombination(str(existing.combination_id), generation, "Changed")
     assert not controller.confirmDelete(token)
-    shared.finish_external_write("import")
+    shared._writes.access.finish_external_write("import")
 
 
 @pytest.mark.parametrize("reentry", ["clear", "reload", "close"])
@@ -161,7 +162,8 @@ def test_favorite_source_loads_more_than_one_thousand_and_old_selection_is_inval
     favorites, shared = build(tmp_path)
     favorites.add_favorites(tuple(FavoriteCandidate.for_tag(f"artist_{index}", FavoriteTagCategory.ARTIST) for index in range(1001)))
     bridge, _core, _editor = _bridge("base")
-    controller = ArtistCombinationController(ArtistCombinationRepository(favorites._database), shared, bridge)
+    controller = ArtistCombinationController(ArtistCombinationRepository(favorites._database), shared, bridge,
+        access=shared._writes.access, favorite_repository=favorites)
     controller.setActive(True)
     assert len(controller.artists) == 1001
     row = controller.artists[-1]

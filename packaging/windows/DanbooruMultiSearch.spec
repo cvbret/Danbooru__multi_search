@@ -123,6 +123,8 @@ hidden_imports = [
     "danbooru_multi_search.storage.favorite_codec",
     "danbooru_multi_search.storage.favorite_transfer",
     "danbooru_multi_search.app.favorite_transfer",
+    "danbooru_multi_search.app.favorites",
+    "danbooru_multi_search.app.write_access",
     "danbooru_multi_search.storage.favorites",
     "danbooru_multi_search.storage.history",
     "danbooru_multi_search.storage.post_snapshot",

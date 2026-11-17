@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError, CheckpointRecord, ExecutionCheckpoint, QueryCheckpoint
 from danbooru_multi_search.danbooru.query_controller import DanbooruM2QueryController, GalleryQueryOrigin, GalleryQueryAccepted, GalleryViewDefinitionChanged, GalleryResultEvent
 from danbooru_multi_search.danbooru.query_types import GalleryResultSummary, QueryExecutionSnapshot, QueryExecutionErrorCode
 from danbooru_multi_search.danbooru.result_processing import build_query_result_session, process_query_snapshot
 from danbooru_multi_search.storage.history import HistoryError, HistoryRepository, RecentQuery
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
-from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.query_state import M2QueryBridgeController
 
 if TYPE_CHECKING:
@@ -26,10 +26,10 @@ class QueryCheckpointController(QObject):
 
     def __init__(self, repository: QueryCheckpointRepository, history: HistoryRepository,
                  controller: DanbooruM2QueryController, bridge: M2QueryBridgeController,
-                 favorites: FavoriteController, parent: QObject | None = None) -> None:
+                 access: SharedWriteAccess, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._repository, self._history, self._controller = repository, history, controller
-        self._bridge, self._favorites = bridge, favorites
+        self._bridge, self._access = bridge, access
         self._session = None
         self._leases = {}
         self._selected = None
@@ -40,13 +40,12 @@ class QueryCheckpointController(QObject):
         self._closed = self._closing = self._draft_loading = False
         self._failing_identities: set[tuple[int | None, int | None, int]] = set()
         self._retired_executions: set[tuple[int | None, int | None]] = set()
-        self._maintenance_owner: str | None = None
         self._deferred = None
         self._resuming = None
         controller.executor.before_attempt = self.persist_execution
         controller.executor.before_abandon = self.persist_execution
         controller.executor.before_publish = self.persist_execution
-        favorites.busyChanged.connect(self._busy_changed)
+        access.changed.connect(self._busy_changed)
 
     def attach_session(self, session: BrowserSessionController) -> None:
         self._session = session
@@ -61,7 +60,7 @@ class QueryCheckpointController(QObject):
 
     @Property(bool, notify=changed)
     def canResume(self) -> bool:
-        return not self._closed and not self._closing and not self._favorites.busy and self._selected is not None and not self._selected.checkpoint.execution.resume_reason and self._selected.checkpoint.source == self._controller.checkpoint_source
+        return not self._closed and not self._closing and not self._access.busy and self._selected is not None and not self._selected.checkpoint.execution.resume_reason and self._selected.checkpoint.source == self._controller.checkpoint_source
 
     @Property(bool, notify=draftLoadingChanged)
     def draftLoading(self) -> bool:
@@ -98,7 +97,7 @@ class QueryCheckpointController(QObject):
         operation_id = self._controller.operation_id
         claimed = None
         owner = uuid4().hex
-        if not self._favorites.begin_external_write(owner):
+        if not self._access.begin_external_write(owner):
             return False
         try:
             if self._closed or self._closing or self._generation != generation or self._selected != record or self._selection_token != token or self._controller.operation_id != operation_id:
@@ -115,7 +114,7 @@ class QueryCheckpointController(QObject):
             if self._closed or self._closing or self._generation != generation:
                 return False
             # Release the short claim before execution; the accepted boundary writes again.
-            self._favorites.finish_external_write(owner)
+            self._access.finish_external_write(owner)
             if self._closed or self._closing or self._generation != generation or self._selected != record or self._selection_token != token or self._controller.operation_id != operation_id:
                 return False
             succeeded = bool(self._session.resumeCheckpoint(claimed.checkpoint, claimed.history_id))
@@ -129,7 +128,7 @@ class QueryCheckpointController(QObject):
         finally:
             if self._resuming is claimed:
                 self._resuming = None
-            self._favorites.finish_external_write(owner)
+            self._access.finish_external_write(owner)
             if not self._closed:
                 self.changed.emit()
                 QTimer.singleShot(0, self._finish_draft_loading)
@@ -143,8 +142,12 @@ class QueryCheckpointController(QObject):
         return self._controller.operation_id, self._controller.execution_id, self._controller.view_generation
 
     def _check_write(self):
-        own_maintenance = self._maintenance_owner is not None and self._favorites._external_write == self._maintenance_owner and not self._favorites._busy
-        occupied = self._favorites._external_write is not None and not own_maintenance if self._closing else self._favorites.busy and not own_maintenance
+        own_maintenance = (
+            self._access.maintenance_owner is not None
+            and self._access.external_owner == self._access.maintenance_owner
+            and not self._access.local_write_active
+        )
+        occupied = self._access.external_owner is not None and not own_maintenance if self._closing else self._access.busy and not own_maintenance
         if self._closed or occupied:
             raise CheckpointError("storage_busy", "收藏正在导入，检查点暂时无法保存，查询已停止。")
 
@@ -274,9 +277,6 @@ class QueryCheckpointController(QObject):
         if self._deferred is None and identity in self._leases:
             checkpoint = self._controller.capture_checkpoint()
             self._deferred = (identity, checkpoint, self._summary(checkpoint))
-
-    def set_maintenance_owner(self, owner: str | None) -> None:
-        self._maintenance_owner = owner
 
     @property
     def current_ownership(self) -> CheckpointRecord | None:

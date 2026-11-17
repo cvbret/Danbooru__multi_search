@@ -14,7 +14,7 @@ def setup(tmp_path, expression="base"):
     favorites, shared = build(tmp_path)
     saved = SavedQueryRepository(favorites._database)
     bridge, core, editor = _bridge(expression)
-    controller = SavedQueryController(saved, bridge, shared)
+    controller = SavedQueryController(saved, bridge, shared._writes.access)
     return favorites, shared, saved, controller, bridge, core
 
 
@@ -65,7 +65,7 @@ def test_import_occupation_refuses_sql_writes(tmp_path, monkeypatch, action):
     generation = controller.generation
     assert controller.prepareDelete(record.query_id, str(record.revision), generation)
     deletion = controller.deleteConfirmation["token"]
-    assert shared.begin_external_write("import")
+    assert shared._writes.access.begin_external_write("import")
     def forbidden(**kwargs):
         raise AssertionError("GUI must not enter SQL during an external write")
     monkeypatch.setattr(saved, "_connection", forbidden)
@@ -73,7 +73,7 @@ def test_import_occupation_refuses_sql_writes(tmp_path, monkeypatch, action):
                   "rename": lambda: controller.rename(record.query_id, str(record.revision), generation, "Changed"),
                   "delete": lambda: controller.confirmDelete(deletion)}
     assert not operations[action]()
-    shared.finish_external_write("import")
+    shared._writes.access.finish_external_write("import")
 
 
 @pytest.mark.parametrize("reentry", ["draft", "reload", "close"])

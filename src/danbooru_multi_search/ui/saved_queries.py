@@ -7,10 +7,10 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.core.saved_queries import SavedQuery, SavedQueryDraft, SavedQueryError
 from danbooru_multi_search.danbooru.query_definition import GalleryQueryDefinition
 from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
-from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.query_state import M2QueryBridgeController
 
 _MODE_TEXT = {"standard": "普通查询", "rank": "近期热门", "latest": "最新作品"}
@@ -22,9 +22,9 @@ class SavedQueryController(QObject):
     PAGE_SIZE = 50
 
     def __init__(self, repository: SavedQueryRepository, query: M2QueryBridgeController,
-                 favorites: FavoriteController, parent: QObject | None = None) -> None:
+                 access: SharedWriteAccess, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._repository, self._query, self._favorites = repository, query, favorites
+        self._repository, self._query, self._access = repository, query, access
         self._queries: tuple[SavedQuery, ...] = ()
         self._generation = 0
         self._draft_generation = 0
@@ -33,7 +33,7 @@ class SavedQueryController(QObject):
         self._capture: tuple[str, GalleryQueryDefinition] | None = None
         self._pending: tuple[str, SavedQuery, int] | None = None
         query.draftChanged.connect(self._draft_changed)
-        favorites.busyChanged.connect(self._busy_changed)
+        access.changed.connect(self._busy_changed)
 
     @Property(int, notify=changed)
     def generation(self) -> int:
@@ -41,7 +41,7 @@ class SavedQueryController(QObject):
 
     @Property(bool, notify=changed)
     def canWrite(self) -> bool:
-        return self._active and not self._closed and not self._favorites.busy
+        return self._active and not self._closed and not self._access.busy
 
     @Property(bool, notify=changed)
     def hasMore(self) -> bool:
@@ -210,7 +210,7 @@ class SavedQueryController(QObject):
         if not self._current(generation) or not guard() or not self.canWrite:
             return False
         owner = uuid4().hex
-        if not self._favorites.begin_external_write(owner):
+        if not self._access.begin_external_write(owner):
             return False
         try:
             if not self._current(generation) or not guard():
@@ -223,7 +223,7 @@ class SavedQueryController(QObject):
         except SavedQueryError as exc:
             return self._fail(exc)
         finally:
-            self._favorites.finish_external_write(owner)
+            self._access.finish_external_write(owner)
 
     def _current(self, generation: int) -> bool:
         return not self._closed and self._active and self._generation == generation

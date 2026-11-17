@@ -12,11 +12,11 @@ from danbooru_multi_search.danbooru.details import DanbooruDetailController
 from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 from danbooru_multi_search.storage.favorites import FavoriteRepository
-from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.downloads import DownloadUiController
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from tests.test_download_manager import setup, works
+from tests.test_favorite_controller import controller_for
 from tests.test_download_repository import request
 
 
@@ -30,7 +30,7 @@ def env(tmp_path):
     store.save(initial)
     settings = SettingsController(store, initial)
     gallery = DanbooruPostListModel()
-    favorites = FavoriteController(FavoriteRepository(repository._database))
+    favorites = controller_for(FavoriteRepository(repository._database))
     selection = GallerySelectionController(gallery, favorites)
     detail = DanbooruDetailController("https://example.invalid", TagTranslationStore())
     ui = DownloadUiController(manager, repository, settings, gallery, selection, detail, default,

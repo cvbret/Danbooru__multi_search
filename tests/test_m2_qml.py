@@ -67,6 +67,8 @@ from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
 from danbooru_multi_search.storage.downloads import DownloadRepository
+from danbooru_multi_search.app.favorites import FavoriteWriteService
+from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.app.download_manager import PersistentDownloadManager
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.ui.downloads import DownloadUiController
@@ -318,10 +320,13 @@ def _create_window(tmp_path):
         local_timezone=timezone.utc,
     )
     detail_navigation = DetailNavigationController(details, core.posts_model)
-    favorites = FavoriteController(FavoriteRepository(database))
+    favorite_repository = FavoriteRepository(database)
+    write_access = SharedWriteAccess()
+    favorite_writes = FavoriteWriteService(favorite_repository, write_access)
+    favorites = FavoriteController(favorite_repository, favorite_writes)
     selection = GallerySelectionController(core.posts_model, favorites)
     detail_favorites = DetailFavoritesController(details, favorites)
-    collection = FavoriteCollectionController(favorites._repository, favorites, detail_navigation)
+    collection = FavoriteCollectionController(favorite_repository, favorites, detail_navigation)
     pool_browser = PoolBrowserController(
         PoolRequestService("https://example.invalid", task_queue=tags._task_queue,
                            network_manager=tags._network_manager),
@@ -332,10 +337,12 @@ def _create_window(tmp_path):
     )
     pool_navigation = PoolNavigationController(pool_browser, detail_navigation)
     executor.executionBound.connect(lambda event: pool_navigation.invalidate())
-    transfer = FavoriteTransferController(database.path, favorites)
-    combinations = ArtistCombinationController(ArtistCombinationRepository(database), favorites, bridge)
-    saved_queries = SavedQueryController(SavedQueryRepository(database), bridge, favorites)
-    checkpoints = QueryCheckpointController(QueryCheckpointRepository(database), session._repository, core, bridge, favorites)
+    transfer = FavoriteTransferController(database.path, favorites, write_access)
+    combinations = ArtistCombinationController(ArtistCombinationRepository(database), favorites, bridge,
+        access=write_access, favorite_repository=favorite_repository)
+    saved_queries = SavedQueryController(SavedQueryRepository(database), bridge, write_access)
+    checkpoint_repository = QueryCheckpointRepository(database)
+    checkpoints = QueryCheckpointController(checkpoint_repository, session._repository, core, bridge, write_access)
     settings_controller = SettingsController(
         SettingsStore(tmp_path / "settings.json"), AppSettings()
     )
@@ -362,8 +369,8 @@ def _create_window(tmp_path):
     pool_reader.changed.connect(download_ui.refresh_snapshot_source)
     collection.poolRequested.connect(pool_navigation.openFavoritePool)
     images = ImageCacheController(tmp_path / "image-cache")
-    protection = CacheProtectionController(CacheProtectionRepository(database), favorites, images)
-    cleanup = CacheCleanupController(session._repository, checkpoints._repository, checkpoints, session, favorites, images, protection)
+    protection = CacheProtectionController(CacheProtectionRepository(database), favorites, images, access=write_access)
+    cleanup = CacheCleanupController(session._repository, checkpoint_repository, checkpoints, session, write_access, images)
     factory = ImageNetworkAccessManagerFactory(images)
     configure_controls_style()
     engine = QQmlApplicationEngine()
@@ -476,6 +483,15 @@ def test_m2_root_loads_split_panels_and_has_no_pagination(tmp_path):
     values = _create_window(tmp_path)
     try:
         root = values["root"]
+        access = values["favorites"]._writes.access
+        assert all(
+            values[name]._access is access
+            for name in (
+                "transfer", "combinations", "saved_queries", "checkpoints",
+                "cache_protection", "cache_cleanup",
+            )
+        )
+        assert values["combinations"]._favorite_repository is values["favorites"]._repository
         for name in (
             "tagsInput",
             "ratingFilter",

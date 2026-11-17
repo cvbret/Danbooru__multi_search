@@ -28,7 +28,7 @@ from danbooru_multi_search.core.favorites import FavoriteCandidate
 from danbooru_multi_search.storage.cache_protection import CacheProtectionError, CacheProtectionRepository
 from danbooru_multi_search.storage.database import Database
 from danbooru_multi_search.storage.favorites import FavoriteRepository
-from tests.test_favorite_controller import post
+from tests.test_favorite_controller import post, controller_for
 
 
 def build(tmp_path):
@@ -99,12 +99,12 @@ def test_unchanged_collection_revision_reuses_decoded_urls(tmp_path, monkeypatch
 def test_empty_cache_initialization_keeps_protection_read_failure_visible(tmp_path):
     from danbooru_multi_search.ui.image_cache import ImageCacheController, MINIMUM_IMAGE_CACHE_BYTES
     from danbooru_multi_search.ui.cache_protection import CacheProtectionController
-    from danbooru_multi_search.ui.favorites import FavoriteController
     database, favorites, repository = build(tmp_path)
     with database.connect() as connection:
         connection.execute("DELETE FROM favorite_collection_state")
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(repository, FavoriteController(favorites), images)
+    shared = controller_for(favorites)
+    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
     try:
         assert images._ensure_cache() is not None
         assert "缺失" in images.statusText and not protection.can_store()
@@ -120,7 +120,6 @@ def test_initialization_and_shrink_keep_real_protected_overflow_message(tmp_path
     from danbooru_multi_search.ui.image_cache import ImageCacheController, MINIMUM_IMAGE_CACHE_BYTES, cache_key
     from danbooru_multi_search.ui.protected_image_cache import ProtectedImageDiskCache
     from danbooru_multi_search.ui.cache_protection import CacheProtectionController
-    from danbooru_multi_search.ui.favorites import FavoriteController
     from tests.test_protected_image_cache import insert, make_cache
     database, favorites, repository = build(tmp_path)
     url = "https://example.invalid/saved.jpg"
@@ -132,7 +131,8 @@ def test_initialization_and_shrink_keep_real_protected_overflow_message(tmp_path
             super().setMaximumCacheSize(1000 if value > MINIMUM_IMAGE_CACHE_BYTES else 500)
     images = ImageCacheController(tmp_path / "images", maximum_bytes=2 * MINIMUM_IMAGE_CACHE_BYTES, disk_cache_factory=lambda parent: TinyCache(parent,
         key=cache_key, protection=images._protection_provider, status=images._set_status))
-    protection = CacheProtectionController(repository, FavoriteController(favorites), images)
+    shared = controller_for(favorites)
+    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
     try:
         assert images._ensure_cache() is not None
         assert "超过容量上限" in images.statusText
@@ -147,13 +147,13 @@ def test_local_redirect_is_protected_before_qt_prepare_and_survives_restart(tmp_
     from PySide6.QtCore import QObject, QUrl
     from danbooru_multi_search.ui.image_cache import ImageCacheController
     from danbooru_multi_search.ui.cache_protection import CacheProtectionController
-    from danbooru_multi_search.ui.favorites import FavoriteController
     from tests.test_image_cache import ImageHttpServer, _fetch, _dispose
     server = ImageHttpServer(redirect=True)
     database, favorites, repository = build(tmp_path)
     favorites.add_favorite(FavoriteCandidate.for_post(replace(post(42), preview_url=server.url, file_url=None)))
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(repository, FavoriteController(favorites), images)
+    shared = controller_for(favorites)
+    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
     parent = QObject()
     manager = images.create_manager(parent)
     cache = images.cache
@@ -173,7 +173,9 @@ def test_local_redirect_is_protected_before_qt_prepare_and_survives_restart(tmp_
         protection.shutdown()
         _dispose(reply, manager, parent, images, protection)
         restarted = ImageCacheController(tmp_path / "images")
-        restarted_protection = CacheProtectionController(CacheProtectionRepository(database), FavoriteController(favorites), restarted)
+        restarted_shared = controller_for(favorites)
+        restarted_protection = CacheProtectionController(CacheProtectionRepository(database), restarted_shared, restarted,
+            access=restarted_shared._writes.access)
         try:
             assert restarted.clearCache()
             assert restarted.cache.metaData(QUrl(server.final_url)).isValid()
@@ -199,15 +201,15 @@ def test_successful_state_read_does_not_reload_collection_and_cancel_or_import_r
     from PySide6.QtCore import QUrl
     from danbooru_multi_search.ui.image_cache import ImageCacheController
     from danbooru_multi_search.ui.cache_protection import CacheProtectionController
-    from danbooru_multi_search.ui.favorites import FavoriteController, post_identity
+    from danbooru_multi_search.ui.favorites import post_identity
     from danbooru_multi_search.storage.favorite_transfer import FavoriteTransferService, FavoriteTransferDocument, FavoriteImportMode
     from tests.test_protected_image_cache import insert
     database, favorites, repository = build(tmp_path)
     url = "https://example.invalid/image.jpg"
     value = replace(post(42), preview_url=url, file_url=None)
-    shared = FavoriteController(favorites)
+    shared = controller_for(favorites)
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(repository, shared, images)
+    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
     reads = []
     original = repository.load_snapshot
     def read():
@@ -227,10 +229,10 @@ def test_successful_state_read_does_not_reload_collection_and_cancel_or_import_r
         assert shared.set_post(value, True, guard=lambda: True)
         service = FavoriteTransferService(favorites)
         preview = service.preview_import(FavoriteTransferDocument(datetime.now(timezone.utc), (), ()), FavoriteImportMode.REPLACE)
-        assert shared.begin_external_write("import")
+        assert shared._writes.access.begin_external_write("import")
         service.apply_import(preview)
         assert shared.publish_external_snapshot("import", favorites.capture_collection())
-        shared.finish_external_write("import")
+        shared._writes.access.finish_external_write("import")
         assert images.clearCache() and not cache.metaData(QUrl(url)).isValid()
     finally:
         images.shutdown()
@@ -241,7 +243,6 @@ def test_alias_write_failure_does_not_cache_untracked_redirect_and_can_retry_lat
     from PySide6.QtCore import QObject, QUrl
     from danbooru_multi_search.ui.image_cache import ImageCacheController
     from danbooru_multi_search.ui.cache_protection import CacheProtectionController
-    from danbooru_multi_search.ui.favorites import FavoriteController
     from tests.test_image_cache import ImageHttpServer, _fetch, _dispose
     server = ImageHttpServer(redirect=True)
     database, favorites, repository = build(tmp_path)
@@ -249,7 +250,8 @@ def test_alias_write_failure_does_not_cache_untracked_redirect_and_can_retry_lat
     with database.connect() as connection:
         connection.execute("CREATE TRIGGER reject_alias BEFORE INSERT ON image_cache_redirects BEGIN SELECT RAISE(ABORT, 'alias failure'); END")
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(repository, FavoriteController(favorites), images)
+    shared = controller_for(favorites)
+    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
     parent = QObject()
     manager = images.create_manager(parent)
     try:
@@ -272,16 +274,15 @@ def test_alias_write_failure_does_not_cache_untracked_redirect_and_can_retry_lat
 def test_empty_alias_flush_does_not_clear_unresolved_collection_read_error(tmp_path):
     from danbooru_multi_search.ui.image_cache import ImageCacheController
     from danbooru_multi_search.ui.cache_protection import CacheProtectionController
-    from danbooru_multi_search.ui.favorites import FavoriteController
     database, favorites, repository = build(tmp_path)
     with database.connect() as connection:
         connection.execute("DELETE FROM favorite_collection_state")
-    shared = FavoriteController(favorites)
+    shared = controller_for(favorites)
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(repository, shared, images)
+    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
     try:
-        assert shared.begin_external_write("other")
-        shared.finish_external_write("other")
+        assert shared._writes.access.begin_external_write("other")
+        shared._writes.access.finish_external_write("other")
         protection.remember_redirect("https://example.invalid/a", "https://cdn.invalid/b")
         assert not protection.can_store() and protection._error
         assert "缺失" in images.statusText

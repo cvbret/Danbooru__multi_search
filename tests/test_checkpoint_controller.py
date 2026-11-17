@@ -12,12 +12,11 @@ from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.history import HistoryRepository
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
 from danbooru_multi_search.tasks import TaskAttemptResult
-from danbooru_multi_search.ui.favorites import FavoriteController
 from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
 from danbooru_multi_search.ui.query_state import M2QueryBridgeController
 from danbooru_multi_search.ui.session_state import BrowserSessionController
 from danbooru_multi_search.ui.window_state import ScreenGeometry, WindowGeometry
-from tests.test_favorite_controller import APPLICATION
+from tests.test_favorite_controller import APPLICATION, controller_for
 from tests.test_query_controller import _harness, _post, ImmediateZeroScheduler
 
 
@@ -26,10 +25,10 @@ def build(tmp_path, *, scheduler_type=None):
     database = Database(tmp_path / "application.sqlite3")
     database.initialize()
     history = HistoryRepository(database, clock=lambda: harness.clock.wall_time, busy_timeout_ms=0)
-    shared = FavoriteController(FavoriteRepository(database))
+    shared = controller_for(FavoriteRepository(database))
     bridge = M2QueryBridgeController(harness.controller)
     repository = QueryCheckpointRepository(database)
-    checkpoints = QueryCheckpointController(repository, history, harness.controller, bridge, shared)
+    checkpoints = QueryCheckpointController(repository, history, harness.controller, bridge, shared._writes.access)
     session = BrowserSessionController(history, (ScreenGeometry(WindowGeometry(0, 0, 1280, 820), primary=True),),
         m2_controller=harness.controller, query_bridge=bridge, checkpoint_controller=checkpoints)
     checkpoints.attach_session(session)
@@ -154,14 +153,14 @@ def test_import_occupation_during_page_commit_stops_next_request_immediately(tmp
     harness, database, history, shared, bridge, repository, checkpoints, session = values
     harness.controller.start_standard("a", limits=QueryExecutionLimits(page_size=1))
     harness.dispatch()
-    assert shared.begin_external_write("import")
+    assert shared._writes.access.begin_external_write("import")
     with database.connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
         harness.succeed((_post(1, "a"),))
         assert len(harness.factory.attempts) == 1
         assert harness.executor.snapshot.state is QueryExecutionState.PARTIAL_FAILED
         assert "收藏正在导入" in checkpoints.messageText
-    shared.finish_external_write("import")
+    shared._writes.access.finish_external_write("import")
     close(values)
 
 
