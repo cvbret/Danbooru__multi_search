@@ -246,3 +246,51 @@ def test_reader_progress_read_error_can_be_retried_by_real_minimum_window_button
         assert original(store, saved.source, 7).post_id == 3
     finally:
         close_m2_qml_test_engine(engine)
+
+
+def test_video_page_real_download_confirmation_saves_original_mp4_bytes(tmp_path, local_http_server):
+    from PySide6.QtCore import QMetaObject, Q_ARG, QUrl
+    from PySide6.QtNetwork import QNetworkAccessManager
+    from danbooru_multi_search.core.downloads import DownloadTaskState
+    from tests.test_qml_pool_downloads import control, press
+
+    payload = b'\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom' + b'original controlled video bytes' * 128
+    server = local_http_server(payload)
+    original_url = server.base_url + '/original.mp4'
+    engine, root, bridge, session, network = start_reader(
+        identifiers=(1, 2, 3), variants={1: {'file_ext': 'mp4', 'file_url': original_url}},
+    )
+    # Metadata remains on the deterministic fixture. Only the original-file
+    # download uses the real Qt HTTP path against the controlled loopback server.
+    media_network = QNetworkAccessManager(session.download_manager)
+    session.download_manager._network_manager = media_network
+    try:
+        reader = session.pool_reader
+        assert reader.currentPage == 1 and reader.totalPages == 3
+        assert 'MP4' in item(root, 'readerPageNotice_1').property('text')
+        assert server.requests == []
+        click(root, item(root, 'readerDownloadButton'))
+        dialog = item(root, 'downloadRequestDialog')
+        assert wait(lambda: dialog.property('opened'))
+        assert session.download_manager._repository.list_batches() == ()
+        destination = tmp_path / '视频 原文件'
+        destination.mkdir()
+        chooser = control(dialog, 'downloadDestinationFolderDialog')
+        token = session.download_ui.beginDirectorySelection('request')
+        chooser.setProperty('choiceToken', token)
+        assert QMetaObject.invokeMethod(chooser, 'acceptSelection', Qt.ConnectionType.DirectConnection,
+                                      Q_ARG('QVariant', QUrl.fromLocalFile(str(destination))))
+        assert server.requests == []
+        press(root, dialog, 'confirmDownloadRequestButton')
+        repository = session.download_manager._repository
+        assert wait(lambda: bool(repository.list_batches()) and
+                    repository.get_batch(repository.list_batches()[0]).items[0].state is DownloadTaskState.COMPLETED)
+        saved = repository.get_batch(repository.list_batches()[0]).items[0]
+        assert saved.request.source_url == original_url and saved.request.file_ext == 'mp4'
+        assert saved.destination == destination / '1.mp4'
+        assert saved.destination.read_bytes() == payload and saved.bytes_written == len(payload)
+        assert [request.path for request in server.requests] == ['/original.mp4']
+        assert reader.currentPage == 1 and reader.totalPages == 3
+        assert reader.model.slot(1).reference.post_id == 1 and len(network.requests) == 2
+    finally:
+        close_m2_qml_test_engine(engine)

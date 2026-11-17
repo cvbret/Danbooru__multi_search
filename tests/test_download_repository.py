@@ -112,7 +112,8 @@ def test_corrupt_rows_are_rejected_without_exposing_file_or_numeric_values(tmp_p
 
 def test_open_database_failure_uses_stable_storage_error(tmp_path, monkeypatch):
     saved = repository(tmp_path)
-    def fail():
+    def fail(*, busy_timeout_ms):
+        assert busy_timeout_ms == 0
         raise sqlite3.OperationalError("database unavailable")
     monkeypatch.setattr(saved._database, "connect", fail)
     with pytest.raises(DownloadError) as caught:

@@ -4,9 +4,9 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第 4 阶段 Danbooru 漫画阅读器
 - 当前里程碑：`M4 漫画阅读器完成`
-- 当前主要任务：`M4-005 完整作品池按页序下载`
-- 当前状态：已完成
-- 执行状态：M4-005 已完成，继续准备 M4-006 Windows 里程碑验证。
+- 当前主要任务：`M4-006 Windows 里程碑验证`
+- 当前状态：待提交
+- 执行状态：M4 功能、回归及 Windows 发行构建验证通过，成果窗口已打开并保留；准备本地提交，M5 待开始。
 - 最后更新：2026-11-17
 
 ## 1. 阶段进度
@@ -2790,3 +2790,55 @@ M2 里程碑回归检查与提交。
 - 准备停止不取消已经加入的文件下载；准备完成不等于文件下载完成。固定五位原页号、缺失保留编号、仅使用原文件、不同 API 来源拒绝继续的规则保持。最新 schema 12，旧 v11/v10 迁移专项固定原截点。
 - `.tools/pytest-m4-005-*` 开发及独立验证数据保留且不提交。尚未执行全量测试、完整构建、原生界面验收、真实站点或 Linux 验证，M4-006 待开始。
 - 最后两条补登记/重启场景及正式导入持锁关闭的独立检查全部通过，reviewer 本任务累计 24 项通过；最终准确范围、版本/历史迁移、资源、来源跳转与关闭只读核对无剩余阻断，明确允许 37 个实现/测试/打包文件及本记录提交。开发 67 与独立 24 分别记录，当前状态待提交。
+
+## 43. 当前任务 M4-006
+
+- 阶段：第 4 阶段 Danbooru 漫画阅读器；状态：待提交，2026-11-17。起点 `a5c9839c669722cb56caad526ce2560b054bd13b`，开始时工作树干净，schema 12。
+- 目标：验证 M4 已实现功能与既有浏览、查询、收藏、下载共同工作，完成 Windows 发行产物、启动关闭检查和里程碑判定。
+- 负责人：reviewer 执行唯一一次完整 pytest 及既有发行验证流程，独立报告实际结果；developer 只读核对 M4 验收覆盖，并处理实际发现且另行登记范围的问题；intergrator 在允许后精确提交必要修正及记录；主 Agent 维护状态、批准实际修正范围和里程碑判定。
+- 当前应用源码冻结。批准读取现有脚本并在 `.tools` 新建本里程碑必要的续跑/产物核对辅助，使用 apply_patch；不增加报告文档，不预先修改生产代码或扩大测试。若完整回归发现问题，记录具体失败和最小文件范围后修正，只复查失败及直接影响，不重新运行已通过整组。
+- 按用户约定在本里程碑执行一次完整 Windows pytest；数据目录 `.tools/pytest-m4-006-reviewer`，临时目录 `.tools/m4-006-temp`。随后复用 `scripts/verify_build.py` 的 compileall、源码资源/干净安装、wheel、sdist、重建及安装检查；新 `.tools/m4_006_continue_validation.py` 仅跳过已经独立执行的那一次完整 pytest，不跳过其他阶段。
+- Windows PyInstaller onedir/NSIS 输出 `dist/m4-006`，Python 发行包输出其 `packages` 子目录，构建工作目录 `.tools/m4-006-build`；使用现有 Python/NSIS 缓存和 `scripts/build_windows_installer.py`，验证 PE/资源及既有 headless/windows/offscreen 启动关闭。保留 M3 产物及原展示窗口。
+- 不运行真实系统安装/卸载，不执行 `verify_windows_install.py --confirm-system-changes`；继续取消原生界面验收、真实 Danbooru/Eagle 请求及 Linux/WSL/Docker。只使用受控数据/本地 HTTP。Windows 10 和其它未运行环境不提前记为通过。
+- 验收覆盖：系列与主题分类及原序/重复/占位、两种阅读模式与跳转缩放/有限加载、当前页操作/来源及偏移恢复、重启和池变化后的进度恢复、完整 25000 页有界下载准备/文件名顺序/事务防重复、取消关闭与共享队列、schema 升级保留数据、原有功能回归、发行资源完整性。
+- 全部必要检查通过后，按既有用户要求启动并保留本次 Windows 成果窗口，使用独立 `.tools/m4-006-preview` 数据目录；这属于成果展示，不增加界面验收。记录实际产物路径/哈希、运行环境和已知限制后再判定 M4 完成，不自动进入 M5。
+- 提交编号和验证结果：待完成后记录。临时验证数据和构建产物保留且不提交，不执行 push。
+
+### 43.1 完整回归中断与补充范围
+
+- 唯一一次完整 pytest 收集 2104 项，在约 19% 的 `tests/test_download_manager.py::test_windows_long_chinese_space_directory_download_survives_reopen_and_manual_resume` 清理阶段发生原生 Aborted；下载、重启和原文件字节断言已经执行，不能据此宣称该项或全部回归通过。具体中断位置为全局 `DeferredDelete` 清理，原因待定位。
+- 批准 developer 定位测试对象生命周期，最小修改范围为 `tests/test_download_manager.py`；需要其它文件或生产修正时报告具体证据后登记。不得通过删除断言、跳过测试或吞掉异常消除失败。可在 `.tools` 创建定位辅助并执行必要直接复现。
+- reviewer 可创建 `.tools/m4_006_resume_pytest.py`，按收集顺序精确选择中断项及其后尚未完成节点，报告已通过前缀与待执行后缀数量；保留已通过结果，不重新运行全套。发行构建等待最终修正与补充测试冻结。
+- 覆盖核对发现 READ-009 已分别验证视频占位和原文件通路，补充批准 developer 在 `tests/test_qml_pool_reader.py` 增加一项实际视频页点击、确认到原文件字节保存的直接验证。只修改必要测试辅助，不预先修改生产代码；reviewer 独立检查该项。
+- `POOL-005` 中父子作品的相关版本界面尚未实现，原 M1 任务已明确排除，M4 阶段清单及六项里程碑条件未包含此界面。保留为后续完整需求验收的缺项，不声称已完成；作品池阅读顺序不根据父子关系推断。25000 页验证覆盖完整准备与持久任务建立，未执行 25000 个真实媒体下载；Linux 仅核对共用数据结构，未运行。
+- 原 2104 项收集顺序中，中断项之前 424 个节点，待继续 1680 个节点（包含中断项）。原输出此前只有通过标记、没有失败或跳过标记，但进程中止前没有最终统计；424 为收集前缀数量，不冒充完整 pytest 的通过统计。
+- developer 将实际中止组合缩小到旧 HTTP 测试与下载管理测试。待删除对象创建于 `test_same_target_uses_runtime_claims_and_explicit_skipped_result[overwrite-2-expected_names1]`；源码显示下载回调保留无父对象的测试 manager，延后销毁子对象时可能释放父对象的最后一个 Python 引用。当前文件的逐项 fixture 保留全部本项 manager（含直接构造的 restored），关闭并处理全局延迟删除后才释放强引用。原长路径清理和断言保留，新增断言确认两次 attempt 已销毁、父 manager 在清理时仍有效。相同相关组合 71 项通过，尚待独立复查；未修改生产代码，不据此断定 Qt 内部原因。
+- 最终冻结仅 `tests/test_download_manager.py` 和 `tests/test_qml_pool_reader.py` 两个测试文件。唯一新增 `test_video_page_real_download_confirmation_saves_original_mp4_bytes` 开发直接通过：真实 QML 点击视频页下载、接受中文目录并确认，经受控本地 HTTP 保存 MP4，字节与原文件一致；确认前零请求，原页码/作品编号/总页数保持。新总数 2105，原前缀仍 424，未完成后缀为 1681。
+- reviewer 静态确认正式程序使用 engine→session→下载 manager→attempt 的 Qt 父链，且 session/启动函数保持 Python 引用至事件循环结束；测试 fixture 的修正本身不等于生产生命周期已验证。继续由后缀内正式下载关闭、engine 删除及全局清理检查和发行生命周期检查验证实际程序路径；当前没有生产失败证据。
+- 独立续跑选择未完成后缀 1681 项，额外选择唯一相关前缀 OVERWRITE 创建点一项，共 1682 项；其余 423 个前缀不重跑。同进程 OVERWRITE 后紧接原中断长路径检查通过，清理及实际销毁断言通过。
+- 续跑发现 `tests/test_download_repository.py::test_open_database_failure_uses_stable_storage_error` 普通失败。只读确认旧 `fail()` 替身未接受 M4-005 新增的 `connect(busy_timeout_ms=0)` 参数。补充批准 developer 仅在此文件更新该替身签名并检查参数，保留原 `sqlite3.OperationalError` 和 `DownloadError/storage_error` 断言；只复查失败项，生产连接代码不修改。后缀其余测试继续，发行构建等待失败处置结束。
+
+### 43.2 回归结果与发行验证
+
+- 最终修改冻结为三个测试文件：`tests/test_download_manager.py`、`tests/test_qml_pool_reader.py`、`tests/test_download_repository.py`，以及本任务记录；生产源码未修改。连接替身显式接受 `busy_timeout_ms` 并断言为 0，继续抛出原 SQLite 错误，原稳定错误码断言保留。
+- reviewer 后缀续跑完成：1681 passed、1 failed、423 deselected，254.01 秒；选择范围为 1681 个未完成后缀节点加 1 个必要前缀复查。唯一失败堆栈确认是旧替身参数不匹配；开发单项复查和独立单项复查均通过，独立耗时 0.14 秒。保留原前缀结果，未重新运行整套，不能写成单次 2105 passed。
+- 原中断位置在同进程 OVERWRITE 复查后通过，之后没有再次原生中止。新增视频真实确认/MP4 原字节保存、正式活动文件下载关闭及 engine 延迟销毁/全局清理、JSON 导入持锁关闭均通过。此处生产关闭验证与测试生命周期修正分别记录，不把测试 fixture 当成生产修复。
+- 发行验证开始：执行既有 `verify_build.py` 剩余原始阶段，跳过已独立执行的完整 pytest；随后生成 Windows onedir/NSIS，结果及产物身份待完成记录。
+- Python 发行流水线退出 0：compileall、源码 headless（schema 12）、原流程离屏 QML 18 项、wheel/sdist 资源检查、从 sdist 重建 wheel、干净环境安装、console 和 `python -m` 双入口、包来源隔离及安装后的 QML 加载全部通过。只跳过精确一次已执行的完整 pytest，未重复整套。发行包已生成于 `dist/m4-006/packages`。
+- Windows 构建流水线退出 0：PyInstaller onedir、PE/资源、headless/windows/offscreen 三项启动关闭及 NSIS 生成全部通过。sdist 内 `src/tests/scripts/packaging` 范围的 243 个文件与冻结树逐字节一致；便携目录共 1900 个文件，179672082 字节。
+- 实际主机由 Windows CIM 确认：Windows 11 家庭版中文版 25H2，10.0.26200.9974，AMD64；Python 3.11.9、PySide6 6.12.0、PyInstaller 6.22.3、NSIS 3.13。Python 的 platform 字符串显示 Windows-10，不将该字符串作为 Windows 10 已验证的依据。
+- reviewer 完成三个测试文件最终独立审查，没有剩余阻断，允许这三个测试文件及 `task.md` 提交；里程碑最终完成仍需成果窗口及本地提交。没有生产修改，没有把 fixture 改动宣称为生产生命周期修复。
+
+### 43.3 Windows 产物与剩余限制
+
+- 产物根目录：`E:\AIProjects\Danbooru__multi_search\dist\m4-006`。以下 SHA256 对应本次实际生成文件，旧 M3 产物保留。
+- wheel：`packages/danbooru_multi_search-0.1.0-py3-none-any.whl`，397036 字节，SHA256 `c6ee40d17500b2cdaebbf822ef1ddc03a035b6cfed4defc9ad11d68a4620ee6a`。
+- sdist：`packages/danbooru_multi_search-0.1.0.tar.gz`，565062 字节，SHA256 `898bf750aea14ee5b88e247cc6a73b20a951e91cd6c08ee85a4b682b3d613170`。
+- 便携程序：`DanbooruMultiSearch/DanbooruMultiSearch.exe`，2829758 字节，SHA256 `aa66128b3f5557cb06ac7e23dc6b361ea1cd4c6bb93659e2558a91b34ec5d291`；使用时保留整个便携目录。
+- 安装包：`DanbooruMultiSearch-0.1.0-win64-setup.exe`，44952685 字节，SHA256 `8460fcd87d91a299a72807847cb9befa1ff1acc1a9885533aed8cdfd52234e2b`。
+- 本阶段完成作品池页序、两种阅读模式、进度持久化与恢复、整池有界下载准备和既有下载任务关联；按钮背景透明度调整包含在本次产物。阅读进度使用平台通用数据结构，Linux 实际运行仍未验证。
+- 仍未验证：Windows 10、Linux、真实系统安装/卸载、真实 Danbooru/Eagle 服务、原生界面验收；未执行 25000 个真实媒体下载。临时诊断、验证辅助、日志和数据保留在 `.tools`，构建产物保留在 `dist/m4-006`，均不提交。
+- 仍未实现父子作品相关版本界面；视频在当前阅读器中保留页位并提供原文件下载，未增加视频播放。停止整池准备不取消已经加入的文件下载，重新启动后已建立文件任务仍由原下载页手动恢复。
+- 既有已知限制继续保留：非覆盖发布依赖硬链接，不支持硬链接的文件系统明确失败；进程异常终止后未完成查询的活动时间检查点不能恢复。M5 自动采集与 Eagle 联调保持待开始，本次不自动启动。
+- 成果窗口已打开并保留：PID 36708，窗口标题 `Danbooru Multi Search`，MainWindowHandle 199304，Responding=True、HasExited=False；取得窗口后再次等待 2 秒确认仍运行。程序为上述 M4 便携 exe，独立数据目录 `.tools/m4-006-preview`。未操作原 M3 窗口或其他用户进程，没有进行原生界面验收或真实查询。
+- reviewer 最终允许准确三个测试文件及本记录提交，无剩余验证阻断。主 Agent 判定 M4 阶段文档第 8.3 节六项里程碑条件均已满足，按已列范围与限制完成本阶段；当前等待本地提交，不启动 M5。

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, Signal
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
+from PySide6.QtTest import QSignalSpy
 
 import danbooru_multi_search.danbooru.download_manager as manager_module
 from danbooru_multi_search.core.downloads import DownloadConflictPolicy, DownloadedFile, DownloadError, DownloadTaskState
@@ -15,6 +16,29 @@ from danbooru_multi_search.tasks import BoundedTaskQueue, TaskAttemptResult, Tas
 from tests.test_download_repository import repository, request
 from tests.test_favorite_controller import APPLICATION, post
 from tests.test_task_queue import ManualClock, ManualScheduler, FakeAbortable
+
+
+@pytest.fixture(autouse=True)
+def download_object_lifetimes(monkeypatch):
+    """Keep Qt parents alive until their deferred children have been destroyed.
+
+    Unlike the application session, these tests create parentless managers.
+    Completed attempts still hold manager-capturing hooks until DeferredDelete;
+    retain every instance, including managers constructed directly on reopen.
+    """
+    managers = []
+    original = PersistentDownloadManager.__init__
+
+    def initialise(manager, *args, **kwargs):
+        original(manager, *args, **kwargs)
+        managers.append(manager)
+
+    monkeypatch.setattr(PersistentDownloadManager, '__init__', initialise)
+    yield
+    for manager in reversed(managers):
+        manager.shutdown()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    APPLICATION.processEvents()
 
 
 class Reply(QObject):
@@ -242,6 +266,7 @@ def test_windows_long_chinese_space_directory_download_survives_reopen_and_manua
     original = directory / "321.JPG"
     original.write_bytes(b"previous complete image")
     restored = None
+    destroyed = ()
     try:
         batch = manager.enqueue_batch(works(1, identifier=321), directory, DownloadConflictPolicy.AUTO_NUMBER)
         scheduler.run_ready()
@@ -271,12 +296,16 @@ def test_windows_long_chinese_space_directory_download_survives_reopen_and_manua
         assert final.destination.read_bytes() == payload and final.bytes_written == len(payload)
         assert original.read_bytes() == b"previous complete image"
         assert not partial.exists() and not tuple(directory.glob("*.part"))
+        attempts = tuple(manager.findChildren(QObject)) + tuple(restored.findChildren(QObject))
+        destroyed = tuple(QSignalSpy(attempt.destroyed) for attempt in attempts)
     finally:
         manager.shutdown()
         if restored is not None:
             restored.shutdown()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         APPLICATION.processEvents()
+    assert len(destroyed) == 2 and all(spy.count() == 1 for spy in destroyed)
+    assert manager.objectName() == restored.objectName() == ""
 
 
 def test_resume_cleanup_failure_keeps_whole_batch_awaiting_resume(tmp_path, monkeypatch):
