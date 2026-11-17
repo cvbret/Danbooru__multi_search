@@ -78,6 +78,7 @@ def test_linux_eagle_bridge_has_an_explicit_unsupported_state(tmp_path):
     assert eagle.test_connection().code == UNSUPPORTED_PLATFORM
     assert eagle.get_current_library().code == UNSUPPORTED_PLATFORM
     assert eagle.list_folders().code == UNSUPPORTED_PLATFORM
+    assert eagle.create_folder('folder').code == UNSUPPORTED_PLATFORM
 
 
 def test_windows_adapter_uses_the_real_eagle_bridge_without_connecting(tmp_path):

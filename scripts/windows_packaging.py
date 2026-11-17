@@ -96,6 +96,7 @@ QML_FILES = (
     "PoolPage.qml",
     "PoolReaderPage.qml",
     "PoolDownloadPanel.qml",
+    "EaglePanel.qml",
     "PoolReaderItem.qml",
     "PoolMembershipPanel.qml",
     "ImageViewer.qml",

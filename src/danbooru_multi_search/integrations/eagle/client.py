@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from http.client import HTTPException
 import json
 import math
 import ntpath
 import re
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -49,6 +50,15 @@ _BUILD_PATTERN = re.compile(
 )
 _STRING_METADATA_FIELDS = frozenset({"name", "website", "annotation"})
 _ALLOWED_METADATA_FIELDS = _STRING_METADATA_FIELDS | {"tags"}
+
+@dataclass(frozen=True, slots=True)
+class EagleClientConfiguration:
+    """Concrete HTTP configuration for application assembly, without resources."""
+    base_url: str
+    timeout_seconds: float
+    maximum_response_bytes: int
+    user_agent: str
+
 
 class _EagleClientError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
@@ -120,6 +130,16 @@ class EagleWebApiBridge:
             return self._failure(exc)
         return ValueResult(succeeded=True, value=connection)
 
+    @property
+    def configuration(self) -> EagleClientConfiguration:
+        """Return validated immutable values; callers cannot mutate this bridge."""
+        return EagleClientConfiguration(
+            self._base_url,
+            self._timeout_seconds,
+            self._maximum_response_bytes,
+            self._user_agent,
+        )
+
     def get_current_library(self) -> ValueResult[EagleLibraryInfo]:
         try:
             data = self._request_data("library/info")
@@ -165,14 +185,24 @@ class EagleWebApiBridge:
             ),
         )
 
-    def list_folders(self) -> ValueResult[tuple[EagleFolderInfo, ...]]:
+    def list_folders(
+        self, *, maximum_pages: int = 10001, maximum_folders: int | None = None,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> ValueResult[tuple[EagleFolderInfo, ...]]:
         folders: list[EagleFolderInfo] = []
         seen_identifiers: set[str] = set()
         requested_offset = 0
         page_count = 0
 
         try:
+            if (type(maximum_pages) is not int or maximum_pages < 1 or
+                    maximum_folders is not None and (type(maximum_folders) is not int or maximum_folders < 1)):
+                raise _EagleClientError("eagle_invalid_folders", "Invalid folder loading limits.")
             while True:
+                if cancelled and cancelled():
+                    raise _EagleClientError("eagle_cancelled", "Eagle folder loading was cancelled.")
+                if page_count >= maximum_pages:
+                    raise _EagleClientError("eagle_folder_limit", "Eagle folder page limit was reached.")
                 query = urlencode(
                     {"offset": requested_offset, "limit": FOLDER_PAGE_LIMIT}
                 )
@@ -189,6 +219,7 @@ class EagleWebApiBridge:
                         parent_identifier=None,
                         output=folders,
                         seen_identifiers=seen_identifiers,
+                        maximum_folders=maximum_folders, cancelled=cancelled,
                     )
 
                 next_offset = requested_offset + len(entries)
@@ -210,6 +241,22 @@ class EagleWebApiBridge:
             return self._failure(exc)
 
         return ValueResult(succeeded=True, value=tuple(folders))
+
+    def create_folder(self, name: str, *, parent_identifier: str | None = None) -> ValueResult[EagleFolderInfo]:
+        """POST once; callers must not automatically repeat an uncertain creation."""
+        try:
+            if not isinstance(name, str) or not name.strip():
+                raise _EagleClientError("eagle_invalid_folder_name", "Folder name must not be empty.")
+            parent = self._validate_folder_identifier(parent_identifier)
+            payload = {"name": name}
+            if parent is not None:
+                payload["parent"] = parent
+            data = self._request_data("folder/create", method="POST", payload=payload)
+            folders: list[EagleFolderInfo] = []
+            self._append_folder_tree(data, parent_identifier=parent, output=folders, seen_identifiers=set())
+            return ValueResult(succeeded=True, value=folders[0])
+        except _EagleClientError as exc:
+            return self._failure(exc)
 
     def import_file(
         self,
@@ -470,7 +517,7 @@ class EagleWebApiBridge:
                 "eagle_invalid_folders",
                 "Eagle folder offset must be a non-negative integer.",
             )
-        if type(limit) is not int or limit <= 0:
+        if type(limit) is not int or not 1 <= limit <= FOLDER_PAGE_LIMIT or len(entries) > limit:
             raise _EagleClientError(
                 "eagle_invalid_folders",
                 "Eagle folder limit must be a positive integer.",
@@ -490,11 +537,17 @@ class EagleWebApiBridge:
         parent_identifier: str | None,
         output: list[EagleFolderInfo],
         seen_identifiers: set[str],
+        maximum_folders: int | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ) -> None:
         stack: list[tuple[object, str | None]] = [
             (raw_folder, parent_identifier)
         ]
         while stack:
+            if cancelled and cancelled():
+                raise _EagleClientError("eagle_cancelled", "Eagle folder loading was cancelled.")
+            if maximum_folders is not None and len(output) >= maximum_folders:
+                raise _EagleClientError("eagle_folder_limit", "Eagle folder node limit was reached.")
             current, current_parent = stack.pop()
             if not isinstance(current, dict):
                 raise _EagleClientError(

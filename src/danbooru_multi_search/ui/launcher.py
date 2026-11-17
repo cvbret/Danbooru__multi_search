@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
@@ -61,6 +63,12 @@ from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
 from danbooru_multi_search.danbooru.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.ui.pool_progress import PoolProgressController
+from danbooru_multi_search.ui.eagle import EagleController
+from danbooru_multi_search.app.eagle_runtime import EagleRuntime
+from danbooru_multi_search.app.eagle_service import EagleBackend, EagleBackendFactory
+from danbooru_multi_search.integrations.eagle import EagleWebApiBridge
+from danbooru_multi_search.integrations.eagle.contracts import EagleBridge
+from danbooru_multi_search.platform import create_platform_adapter
 from danbooru_multi_search.ui.image_cache import (
     ImageCacheController,
     ImageNetworkAccessManagerFactory,
@@ -75,6 +83,35 @@ if TYPE_CHECKING:
 
 def main_qml_path() -> Path:
     return Path(__file__).resolve().parent / "qml" / "M2Main.qml"
+
+
+def create_eagle_backend_factory(bridge: EagleBridge) -> EagleBackendFactory:
+    """Capture configuration now; create and dispose all Qt I/O in the worker."""
+    if not bridge.is_supported or not bridge.availability.available:
+        @contextmanager
+        def unavailable(cancelled: Callable[[], bool], deadline: float) -> Iterator[EagleBackend]:
+            yield EagleBackend(bridge, lambda: False)
+        return unavailable
+    if not isinstance(bridge, EagleWebApiBridge):
+        raise TypeError("A supported Eagle backend requires explicit HTTP configuration.")
+    configuration = bridge.configuration
+
+    @contextmanager
+    def backend(cancelled: Callable[[], bool], deadline: float) -> Iterator[EagleBackend]:
+        from danbooru_multi_search.integrations.eagle.qt_transport import QtEagleHttpTransport
+        transport = QtEagleHttpTransport(cancelled, deadline)
+        try:
+            client = EagleWebApiBridge(
+                configuration.base_url,
+                transport=transport,
+                timeout_seconds=configuration.timeout_seconds,
+                maximum_response_bytes=configuration.maximum_response_bytes,
+                user_agent=configuration.user_agent,
+            )
+            yield EagleBackend(client, lambda: transport.sent_post)
+        finally:
+            transport.close()
+    return backend
 
 
 def configure_controls_style() -> None:
@@ -138,6 +175,13 @@ class _UiSession(QObject):
             scheduler=scheduler,
         )
         self.network_manager = network_manager or QNetworkAccessManager(self)
+        platform = runtime.platform if runtime is not None else create_platform_adapter()
+        eagle_bridge = platform.services.eagle
+        self.eagle_runtime = EagleRuntime(
+            create_eagle_backend_factory(eagle_bridge), eagle_bridge.availability,
+            self.task_queue, self,
+        )
+        self.eagle = EagleController(self.eagle_runtime, self)
         self.download_manager = PersistentDownloadManager(
             DownloadRepository(database), self.task_queue, self.network_manager,
             scheduler=scheduler, parent=self,
@@ -272,6 +316,8 @@ class _UiSession(QObject):
             return
         self._closing = True
         steps = (
+            self.eagle.shutdown,
+            self.eagle_runtime.begin_shutdown,
             self.pool_downloads.shutdown,
             self.pool_download_manager.begin_shutdown,
             self.pool_progress.begin_shutdown,
@@ -291,6 +337,7 @@ class _UiSession(QObject):
             self.detail_favorites.shutdown,
             self.query_bridge.beginClosing,
             self.favorite_transfer.shutdown,
+            self.eagle_runtime.shutdown,
             self.pool_download_manager.finish_shutdown,
             self.pool_progress.finish_shutdown,
             self.query_checkpoints.finish_shutdown,
@@ -333,6 +380,8 @@ class _UiSession(QObject):
             and self.pool_progress._closed
             and self.pool_downloads._closed
             and self.pool_download_manager._closed
+            and self.eagle._closed
+            and self.eagle_runtime.shutdown_completed
             and self.favorite_transfer.shutdown_completed
             and self.download_manager.closed
             and self.download_ui._closed
@@ -420,6 +469,7 @@ def _create_qml_session(
     engine.rootContext().setContextProperty("poolNavigation", session.pool_navigation)
     engine.rootContext().setContextProperty("poolReader", session.pool_reader)
     engine.rootContext().setContextProperty("poolDownloads", session.pool_downloads)
+    engine.rootContext().setContextProperty("eagleController", session.eagle)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)

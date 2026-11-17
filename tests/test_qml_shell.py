@@ -18,6 +18,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
+from tests.test_eagle_qt_transport import server as eagle_slow_server
 
 from danbooru_multi_search.danbooru import (
     DanbooruPost,
@@ -640,5 +641,32 @@ def test_active_download_shutdown_preserves_shared_query_and_final_history(tmp_p
         network.replies[1].readyRead.emit()
         network.replies[1].finished.emit()
         assert not list(runtime.paths.download_dir.glob("*.jpg"))
+    finally:
+        _close_engine(engine)
+
+
+def test_formal_session_closes_active_eagle_headers_without_gui_completion(tmp_path, eagle_slow_server):
+    import time
+    from dataclasses import replace
+    from danbooru_multi_search.integrations.eagle import EagleWebApiBridge
+    from danbooru_multi_search.platform import PlatformAdapter
+    instance, url = eagle_slow_server('headers')
+    runtime = initialize_runtime(tmp_path)
+    services = replace(runtime.platform.services, eagle=EagleWebApiBridge(url.removesuffix('app/info')))
+    runtime = replace(runtime, platform=PlatformAdapter(runtime.platform.capabilities, services))
+    network = _RecordingNetworkManager()
+    application = QGuiApplication.instance() or QGuiApplication([])
+    engine, bridge = create_qml_engine(application, danbooru_base_url='https://example.invalid',
+                                      runtime=runtime, network_manager=network)
+    session = bridge.parent()
+    try:
+        assert not session.eagle_runtime.thread_started and network.requests == []
+        assert session.eagle.refresh()
+        assert _wait_until(lambda: instance.requests == 1)
+        started = time.monotonic()
+        session.shutdown()
+        assert time.monotonic() - started < 1
+        assert session.eagle_runtime.shutdown_completed and session.shutdown_completed
+        assert instance.requests == 1 and network.requests == []
     finally:
         _close_engine(engine)

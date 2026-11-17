@@ -48,6 +48,7 @@ ApplicationWindow {
         controller: appearanceController
         theme: root.theme
     }
+    EaglePanel { id: eaglePanel; controller: eagleController; theme: root.theme }
 
     FavoriteTransferDialog {
         id: favoriteTransferDialog
@@ -727,6 +728,7 @@ ApplicationWindow {
                         id: browseTools
                         objectName: "browseTools"
                         spacing: 8
+                        ActionButton { objectName: "eagleButton"; text: qsTr("Eagle"); onClicked: eaglePanel.open() }
                         ActionButton {
                             objectName: "imageCacheButton"
                             text: qsTr("缓存")

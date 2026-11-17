@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, TypeVar
+from typing import Callable, Mapping, TypeVar
 
 from danbooru_multi_search.integrations.eagle.contracts import (
     EagleConnectionInfo,
@@ -38,7 +38,13 @@ class UnavailableEagleBridge:
     def get_current_library(self) -> ValueResult[EagleLibraryInfo]:
         return self._unavailable_result()
 
-    def list_folders(self) -> ValueResult[tuple[EagleFolderInfo, ...]]:
+    def list_folders(
+        self, *, maximum_pages: int = 10001, maximum_folders: int | None = None,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> ValueResult[tuple[EagleFolderInfo, ...]]:
+        return self._unavailable_result()
+
+    def create_folder(self, name: str, *, parent_identifier: str | None = None) -> ValueResult[EagleFolderInfo]:
         return self._unavailable_result()
 
     def import_file(

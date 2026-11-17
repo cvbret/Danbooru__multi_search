@@ -83,6 +83,10 @@ from danbooru_multi_search.ui.pool_progress import PoolProgressController
 from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
 from danbooru_multi_search.danbooru.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
+from danbooru_multi_search.ui.eagle import EagleController
+from danbooru_multi_search.app.eagle_runtime import EagleRuntime
+from danbooru_multi_search.ui.launcher import create_eagle_backend_factory
+from danbooru_multi_search.integrations.eagle import EagleWebApiBridge
 from danbooru_multi_search.ui.appearance import AppearanceController
 from danbooru_multi_search.ui.launcher import configure_controls_style
 from danbooru_multi_search.ui.image_cache import (
@@ -349,6 +353,9 @@ def _create_window(tmp_path):
         PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
         download_manager, "https://example.invalid")
     pool_downloads = PoolDownloadController(pool_download_manager, settings_controller, download_ui, pool_browser, pool_reader)
+    eagle_bridge = EagleWebApiBridge()
+    eagle_runtime = EagleRuntime(create_eagle_backend_factory(eagle_bridge), eagle_bridge.availability, tags._task_queue)
+    eagle = EagleController(eagle_runtime)
     pool_reader.changed.connect(download_ui.refresh_snapshot_source)
     collection.poolRequested.connect(pool_navigation.openFavoritePool)
     images = ImageCacheController(tmp_path / "image-cache")
@@ -382,6 +389,7 @@ def _create_window(tmp_path):
     context.setContextProperty("poolNavigation", pool_navigation)
     context.setContextProperty("poolReader", pool_reader)
     context.setContextProperty("poolDownloads", pool_downloads)
+    context.setContextProperty("eagleController", eagle)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
     assert engine.rootObjects(), [error.toString() for error in engine.warnings()]
     root = engine.rootObjects()[0]
@@ -416,11 +424,15 @@ def _create_window(tmp_path):
         "pool_progress": pool_progress,
         "pool_download_manager": pool_download_manager,
         "pool_downloads": pool_downloads,
+        "eagle": eagle,
+        "eagle_runtime": eagle_runtime,
         "qml_warnings": qml_warnings,
     }
 
 
 def _close_window(values) -> None:
+    values["eagle"].shutdown()
+    values["eagle_runtime"].begin_shutdown()
     values["pool_downloads"].shutdown()
     values["pool_download_manager"].begin_shutdown()
     values["pool_progress"].begin_shutdown()
@@ -434,6 +446,7 @@ def _close_window(values) -> None:
     values["combinations"].shutdown()
     values["saved_queries"].shutdown()
     values["transfer"].shutdown()
+    values["eagle_runtime"].shutdown()
     values["pool_download_manager"].finish_shutdown()
     values["pool_progress"].finish_shutdown()
     values["collection"].shutdown()

@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = PROJECT_ROOT / "src" / "danbooru_multi_search"
 BUSINESS_MODULE_PATHS = (
     PACKAGE_ROOT / "__main__.py",
-    *(PACKAGE_ROOT / name for name in ("core", "danbooru", "storage", "tasks", "ui")),
+    *(PACKAGE_ROOT / name for name in ("app", "core", "danbooru", "storage", "tasks", "ui")),
 )
 PLATFORM_SPECIFIC_PATTERNS = {
     "hard-coded drive path": re.compile(r"(?i)(?<![A-Za-z])[A-Z]:[\\/]"),
@@ -27,7 +27,7 @@ PLATFORM_SPECIFIC_PATTERNS = {
         r"(?:adapters|paths|stubs|windows_wallpaper)\b"
     ),
     "Windows implementation access": re.compile(
-        r"\b(?:winreg|WinDLL|PowerShell|EagleWebApiBridge|"
+        r"\b(?:winreg|WinDLL|PowerShell|"
         r"WindowsPlatformAdapter|LinuxPlatformAdapter|"
         r"UnsupportedPlatformAdapter)\b"
     ),
@@ -70,8 +70,10 @@ def _has_forbidden_backslash_literal(source: str) -> bool:
     return False
 
 
-def _source_violations(source: str) -> tuple[str, ...]:
+def _source_violations(source: str, *, path: Path | None = None) -> tuple[str, ...]:
     violations = [description for description, pattern in PLATFORM_SPECIFIC_PATTERNS.items() if pattern.search(source)]
+    if re.search(r"\bEagleWebApiBridge\b", source) and path != PACKAGE_ROOT / "ui" / "launcher.py":
+        violations.append("concrete Eagle backend outside assembly")
     if _has_forbidden_backslash_literal(source):
         violations.append("hard-coded backslash")
     return tuple(violations)
@@ -83,7 +85,7 @@ def test_business_modules_have_no_platform_specific_paths_or_implementations() -
     for path in _business_python_files():
         source = path.read_text(encoding="utf-8")
         relative_path = path.relative_to(PROJECT_ROOT)
-        violations.extend(f"{relative_path}: {description}" for description in _source_violations(source))
+        violations.extend(f"{relative_path}: {description}" for description in _source_violations(source, path=path))
 
     assert violations == []
 
@@ -111,3 +113,12 @@ def test_filename_membership_checks_and_existing_raw_regexes_are_allowed(source)
 ])
 def test_platform_paths_and_implementations_remain_rejected(source):
     assert _source_violations(source)
+
+
+def test_only_exact_launcher_may_assemble_eagle_backend():
+    source = 'client = EagleWebApiBridge(transport=transport)'
+    launcher = PACKAGE_ROOT / 'ui' / 'launcher.py'
+    assert _source_violations(source, path=launcher) == ()
+    assert _source_violations(source, path=PACKAGE_ROOT / 'ui' / 'eagle.py')
+    assert _source_violations('import winreg', path=launcher)
+    assert _source_violations(r'path = "C:\\Users\\sample"', path=launcher)

@@ -708,6 +708,52 @@ class InMemoryFolderBridge(EagleWebApiBridge):
         return self.page
 
 
+def test_concrete_client_exposes_immutable_configuration_without_changing_transport():
+    from dataclasses import FrozenInstanceError
+    original_transport = RecordingTransport(transport_response(app_info()))
+    bridge = EagleWebApiBridge(transport=original_transport, timeout_seconds=.75,
+                              maximum_response_bytes=1024, user_agent='worker test')
+    configuration = bridge.configuration
+    assert configuration.base_url == 'http://localhost:41595/api/v2/'
+    assert configuration.timeout_seconds == .75 and configuration.maximum_response_bytes == 1024
+    assert configuration.user_agent == 'worker test'
+    with pytest.raises(FrozenInstanceError):
+        configuration.timeout_seconds = 10
+    assert bridge.test_connection().succeeded and len(original_transport.requests) == 1
+
+
+def test_create_folder_uses_one_post_and_validates_returned_folder():
+    transport = RecordingTransport(transport_response({'id': 'NEW', 'name': '中文 文件夹', 'children': []}))
+    result = EagleWebApiBridge(transport=transport).create_folder('中文 文件夹', parent_identifier='PARENT')
+    assert result.succeeded and result.value.identifier == 'NEW' and result.value.parent_identifier == 'PARENT'
+    assert len(transport.requests) == 1 and transport.requests[0].method == 'POST'
+    assert transport.requests[0].url.endswith('/folder/create')
+    assert json.loads(transport.requests[0].body) == {'name': '中文 文件夹', 'parent': 'PARENT'}
+
+
+@pytest.mark.parametrize('kind', ['page_overflow', 'page_limit', 'node_limit', 'cancel'])
+def test_gui_folder_boundaries_and_cancel_stop_loading(kind):
+    node = {'id': 'P', 'name': 'parent', 'children': [{'id': 'C', 'name': 'child', 'children': []}]}
+    page = {'data': [node], 'total': 2, 'offset': 0, 'limit': 1}
+    if kind == 'page_overflow':
+        page['data'] += [{'id': 'OTHER', 'name': 'other', 'children': []}]
+    bridge = InMemoryFolderBridge(page)
+    calls = 0
+    def cancel():
+        nonlocal calls
+        calls += 1
+        return calls >= 2
+    options = {'maximum_pages': 1}
+    if kind == 'node_limit':
+        options['maximum_folders'] = 1
+    if kind == 'cancel':
+        options['cancelled'] = cancel
+    result = bridge.list_folders(**options)
+    assert not result.succeeded
+    assert result.code == ('eagle_invalid_folders' if kind == 'page_overflow' else
+                           'eagle_cancelled' if kind == 'cancel' else 'eagle_folder_limit')
+
+
 def test_1200_nested_folder_levels_use_an_explicit_stack():
     current: dict[str, object] = {
         "id": "folder-1200",
