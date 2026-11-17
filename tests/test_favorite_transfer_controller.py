@@ -7,14 +7,14 @@ import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import Qt
 
-import danbooru_multi_search.storage.favorite_transfer_jobs as jobs
+import danbooru_multi_search.app.favorite_transfer as transfer_app
 from danbooru_multi_search.core.favorites import FavoriteCandidate, FavoriteIdentity, FavoriteObjectType
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.favorite_transfer import FavoriteTransferService
 from danbooru_multi_search.ui.favorite_transfer import FavoriteTransferController
 from danbooru_multi_search.ui.favorites import FavoriteController
 from tests.test_favorite_controller import APPLICATION, post
-from tests.test_favorite_transfer_jobs import source_file
+from tests.test_favorite_transfer_service import source_file
 from tests.test_qml_favorites import wait
 
 
@@ -39,11 +39,11 @@ def test_every_phase_is_off_gui_thread_with_one_reused_thread_and_independent_re
     ui_notifications = []
     controller.changed.connect(lambda: ui_notifications.append(get_ident()))
     for name, owner, attribute in (
-        ("read", jobs, "_read_transfer_bytes"), ("decode", jobs, "decode_favorite_transfer_document"),
+        ("read", transfer_app, "read_favorite_transfer_bytes"), ("decode", transfer_app, "decode_favorite_transfer_document"),
         ("preview", FavoriteTransferService, "preview_import"),
         ("snapshot", FavoriteTransferService, "create_export_document"),
-        ("encode", jobs, "encode_favorite_transfer_document"),
-        ("write", jobs, "_write_transfer_bytes"), ("apply", FavoriteTransferService, "apply_import"),
+        ("encode", transfer_app, "encode_favorite_transfer_document"),
+        ("write", transfer_app, "write_favorite_transfer_bytes"), ("apply", FavoriteTransferService, "apply_import"),
     ):
         original = getattr(owner, attribute)
         def wrapped(*args, _name=name, _original=original, **kwargs):
@@ -175,15 +175,15 @@ def test_background_read_lock_does_not_block_gui_repository(tmp_path, monkeypatc
 def test_cancel_after_read_never_starts_decode_or_import(tmp_path, monkeypatch):
     source, target, shared, controller = setup_transfer(tmp_path)
     entered, release = Event(), Event()
-    original = jobs._read_transfer_bytes
+    original = transfer_app.read_favorite_transfer_bytes
     decoded = []
     def read(path):
         value = original(path)
         entered.set()
         assert release.wait(5)
         return value
-    monkeypatch.setattr(jobs, "_read_transfer_bytes", read)
-    monkeypatch.setattr(jobs, "decode_favorite_transfer_document", lambda value: decoded.append(value))
+    monkeypatch.setattr(transfer_app, "read_favorite_transfer_bytes", read)
+    monkeypatch.setattr(transfer_app, "decode_favorite_transfer_document", lambda value: decoded.append(value))
     try:
         choice = controller.beginImportSelection()
         assert controller.acceptImportFile(QUrl.fromLocalFile(str(source)), choice)
@@ -203,7 +203,7 @@ def test_cancel_after_read_never_starts_decode_or_import(tmp_path, monkeypatch):
 def test_close_waits_without_starting_new_steps_or_accepting_late_ui_results(tmp_path, monkeypatch, stage):
     source, target, shared, controller = setup_transfer(tmp_path)
     entered, release = Event(), Event()
-    owner, attribute = (jobs, "encode_favorite_transfer_document") if stage == "encode" else (jobs, "_write_transfer_bytes")
+    owner, attribute = (transfer_app, "encode_favorite_transfer_document") if stage == "encode" else (transfer_app, "write_favorite_transfer_bytes")
     original = getattr(owner, attribute)
     def pause(*args, **kwargs):
         if stage == "encode":

@@ -9,7 +9,7 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, Property, QThread, QUrl, Qt, Signal, Slot
 
 from danbooru_multi_search.storage.favorite_transfer import FavoriteImportMode
-from danbooru_multi_search.storage.favorite_transfer_jobs import (
+from danbooru_multi_search.app.favorite_transfer import (
     TransferOperation, TransferRequest, TransferResult, execute_transfer,
 )
 from danbooru_multi_search.ui.favorites import FavoriteController

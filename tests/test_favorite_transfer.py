@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -195,6 +197,16 @@ def test_public_transfer_api_is_exported():
 
     assert names <= set(storage.__all__)
     assert all(hasattr(storage, name) for name in names)
+    from danbooru_multi_search.app.favorite_transfer import (
+        FavoriteTransferService as ApplicationTransferService,
+    )
+
+    assert storage.FavoriteTransferService is ApplicationTransferService
+    assert transfer_module.FavoriteTransferService is ApplicationTransferService
+    assert transfer_module.FavoriteTransferService is FavoriteTransferService
+    assert "FavoriteTransferService" in dir(transfer_module)
+    with pytest.raises(AttributeError):
+        getattr(transfer_module, "unknown_transfer_export")
 
 
 def test_six_types_export_parse_import_and_reexport_business_content(tmp_path):
@@ -1004,3 +1016,88 @@ def test_complete_snapshot_and_export_are_not_limited_to_one_thousand(tmp_path):
     assert len(applied.favorites) == 1001
     assert len(exported.favorites) == 1001
     assert applied.revision == 1
+
+
+@pytest.mark.parametrize("first_import", ["application", "storage_module", "storage_package"])
+def test_service_cold_import_order_and_execution_without_qt_or_ui(tmp_path, first_import):
+    code = """
+import importlib.abc
+import importlib.util
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+class RejectQtAndUi(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(("PySide6", "danbooru_multi_search.ui")):
+            raise AssertionError(fullname)
+
+sys.meta_path.insert(0, RejectQtAndUi())
+first = sys.argv[1]
+if first == "application":
+    from danbooru_multi_search.app.favorite_transfer import FavoriteTransferService as first_class
+elif first == "storage_module":
+    import danbooru_multi_search.storage.favorite_transfer as codec
+    assert "danbooru_multi_search.app.favorite_transfer" not in sys.modules
+    first_class = codec.FavoriteTransferService
+else:
+    import danbooru_multi_search.storage as storage
+    first_class = storage.FavoriteTransferService
+
+from danbooru_multi_search.app import favorite_transfer as app
+from danbooru_multi_search.storage import favorite_transfer as codec
+from danbooru_multi_search import storage
+from danbooru_multi_search.storage.database import Database
+from danbooru_multi_search.storage.favorites import FavoriteRepository
+
+assert first_class is app.FavoriteTransferService is codec.FavoriteTransferService is storage.FavoriteTransferService
+assert codec.__dict__["FavoriteTransferService"] is app.FavoriteTransferService
+assert not hasattr(codec, "_document_digest")
+assert not hasattr(codec, "_document_from_snapshot")
+assert not hasattr(codec, "_preview_binding")
+assert importlib.util.find_spec("danbooru_multi_search.storage.favorite_transfer_jobs") is None
+database = Database(Path(sys.argv[2]) / "cold.sqlite3")
+database.initialize()
+service = first_class(FavoriteRepository(database))
+document = codec.FavoriteTransferDocument(datetime.now(timezone.utc), (), ())
+preview = service.preview_import(document, codec.FavoriteImportMode.MERGE)
+assert service.apply_import(preview).favorites == ()
+assert service.create_export_document().favorites == ()
+assert not any(name.startswith(("PySide6", "danbooru_multi_search.ui")) for name in sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, first_import, str(tmp_path)],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_document_and_application_use_the_same_storage_byte_io(tmp_path, monkeypatch):
+    from danbooru_multi_search.app import favorite_transfer as application
+
+    assert application.read_favorite_transfer_bytes is transfer_module.read_favorite_transfer_bytes
+    assert application.write_favorite_transfer_bytes is transfer_module.write_favorite_transfer_bytes
+    document = _empty_document()
+    encoded = encode_favorite_transfer_document(document)
+    observed = []
+    original_read = transfer_module.read_favorite_transfer_bytes
+    original_write = transfer_module.write_favorite_transfer_bytes
+
+    def read(path):
+        observed.append("read")
+        return original_read(path)
+
+    def write(path, data):
+        observed.append("write")
+        assert data == encoded
+        return original_write(path, data)
+
+    monkeypatch.setattr(transfer_module, "read_favorite_transfer_bytes", read)
+    monkeypatch.setattr(transfer_module, "write_favorite_transfer_bytes", write)
+    path = tmp_path / "shared-byte-io.json"
+    write_favorite_transfer_document(path, document)
+    assert read_favorite_transfer_document(path) == document
+    assert observed == ["write", "read"]

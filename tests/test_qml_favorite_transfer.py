@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from PySide6.QtCore import QUrl, QPointF
 
-import danbooru_multi_search.storage.favorite_transfer_jobs as jobs
+import danbooru_multi_search.app.favorite_transfer as transfer_app
 from danbooru_multi_search.core.bootstrap import initialize_runtime
 from danbooru_multi_search.core.favorites import FavoriteCandidate
 from danbooru_multi_search.storage.database import Database
@@ -188,7 +188,7 @@ def test_export_error_exposes_original_code_and_residual_path(tmp_path, monkeypa
     residual = tmp_path / ".export.json.tmp"
     def fail(*args):
         raise FavoriteTransferError("file_cleanup_error", "cleanup failed", residual_path=residual)
-    monkeypatch.setattr(jobs, "_write_transfer_bytes", fail)
+    monkeypatch.setattr(transfer_app, "write_favorite_transfer_bytes", fail)
     try:
         choose_export(root, controller, tmp_path / "export.json")
         assert wait(lambda: not controller.busy)
