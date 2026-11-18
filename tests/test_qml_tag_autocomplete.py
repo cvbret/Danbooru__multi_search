@@ -93,10 +93,12 @@ def _create_window():
     tag_controller = engine.rootContext().contextProperty(
         "tagSuggestionController"
     )
-    tag_controller._index = TagIndexSnapshot.build(
-        (
-            TagSuggestion("cat", ("猫",), 20, 0),
-            TagSuggestion("cat_ears", ("猫耳",), 10, 0),
+    tag_controller.translation_store.replace_snapshot(
+        TagIndexSnapshot.build(
+            (
+                TagSuggestion("cat", ("猫",), 20, 0),
+                TagSuggestion("cat_ears", ("猫耳",), 10, 0),
+            )
         )
     )
     tags_input = root.findChild(QObject, "tagsInput")

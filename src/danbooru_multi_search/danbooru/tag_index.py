@@ -13,9 +13,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from danbooru_multi_search.danbooru.tags import (
+from danbooru_multi_search.danbooru.tag_types import (
     DEFAULT_TAG_SUGGESTION_LIMIT,
     TagSuggestion,
+)
+from danbooru_multi_search.danbooru.tag_syntax import (
     normalize_tag_fragment,
     normalize_tag_name,
 )

@@ -37,17 +37,26 @@ _EXPORT_GROUPS = {
     "danbooru_multi_search.danbooru.autocomplete": (
         "TAG_SUGGESTION_DEBOUNCE_MS",
         "ActiveTagFragment",
-        "DanbooruTagSuggestionController",
         "QueryTagFragment",
-        "TagImportOutcome",
         "TagReplacement",
-        "TagSuggestionListModel",
-        "TagSuggestionRole",
         "locate_active_tag_fragment",
         "locate_query_tag_fragment",
         "merge_tag_suggestions",
         "replace_active_tag_fragment",
         "replace_query_tag_fragment",
+    ),
+    "danbooru_multi_search.ui.autocomplete": (
+        "DanbooruTagSuggestionController",
+        "TagSuggestionListModel",
+        "TagSuggestionRole",
+    ),
+    "danbooru_multi_search.app.tag_suggestions": (
+        "TagImportOutcome",
+    ),
+    "danbooru_multi_search.danbooru.tag_types": (
+        "DEFAULT_TAG_SUGGESTION_LIMIT",
+        "MAX_TAG_RESPONSE_BYTES",
+        "TagSuggestion",
     ),
     "danbooru_multi_search.danbooru.client": (
         "DEFAULT_TIMEOUT_MS",
@@ -204,15 +213,10 @@ _EXPORT_GROUPS = {
         "load_tag_csv",
     ),
     "danbooru_multi_search.danbooru.tags": (
-        "DEFAULT_TAG_SUGGESTION_LIMIT",
-        "MAX_TAG_RESPONSE_BYTES",
         "QtTagsRequestAttempt",
         "TagErrorKind",
         "TagParseError",
-        "TagSuggestion",
         "build_tags_request",
-        "normalize_tag_fragment",
-        "normalize_tag_name",
         "parse_tags_response",
     ),
     "danbooru_multi_search.danbooru.tag_translation": (
@@ -224,6 +228,8 @@ _EXPORT_GROUPS = {
         "TagSyntaxError",
         "has_valid_internal_parentheses",
         "metatag_name",
+        "normalize_tag_fragment",
+        "normalize_tag_name",
     ),
     "danbooru_multi_search.ui.detail_navigation": (
         "GalleryViewSnapshot",

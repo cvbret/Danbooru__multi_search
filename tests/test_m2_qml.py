@@ -24,6 +24,7 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtGui import QGuiApplication, QInputMethodEvent
+from PySide6.QtNetwork import QNetworkAccessManager
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
@@ -49,8 +50,12 @@ from danbooru_multi_search.danbooru import (
     TagSuggestion,
     TagTranslationStore,
 )
-from danbooru_multi_search.danbooru.autocomplete import (
-    DanbooruTagSuggestionController,
+from danbooru_multi_search.ui.autocomplete import DanbooruTagSuggestionController
+from danbooru_multi_search.tasks import (
+    BoundedTaskQueue,
+    QtScheduler,
+    SystemClock,
+    TaskQueueConfig,
 )
 from danbooru_multi_search.storage import HistoryRepository
 from danbooru_multi_search.storage.favorites import FavoriteRepository
@@ -312,8 +317,14 @@ def _create_window(tmp_path):
         m2_controller=core,
         query_bridge=bridge,
     )
+    network_manager = QNetworkAccessManager()
+    task_queue = BoundedTaskQueue(
+        TaskQueueConfig(), clock=SystemClock(), scheduler=QtScheduler(network_manager),
+    )
     tags = DanbooruTagSuggestionController(
         "https://example.invalid",
+        task_queue=task_queue,
+        network_manager=network_manager,
         translation_store=translations,
         connect_application_quit=False,
     )
@@ -331,11 +342,11 @@ def _create_window(tmp_path):
     detail_favorites = DetailFavoritesController(details, favorites)
     collection = FavoriteCollectionController(favorite_repository, favorites, detail_navigation)
     pool_browser = PoolBrowserController(
-        PoolRequestService("https://example.invalid", task_queue=tags._task_queue,
-                           network_manager=tags._network_manager),
-        PoolRequestService("https://example.invalid", task_queue=tags._task_queue,
-                           network_manager=tags._network_manager),
-        PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
+        PoolRequestService("https://example.invalid", task_queue=task_queue,
+                           network_manager=network_manager),
+        PoolRequestService("https://example.invalid", task_queue=task_queue,
+                           network_manager=network_manager),
+        PoolPageRequestService("https://example.invalid", task_queue, network_manager),
         favorites,
     )
     pool_navigation = PoolNavigationController(pool_browser, detail_navigation)
@@ -355,23 +366,23 @@ def _create_window(tmp_path):
     )
     appearance = AppearanceController(settings_controller)
     download_repository = DownloadRepository(database)
-    download_manager = PersistentDownloadManager(download_repository, tags._task_queue, tags._network_manager)
+    download_manager = PersistentDownloadManager(download_repository, task_queue, network_manager)
     download_submission = DownloadSubmissionService(settings_controller)
     download_ui = DownloadUiController(download_manager, download_repository, settings_controller,
         core.posts_model, selection, details, tmp_path / "downloads", submission=download_submission)
     pool_reader = PoolReaderController(
-        PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
+        PoolPageRequestService("https://example.invalid", task_queue, network_manager),
         favorites, download_ui, translations, "https://example.invalid",
     )
     pool_navigation.attach_reader(pool_reader)
     pool_progress = PoolProgressController(PoolProgressRepository(database), pool_reader, "https://example.invalid")
     pool_download_manager = PoolDownloadManager(PoolDownloadRepository(database),
-        PoolPageRequestService("https://example.invalid", tags._task_queue, tags._network_manager),
+        PoolPageRequestService("https://example.invalid", task_queue, network_manager),
         download_manager, "https://example.invalid")
     pool_downloads = PoolDownloadController(pool_download_manager, settings_controller, download_ui, pool_browser, pool_reader,
         submission=download_submission)
     eagle_bridge = EagleWebApiBridge()
-    eagle_runtime = EagleRuntime(create_eagle_backend_factory(eagle_bridge), eagle_bridge.availability, tags._task_queue)
+    eagle_runtime = EagleRuntime(create_eagle_backend_factory(eagle_bridge), eagle_bridge.availability, task_queue)
     eagle = EagleController(eagle_runtime)
     pool_reader.changed.connect(download_ui.refresh_snapshot_source)
     collection.poolRequested.connect(pool_navigation.openFavoritePool)
@@ -420,6 +431,8 @@ def _create_window(tmp_path):
         "bridge": bridge,
         "session": session,
         "tags": tags,
+        "task_queue": task_queue,
+        "network_manager": network_manager,
         "details": details,
         "detail_navigation": detail_navigation,
         "appearance": appearance,
@@ -484,6 +497,7 @@ def _close_window(values) -> None:
     values["detail_navigation"].shutdown()
     values["appearance"].shutdown()
     values["tags"].shutdown()
+    values["task_queue"].shutdown()
     values["images"].shutdown()
     values["cache_protection_service"].shutdown()
     values["root"].close()

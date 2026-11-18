@@ -4,7 +4,7 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第二轮结构整改
 - 当前里程碑：`第二轮结构整改完成`
-- 当前主要任务：`R6-003 画廊与详情归属及评级显示`
+- 当前主要任务：`R6-004 标签补全规则、运行协调与界面分离`
 - 当前状态：待提交
 - 执行状态：用户于 2026-11-18 明确要求继续；按第 45 节推进第二轮结构整改，沿用已通过结果，只执行当前修改的直接相关检查。
 - 最后更新：2026-11-18
@@ -3063,7 +3063,7 @@ M2 里程碑回归检查与提交。
 
 ### 45.11 当前任务 R6-003
 
-- 状态：待提交；起点 `7e8eb96dec92491ddf214e6a8f0b51ba1c21b321`，从干净工作树开始。目标是将实际画廊/详情视图模型归入 UI，查询运行通过必要模型接口提交结果，并完成 R7 三份相同评级显示表的合并。
+- 状态：已完成；起点 `7e8eb96dec92491ddf214e6a8f0b51ba1c21b321`，从干净工作树开始。目标是将实际画廊/详情视图模型归入 UI，查询运行通过必要模型接口提交结果，并完成 R7 三份相同评级显示表的合并。
 - 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
 - 准确生产/打包范围 18 个物理路径：新增 `src/danbooru_multi_search/ui/gallery.py`、`ui/details.py`、`ui/query_controller.py`、`ui/post_labels.py`；删除 `danbooru/gallery.py`、`danbooru/details.py`；修改 `danbooru/query_controller.py`、`danbooru/__init__.py`、`ui/favorite_models.py`、`ui/gallery_selection.py`、`ui/downloads.py`、`ui/detail_navigation.py`、`ui/detail_favorites.py`、`ui/pool_reader.py`、`ui/query_state.py`、`ui/session_state.py`、`ui/launcher.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用 src 前缀，不修改 QML、query_execution、M1 client/smoke、数据结构或保存格式。
 - 准确测试范围 10 个路径：`tests/test_detail_favorites.py`、`test_download_ui.py`、`test_favorite_collection.py`、`test_gallery_selection.py`、`test_favorite_transfer_controller.py`、`test_danbooru_details.py`、`test_danbooru_gallery.py`、`test_query_controller.py`、`test_import_boundaries.py`、`test_windows_packaging.py`。测试短路径沿用 tests 前缀；details 的模块对象及 datetime monkeypatch 指向实际新所有者。M2/QML/会话/媒体关闭等只选择必要原节点，不预先修改其他文件。
@@ -3076,3 +3076,31 @@ M2 里程碑回归检查与提交。
 - 开发已冻结准确 18 个生产/打包及 10 个测试物理路径，另含本记录。26 个现存文件语法/空白通过，两个旧 gallery/details 文件已删除，spec 四个 UI 新模块完整并移除旧两模块，无重复。静态比较确认两个视图模块的类正文除评级表引用外保持，协调器执行/通知/关闭正文保持；旧公开入口仍指唯一 UI 类，查询评级输入规则未改。独立生产静态审查暂无确定阻断，等待最终聚焦验证。
 - 本轮 31 个不同直接场景通过：模型/公开身份/无 UI 的实际协调/parent/显示/重入及媒体边界 18 项，必要消费者/实际 QML/资源 13 项（4.05 秒）。初稿的详情模块残留一份旧评级字典，被新检查发现后删除，仅复查失败单项通过，其余 17 项未重跑；另一次最初节点名称错误未执行用例，不计入场景。覆盖实际 M2 结果提交/装配关闭、收藏/下载/导入消费者、图片解码重试回退及远页详情返回。检查数据 `.tools/pytest-r6-003-{models,labels-fixed,compat}` 保留且不提交，没有全量回归、完整构建、原生界面、真实服务或 Linux，成果窗口未操作。
 - reviewer 最终独立选择 17 项全部通过，2.75 秒。覆盖无 UI 冷导入的小模型真实查询/关闭、旧直接/包级/UI 类同一身份与默认/外部 parent、唯一四评级表及原未知码行为、同步完成/模型通知期间新查询和关闭、同对象排行不重复 reset、媒体代次/attempt/URL 与同步关闭、实际 M2/远页详情返回/真实解码回退/正式装配关闭/spec。准确 18 个生产/打包、10 个测试及本记录共 29 个物理路径获准提交，无剩余阻断；协调器仅承诺无 UI 依赖，不承诺无 Qt。独立数据 `.tools/pytest-r6-003-reviewer*` 保留且不提交，没有全量回归或构建。
+- 本地提交：`fef7638a9f62f1a6ee651ade34b923c900516c03`（`refactor(ui): separate gallery and detail presentation`），按 no-renames 核对准确 29 个物理路径，Git 默认因两次迁移显示 27 条记录。提交后工作树与暂存区干净，未推送。R7 的 HTTP 诊断及相同评级显示表两项已完成，剩余 R6 标签补全分离后进入结构里程碑统一验证。
+
+### 45.12 当前任务 R6-004
+
+- 状态：待提交；起点 `fef7638a9f62f1a6ee651ade34b923c900516c03`，从干净工作树开始。目标是把标签补全的纯规则、实际运行协调和界面模型分开，删除旧混合模块中已迁出的实现及仅为测试保留的私有转发。
+- 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
+- 准确生产/打包范围 10 个路径：新增 `src/danbooru_multi_search/danbooru/tag_types.py`、`app/tag_suggestions.py`、`ui/autocomplete.py`；修改 `danbooru/autocomplete.py`、`danbooru/tags.py`、`danbooru/tag_syntax.py`、`danbooru/tag_index.py`、`danbooru/__init__.py`、`ui/launcher.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用 src 前缀，不修改 QML、tag_translation 共享快照实现、实际 HTTP/队列实现或设置格式。
+- 准确测试范围 7 个路径：新增 `tests/test_tag_suggestions.py`；修改 `test_tag_autocomplete.py`、`test_query_autocomplete.py`、`test_m2_qml.py`、`test_qml_tag_autocomplete.py`、`test_import_boundaries.py`、`test_windows_packaging.py`，短路径沿用 tests 前缀。原标签索引/翻译/网络和其他装配检查只选择必要节点，不预先修改额外文件。
+- TagSuggestion 及两个请求限值整体迁入纯 tag_types，保留现有字段、属性和 prefer_chinese_name；normalize_tag_fragment 整体迁入现有 tag_syntax，保留原异常与文字。tags 继续负责真实请求，并通过导入保留这些值/函数同一对象；tag_index 直接依赖纯值/语法，解除通过 tags 加载 Qt 的依赖。
+- danbooru/autocomplete 保留真实定位、替换、解析、合并和排序规则，以及原 debounce 数值常量；正常导入和实际规则/CSV 索引检索不加载 Qt、网络实现或 UI。旧 UI 类及 TagImportOutcome 的必要直接入口可按名称懒加载同一对象，模块仍有真实规则实现，不保留旧类副本。
+- app/tag_suggestions 的 TagSuggestionService(QObject) 接管本地检索、远程计时/请求/队列取消、请求与导入身份、CSV worker、共享索引替换、路径保存及关闭等待；TagImportOutcome 和线程实现归应用模块。服务不接收输入全文、光标、QUrl 或列表模型，不导入 UI。UI 保留原公共构造参数、Qt 属性/信号/Slot、角色/列表模型、全文/光标/普通与 M2 上下文、popup、选择和替换映射。
+- 请求接口按 invalidate_request、suggest(fragment_or_none, generation) 分离；UI 定位片段，服务只接受片段与身份。只读 is_current_request/import 只比较身份，关闭另行核对；队列关闭仅用于远程许可。共享队列关闭后仍可显示本地建议、完成 CSV 和重算本地结果。原最多 20 个可见建议、40 个英文合并候选及 300 ms 延迟保持。
+- 服务与 UI 在 GUI 线程内同步发布通知；worker.completed 先进入服务 QObject Slot，再发布 UI 通知，不以排队转发改变时序。结果替换与清空分别保持 set_items 和 clear 的模型通知区别；UI 在更新模型前写 popup 状态，模型通知返回后不覆盖新状态。本地模型通知后仍按 open/remote/notice 发三项通知，再核对身份启动 debounce；远程模型通知后先核对身份/远程许可，再发三项通知，不合并为统一错误时点的 helper。
+- 远程 debounce 到时先通知 pending=False，复查后构造请求；busy/notice 与视图通知后复查再提交队列。队列状态通知及 submit 返回后各核对身份，失效只取消自己的 record；仅非终态才登记 active ID，完成回调允许 submit 返回前已同步完成的原情况。
+- CSV 保持先增加导入身份、取消并等待旧线程，再由 UI 校验 URL，无效 URL 也取消旧导入；恢复空路径直接返回且不重复保存路径。开始状态通知后同时核对导入身份、线程对象与关闭状态再 start。成功顺序为替换共享索引、检查导入身份/关闭、保存路径、再次检查、状态通知、再次检查、完成通知，最后才联合检查请求与导入身份决定 UI 重算。中间输入变化不能阻止保存/完成；新导入或关闭必须阻止旧流程。保存失败保留新索引，succeeded=True、settings_save_failed/path_saved=False；无保存回调或恢复导入仍 path_saved=None。
+- 关闭建议保留输入上下文，只使请求失效并清除建议/notice；选择继续先计算替换、关闭建议，再返回映射，不发查询。shutdown 等待 CSV worker，只关闭自有队列，共享队列只取消自身任务。launcher 仍注入唯一共享队列/网络/翻译存储及设置回调，保持两阶段关闭和保存 CSV 恢复入口。
+- 包导出分别指向实际纯规则、UI、应用结果和值/语法归属，保留必要公开身份。删除 UI 的测试专用 _index 及私有 queue/network 转发；测试用公开 translation_store 和明确创建/注入共享依赖，原直接导入状态测试改由应用对象承担，不能为测试重建旧接口。
+- 验收覆盖无 Qt/网络/UI 的真实规则与索引、无 UI 的实际应用协调、两类身份/同步通知/CSV 取消与关闭等待、共享队列关闭仍本地可用、旧公开身份、实际 QML 键鼠/popup 与正式共享装配/spec。仅执行直接相关检查，本项完成后再进入结构整改里程碑的一次完整回归及 Windows 构建；提交编号待完成记录。
+- 纯值/语法/索引与规则、应用服务和 UI 初稿已形成，包/launcher/测试消费者继续更新。独立静态审查发现 shutdown 仍调用已经改名的 _invalidate_remote_request，首次关闭会在设置关闭状态后抛出 AttributeError，阻断线程等待与清理。已交开发在当前范围改用实际 invalidate_request，并检查正式关闭和活动 CSV 等待；不通过补旧名称空转发掩盖遗漏。尚未冻结或允许提交。
+- 独立静态审查另指出既有取消重入边界：外部 reply.finished 或任务监听者可在取消返回前更新输入，旧失效方法却返回回调后的最新代次，外层旧输入可能取得新代次并覆盖上下文。主 Agent 已在本批原 17 个代码路径内授权先直接复现，再修正为取消前捕获本次代次、UI 写入上下文前复核；过期 closeSuggestions 也不得清空新输入的建议。其余本地/远程/CSV 通知时序保持，不引入通用框架；此项待实际验证，不能把静态判断记录为已通过。
+- 开发随后通过额外 reply.finished 同步监听者直接复现两个失败：旧输入覆盖取消期间新输入、关闭建议清空新输入结果。现已捕获取消前代次并在 UI 写入上下文前复核，两参数复查通过；关联取消/模型通知关闭/活动 CSV 关闭和迟到导入拒绝共 6 个不同场景通过。纯 merge 迁移曾漏掉 normalize_tag_fragment 导入，已从实际 tag_syntax 归属补齐并单项复查通过；已通过且不受影响的集合未重跑。整体仍在消费者迁移和直接检查，尚未冻结。
+- 消费者补查确认 `tests/test_qml_shell.py` 的正式共享装配及关闭故障检查仍读取标签 UI 的旧 queue/network/owns_queue/shutdown 私有属性。本批追加该测试文件，最终准确范围为 10 个生产/打包及 8 个测试路径，另含本记录共 19 个路径。仅将归属和最终关闭断言迁到实际应用服务对象，不给 UI 补私有转发；最终 shutdown 检查必须验证真实最终状态，不能用兼含 closing 的 closed 属性降低条件。其余共享实例及关闭次序断言保持。
+- 正式消费者检查另发现两处实际归属遗漏：已批准 launcher 的最终关闭判据仍读取旧标签 UI 的 _shutdown，已改读取实际服务最终状态；同一已追加 test_qml_shell 的关闭故障用例仍在旧查询进度 UI 上监控 finish_shutdown，因该方法已在 R5-004 迁入 checkpoint_service 而报 AttributeError，尚未执行该用例的关闭流程。批准仅将该监控对象改为 ui_session.checkpoint_service，保留事件名称、原顺序与所有最终保存/关闭断言；不修改查询进度生产实现、不重复已通过 45 个场景。
+- 同一监控列表还保留 R5-005 迁移前的 cache_protection.shutdown，现正式装配使用 cache_protection_service.shutdown。追加批准仅修改该监控对象，仍保留原事件顺序及断言，不修改缓存生产实现。开发已只读核对列表其余目标存在；另两项原 UI 活动 CSV 取消/关闭通过，累计 47 个不同场景，故障关闭用例此时仍未进入实际操作阶段。
+- 开发已冻结准确 10 个生产/打包及 8 个测试路径，另含本记录。18 个文件语法/空白通过，spec 三个新模块完整无重复。纯规则、标签值/规范化、CSV 索引、真实 tags HTTP/解析、七字段导入结果、worker 和列表模型正文均已对照保持；服务无 UI/QUrl/输入全文/光标/模型，UI 无旧私有运行状态转发。独立静态已确认关闭调用及取消重入修正，等待完整冻结后的最终聚焦验证。
+- 本轮 48 个不同直接场景全部通过：取消/关闭 6、服务/CSV/两种冷进程 20、实际 QML 键鼠/输入法/原两标签规则/网络与索引/资源 18、正式共享关闭 1、活动 CSV 取消/关闭 2、故障重入最终关闭 1。最后故障关闭完整执行通过，两个历史监控对象均匹配实际装配，原事件名称/完整顺序、保存失败重入和最终状态断言未降低。实际证明 worker 在后台读取后回服务所属线程，按 snapshot/save/state/complete 发布；队列关闭仍允许本地/CSV及最后重算。
+- 取消期间新输入保护属于真实行为修复，不能只记为代码移动；初稿的旧 shutdown 方法名和缺少语法导入也已修正并实际检查。失败项仅单独复查，未重复已通过集合。数据 `.tools/pytest-r6-004-*` 保留且不提交，没有全量回归、完整构建、原生界面、真实服务或 Linux，成果窗口未操作。
+- reviewer 最终独立选择 28 项全部通过，9.22 秒。覆盖应用服务全部 5 项、两类真实冷进程、两种取消期间新输入回归、worker 归属/活动等待/迟到结果、共享队列关闭后本地与 CSV、原 snapshot/save/state/complete 及路径保存失败、开始/完成/无效 URL 的关闭和替换、各模型/远程通知时点、40 候选、实际键鼠/输入法、M2/正式共享装配及完整保存失败重入关闭/spec。两个历史监控对象和真实最终服务状态的原断言均已执行。准确 10 个生产/打包、8 个测试及本记录共 19 个路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r6-004-reviewer*` 保留且不提交，没有全量回归或构建。

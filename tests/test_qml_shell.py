@@ -342,8 +342,9 @@ def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
     ui_session = session_controller.parent()
     executor = query_controller.executor
     shared_queue = executor._task_queue
+    tag_service = tag_controller._service
 
-    assert tag_controller._task_queue is shared_queue
+    assert tag_service._task_queue is shared_queue
     assert ui_session.pool_browser._pools._queue is shared_queue
     assert ui_session.pool_browser._memberships._queue is shared_queue
     assert ui_session.pool_browser._pages._queue is shared_queue
@@ -355,9 +356,9 @@ def test_qml_session_shares_one_queue_and_shutdown_is_repeatable():
     assert ui_session.pool_download_manager._service is not ui_session.pool_reader._pages
     assert ui_session.pool_download_manager._downloads is ui_session.download_manager
     assert executor.owns_queue is False
-    assert tag_controller._owns_queue is False
+    assert tag_service._owns_queue is False
     assert executor._network_manager is ui_session.network_manager
-    assert tag_controller._network_manager is ui_session.network_manager
+    assert tag_service._network_manager is ui_session.network_manager
     assert bridge.core_controller is query_controller
     assert bridge.postsModel is query_controller.posts_model
     navigation = engine.rootContext().contextProperty("detailNavigation")
@@ -434,7 +435,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         ("combinations", ui_session.artist_combinations, "shutdown"),
         ("saved-queries", ui_session.saved_queries, "shutdown"),
         ("transfer-wait", ui_session.favorite_transfer, "shutdown"),
-        ("checkpoints-save", ui_session.query_checkpoints, "finish_shutdown"),
+        ("checkpoints-save", ui_session.checkpoint_service, "finish_shutdown"),
         ("collection", ui_session.favorite_collection, "shutdown"),
         ("favorites", ui_session.favorite_controller, "shutdown"),
         ("selection", ui_session.gallery_selection, "shutdown"),
@@ -448,7 +449,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
         ("tags-closing", tags, "begin_shutdown"),
         ("tags", tags, "shutdown"),
         ("images", images, "shutdown"),
-        ("cache-protection", ui_session.cache_protection, "shutdown"),
+        ("cache-protection", ui_session.cache_protection_service, "shutdown"),
         ("queue", queue, "shutdown"),
     ):
         original = getattr(owner, attribute)
@@ -509,7 +510,7 @@ def test_coordinated_shutdown_continues_after_final_save_failure_and_reentry(
     assert bridge.detached is True
     assert bridge.queryState == QueryExecutionState.PARTIAL_CANCELLED.value
     assert session_controller.events_detached is True
-    assert tags._shutdown is True
+    assert tags._service._shutdown is True
     assert images.closed is True
     assert queue.is_shutdown is True
     assert queue.has_work is False

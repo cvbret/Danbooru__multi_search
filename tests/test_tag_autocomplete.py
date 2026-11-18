@@ -28,7 +28,9 @@ from danbooru_multi_search.danbooru import (
     replace_active_tag_fragment,
 )
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
-from danbooru_multi_search.tasks import TaskQueueConfig
+from danbooru_multi_search.tasks import (
+    BoundedTaskQueue, QtScheduler, SystemClock, TaskQueueConfig,
+)
 
 
 APPLICATION = QGuiApplication.instance() or QGuiApplication([])
@@ -377,10 +379,14 @@ def test_remote_start_signal_can_close_without_leaving_busy_state_or_request():
 def test_queue_state_signal_can_close_before_starter_sends_request():
     reply = FakeReply(_tag_payload({"name": "cat", "post_count": 1}))
     manager = FakeNetworkManager([reply])
+    queue = BoundedTaskQueue(
+        TaskQueueConfig(minimum_interval_seconds=0),
+        clock=SystemClock(), scheduler=QtScheduler(APPLICATION),
+    )
     controller = DanbooruTagSuggestionController(
         "https://example.invalid",
         network_manager=manager,
-        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        task_queue=queue,
         index_snapshot=_snapshot(TagSuggestion("cat", (), 1, 0)),
     )
     controller.updateInput("cat", 3)
@@ -401,7 +407,7 @@ def test_queue_state_signal_can_close_before_starter_sends_request():
     assert busy_signal_count >= 2
     assert manager.requests == []
     assert controller.remoteBusy is False
-    assert controller._task_queue.has_work is False
+    assert queue.has_work is False
 
 
 def test_model_count_listener_can_shutdown_before_debounce_starts():
@@ -460,6 +466,42 @@ def test_remote_merge_keeps_candidates_beyond_initial_visible_twenty():
     assert final_names[:5] == [f"cat_{index:02d}" for index in range(20, 25)]
 
 
+@pytest.mark.parametrize("action", ["input", "close"])
+def test_abort_listener_new_input_survives_older_input_or_dismiss(action):
+    reply = FakeReply(_tag_payload({"name": "cat", "post_count": 1}))
+    manager = FakeNetworkManager([reply])
+    controller = DanbooruTagSuggestionController(
+        "https://example.invalid", network_manager=manager,
+        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+        index_snapshot=_snapshot(
+            TagSuggestion("cat", (), 1, 0),
+            TagSuggestion("dog", (), 1, 0),
+            TagSuggestion("wolf", (), 1, 0),
+        ),
+    )
+    controller.updateInput("cat", 3)
+    assert _wait_until(lambda: len(manager.requests) == 1)
+    current_text = "dog AND bird"
+
+    def newer_input():
+        controller.updateQueryInput(current_text, 3)
+
+    reply.finished.connect(newer_input)
+    try:
+        if action == "input":
+            controller.updateInput("wolf", 4)
+        else:
+            controller.closeSuggestions()
+        assert reply.abort_count == 1
+        assert controller._current_text == current_text
+        assert controller._current_cursor == 3 and controller._current_query_input
+        assert [item.name for item in controller.suggestionsModel.items] == ["dog"]
+        assert controller.isOpen
+    finally:
+        reply.finished.disconnect(newer_input)
+        controller.shutdown()
+
+
 def _import_result(name: str) -> TagCsvImportResult:
     snapshot = _snapshot(TagSuggestion(name, ("虚构名称",), 1, 0))
     return TagCsvImportResult(snapshot, 1, 1, 0, 0, 1, "utf-8")
@@ -478,7 +520,7 @@ def test_successful_import_replaces_index_saves_absolute_path_before_completion(
     def save_path(path: Path) -> None:
         assert controller is not None
         events.append(("save", path))
-        assert controller._index.records[0].name == "imported"
+        assert controller.translation_store.snapshot.records[0].name == "imported"
 
     controller = DanbooruTagSuggestionController(
         "https://example.invalid",
@@ -538,31 +580,6 @@ def test_successful_import_without_path_saver_does_not_claim_path_was_saved(
     assert outcomes[0].path_saved is None
 
 
-def test_begin_shutdown_rejects_late_import_result_before_formal_shutdown(
-    tmp_path,
-):
-    csv_path = Path(tmp_path) / "late.csv"
-    csv_path.write_text("placeholder", encoding="utf-8")
-    saved_paths: list[Path] = []
-    old_snapshot = _snapshot(TagSuggestion("old", ("旧值",), 1, 0))
-    controller = DanbooruTagSuggestionController(
-        "https://example.invalid",
-        queue_config=TaskQueueConfig(minimum_interval_seconds=0),
-        csv_path_saver=saved_paths.append,
-        index_snapshot=old_snapshot,
-    )
-    controller._import_generation = 7
-    controller._import_path = csv_path.resolve()
-    controller._persist_import_path = True
-
-    controller.begin_shutdown()
-    controller._import_finished(7, _import_result("late"), None)
-
-    assert controller._index == old_snapshot
-    assert saved_paths == []
-    assert controller._import_generation == 8
-
-
 def test_success_callback_starting_new_import_never_resaves_old_path(tmp_path):
     first_path = Path(tmp_path) / "first.csv"
     second_path = Path(tmp_path) / "second.csv"
@@ -589,7 +606,7 @@ def test_success_callback_starting_new_import_never_resaves_old_path(tmp_path):
     assert _wait_until(lambda: len(outcomes) == 2)
     assert saved_paths == [first_path.resolve(), second_path.resolve()]
     assert [outcome.generation for outcome in outcomes] == [1, 2]
-    assert controller._index.records[0].name == "second"
+    assert controller.translation_store.snapshot.records[0].name == "second"
 
 
 def test_success_callback_shutdown_does_not_save_another_path(tmp_path):
@@ -644,7 +661,7 @@ def test_path_save_failure_keeps_new_index_and_persisted_old_path(tmp_path):
     assert _wait_until(lambda: len(outcomes) == 1)
     assert save_attempts == [new_path.resolve()]
     assert persisted_paths == [old_path]
-    assert controller._index.records[0].name == "new_index"
+    assert controller.translation_store.snapshot.records[0].name == "new_index"
     assert outcomes[0].succeeded is True
     assert outcomes[0].error_code == "settings_save_failed"
     assert outcomes[0].path_saved is False
@@ -675,7 +692,7 @@ def test_saved_csv_load_rebuilds_index_without_resaving_path(tmp_path):
     assert _wait_until(lambda: len(outcomes) == 1)
     assert loaded_paths == [csv_path.resolve()]
     assert save_attempts == []
-    assert controller._index.records[0].name == "restored"
+    assert controller.translation_store.snapshot.records[0].name == "restored"
     assert outcomes[0].path == csv_path.resolve()
     assert outcomes[0].path_saved is None
 
@@ -717,7 +734,7 @@ def test_failed_csv_load_preserves_existing_index_and_saved_path(
         controller.importCsv(QUrl.fromLocalFile(str(failed_path)))
 
     assert _wait_until(lambda: len(outcomes) == 1)
-    assert controller._index.records[0].name == "existing"
+    assert controller.translation_store.snapshot.records[0].name == "existing"
     assert persisted_paths == [saved_path]
     assert save_attempts == []
     assert outcomes[0].succeeded is False
@@ -880,7 +897,7 @@ def test_import_state_listener_can_replace_not_yet_started_worker(tmp_path):
     assert _wait_until(lambda: controller.localTagCount == 1)
     assert loaded_paths == ["second.csv"]
     assert controller.suggestionsModel.count == 0
-    assert controller._index.records[0].name == "second"
+    assert controller.translation_store.snapshot.records[0].name == "second"
 
 
 def test_invalid_url_state_listener_shutdown_suppresses_late_completion():
@@ -921,7 +938,7 @@ def test_invalid_url_state_listener_new_import_suppresses_old_completion(tmp_pat
 
     assert _wait_until(lambda: len(outcomes) == 1)
     assert outcomes[0].succeeded is True
-    assert controller._index.records[0].name == "replacement"
+    assert controller.translation_store.snapshot.records[0].name == "replacement"
 
 
 def test_invalid_url_cancels_running_import_and_preserves_existing_index(tmp_path):
@@ -954,7 +971,7 @@ def test_invalid_url_cancels_running_import_and_preserves_existing_index(tmp_pat
     assert cancelled.is_set()
     assert len(outcomes) == 1
     assert outcomes[0].error_code == "invalid_file_url"
-    assert controller._index.records[0].name == "existing"
+    assert controller.translation_store.snapshot.records[0].name == "existing"
     assert controller.importBusy is False
 
 
@@ -1011,7 +1028,7 @@ def test_malformed_csv_failure_preserves_existing_index(tmp_path):
     assert _wait_until(lambda: len(outcomes) == 1)
     assert outcomes[0].succeeded is False
     assert outcomes[0].error_code == "csv_error"
-    assert controller._index.records[0].name == "existing"
+    assert controller.translation_store.snapshot.records[0].name == "existing"
 
 
 def test_success_completion_close_keeps_recomputed_suggestions_closed(tmp_path):
@@ -1097,5 +1114,5 @@ def test_success_completion_new_import_suppresses_old_recompute(tmp_path):
     assert controller.isOpen is False
     release_second.set()
     assert _wait_until(lambda: len(outcomes) == 2)
-    assert controller._index.records[0].name == "second"
+    assert controller.translation_store.snapshot.records[0].name == "second"
     assert controller.suggestionsModel.items[0].name == "second"

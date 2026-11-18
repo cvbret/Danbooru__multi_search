@@ -9,12 +9,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QGuiApplication
 
 from danbooru_multi_search.danbooru.autocomplete import (
-    DanbooruTagSuggestionController,
     locate_active_tag_fragment,
     locate_query_tag_fragment,
     replace_active_tag_fragment,
     replace_query_tag_fragment,
 )
+from danbooru_multi_search.ui.autocomplete import DanbooruTagSuggestionController
 from danbooru_multi_search.danbooru.tag_index import TagIndexSnapshot
 from danbooru_multi_search.danbooru.tags import TagSuggestion
 

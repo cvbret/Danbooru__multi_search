@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QUrl, QUrlQuery, Slot
@@ -17,22 +16,15 @@ from danbooru_multi_search.danbooru.client import (
     RequestErrorKind,
 )
 from danbooru_multi_search.danbooru.tag_syntax import (
-    QUERY_OPERATOR_NAMES,
+    normalize_tag_fragment,
     normalize_tag_name,
 )
+from danbooru_multi_search.danbooru.tag_types import (
+    DEFAULT_TAG_SUGGESTION_LIMIT,
+    MAX_TAG_RESPONSE_BYTES,
+    TagSuggestion,
+)
 from danbooru_multi_search.tasks import TaskAttemptResult
-
-
-DEFAULT_TAG_SUGGESTION_LIMIT = 20
-MAX_TAG_RESPONSE_BYTES = 1024 * 1024
-
-_CATEGORY_LABELS = {
-    0: "普通标签",
-    1: "画师",
-    3: "作品系列",
-    4: "角色",
-    5: "元数据",
-}
 
 
 class TagErrorKind:
@@ -46,65 +38,6 @@ class TagErrorKind:
 
 class TagParseError(ValueError):
     """Raised when a tag response cannot form strict suggestion models."""
-
-
-@dataclass(frozen=True, slots=True)
-class TagSuggestion:
-    name: str
-    chinese_names: tuple[str, ...] = ()
-    post_count: int | None = None
-    category: int | None = None
-
-    @property
-    def chinese_name(self) -> str | None:
-        return self.chinese_names[0] if self.chinese_names else None
-
-    @property
-    def chinese_name_text(self) -> str:
-        return "、".join(self.chinese_names) if self.chinese_names else "暂无中文名称"
-
-    @property
-    def category_text(self) -> str:
-        return _CATEGORY_LABELS.get(self.category, "未知分类")
-
-    @property
-    def post_count_text(self) -> str:
-        return str(self.post_count) if self.post_count is not None else "暂无数据"
-
-    @property
-    def has_known_category(self) -> bool:
-        return self.category in _CATEGORY_LABELS
-
-    def prefer_chinese_name(self, name: str | None) -> TagSuggestion:
-        if not name or name not in self.chinese_names:
-            return self
-        return replace(
-            self,
-            chinese_names=(name,) + tuple(
-                current for current in self.chinese_names if current != name
-            ),
-        )
-
-
-def normalize_tag_fragment(value: str) -> str:
-    """Normalize an incomplete ASCII fragment without damaging punctuation."""
-
-    if not isinstance(value, str):
-        raise ValueError("Tag fragment must be text.")
-    stripped = value.strip()
-    if not stripped:
-        raise ValueError("Tag fragment cannot be empty.")
-    if not stripped.isascii():
-        raise ValueError("Remote tag fragments must contain only ASCII characters.")
-    if any(character.isspace() for character in stripped):
-        raise ValueError("Tag fragment cannot contain whitespace.")
-    if any(ord(character) < 33 or ord(character) > 126 for character in stripped):
-        raise ValueError("Tag fragment contains unsupported control characters.")
-    if stripped.startswith(("-", "~")) or "*" in stripped:
-        raise ValueError("Tag fragment contains unsupported search syntax.")
-    if stripped.casefold() in QUERY_OPERATOR_NAMES:
-        raise ValueError("Tag fragment contains an unsupported query operator.")
-    return stripped.casefold()
 
 
 def build_tags_request(

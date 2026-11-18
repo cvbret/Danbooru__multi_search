@@ -15,6 +15,7 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtNetwork import QNetworkAccessManager, QSslSocket
 
 from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.ui.autocomplete import DanbooruTagSuggestionController
 from danbooru_multi_search.ui.query_controller import DanbooruM2QueryController
 from danbooru_multi_search.ui.details import DanbooruDetailController
 from danbooru_multi_search.core.settings import (
@@ -23,7 +24,6 @@ from danbooru_multi_search.core.settings import (
 from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.danbooru import (
     DanbooruMultiBranchExecutor,
-    DanbooruTagSuggestionController,
     TagTranslationStore,
 )
 from danbooru_multi_search.tasks import (
@@ -425,7 +425,7 @@ class _UiSession(QObject):
             and self.query_executor.closed
             and self.query_bridge.closing
             and self.query_bridge.detached
-            and self.tag_controller._shutdown
+            and self.tag_controller._service._shutdown
             and self.image_cache_controller.closed
             and self.task_queue.is_shutdown
         )

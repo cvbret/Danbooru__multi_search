@@ -18,6 +18,10 @@ PACKAGES = (
     "danbooru_multi_search.tasks",
 )
 PURE_MODULES = (
+    "danbooru_multi_search.danbooru.tag_types",
+    "danbooru_multi_search.danbooru.tag_syntax",
+    "danbooru_multi_search.danbooru.tag_index",
+    "danbooru_multi_search.danbooru.autocomplete",
     "danbooru_multi_search.core.settings",
     "danbooru_multi_search.storage.settings",
     "danbooru_multi_search.storage.check_output",
@@ -263,6 +267,102 @@ def _probe_query_coordinator() -> None:
     assert not any(name.startswith("danbooru_multi_search.ui") for name in sys.modules)
 
 
+def _probe_tag_rules(data_root: Path) -> None:
+    blocked = (
+        "PySide6", "danbooru_multi_search.app", "danbooru_multi_search.ui",
+        "danbooru_multi_search.danbooru.client", "danbooru_multi_search.danbooru.tags",
+        "danbooru_multi_search.danbooru.tag_translation",
+    )
+
+    class RejectRuntime(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path, target=None):
+            if any(fullname == name or fullname.startswith(name + ".") for name in blocked):
+                raise AssertionError(f"Tag rules imported {fullname}")
+            return None
+
+    sys.meta_path.insert(0, RejectRuntime())
+    from danbooru_multi_search.danbooru import TagSuggestion as PublicSuggestion
+    from danbooru_multi_search.danbooru import autocomplete
+    from danbooru_multi_search.danbooru.autocomplete import (
+        locate_query_tag_fragment, merge_tag_suggestions, replace_query_tag_fragment,
+    )
+    from danbooru_multi_search.danbooru.tag_index import load_tag_csv
+    from danbooru_multi_search.danbooru.tag_syntax import normalize_tag_fragment
+    from danbooru_multi_search.danbooru.tag_types import TagSuggestion
+
+    assert PublicSuggestion is TagSuggestion
+    assert normalize_tag_fragment(" Cat_") == "cat_"
+    assert locate_query_tag_fragment("cat AND dog", 10).fragment == "dog"
+    assert replace_query_tag_fragment("cat AND dog", 10, "wolf").text == "cat AND wolf"
+    assert "DanbooruTagSuggestionController" in dir(autocomplete)
+    assert "DanbooruTagSuggestionController" not in autocomplete.__dict__
+    path = data_root / "标签.csv"
+    path.write_text("name,cn_name,post_count,category\ncat,猫,10,0\ncat_ears,猫耳,5,0\n", encoding="utf-8")
+    loaded = load_tag_csv(path)
+    local = loaded.snapshot.search_chinese("猫")
+    assert {item.name for item in local} == {"cat", "cat_ears"}
+    assert loaded.snapshot.search_english("cat")[0].name == "cat"
+    merged = merge_tag_suggestions(local, (TagSuggestion("cat", (), 11, 0),), "cat")
+    assert merged[0].name == "cat" and merged[0].post_count == 11
+    assert merged[0].chinese_names == ("猫",)
+    assert merged[0].prefer_chinese_name("猫") == merged[0]
+    assert not any(
+        name == prefix or name.startswith(prefix + ".")
+        for name in sys.modules for prefix in blocked
+    )
+
+
+def _probe_tag_service(data_root: Path) -> None:
+    class RejectUi(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path, target=None):
+            if fullname == "danbooru_multi_search.ui" or fullname.startswith("danbooru_multi_search.ui."):
+                raise AssertionError(f"Tag service imported {fullname}")
+            return None
+
+    sys.meta_path.insert(0, RejectUi())
+    import time
+    from PySide6.QtCore import QCoreApplication
+    from danbooru_multi_search.app.tag_suggestions import TagImportOutcome, TagSuggestionService
+    from danbooru_multi_search.danbooru.autocomplete import TagImportOutcome as OldOutcome
+    from danbooru_multi_search.danbooru.tag_index import TagIndexSnapshot
+    from danbooru_multi_search.danbooru.tag_types import TagSuggestion
+
+    class NoNetwork:
+        def get(self, request):
+            raise AssertionError("Local service execution must not send a request")
+
+    application = QCoreApplication([])
+    saved = []
+    service = TagSuggestionService(
+        "https://example.invalid", network_manager=NoNetwork(),
+        index_snapshot=TagIndexSnapshot.build((TagSuggestion("cat", ("猫",), 1, 0),)),
+        csv_path_saver=saved.append,
+    )
+    assert OldOutcome is TagImportOutcome
+    suggestions = []
+    outcomes = []
+    service.suggestionsReplaced.connect(lambda generation, items: suggestions.append(items))
+    service.importCompleted.connect(outcomes.append)
+    try:
+        generation = service.invalidate_request()
+        service.suggest("猫", generation=generation)
+        assert suggestions[0][0].name == "cat" and not service.debounce_pending
+        path = data_root / "new.csv"
+        path.write_text("name,cn_name,post_count,category\ndog,狗,2,0\n", encoding="utf-8")
+        service.start_import(service.begin_import(), path, persist_path=True)
+        deadline = time.monotonic() + 3
+        while not outcomes and time.monotonic() < deadline:
+            application.processEvents()
+            time.sleep(0.005)
+        assert len(outcomes) == 1 and outcomes[0].succeeded
+        assert outcomes[0].path_saved is True and saved == [path]
+        assert service.translation_store.snapshot.records[0].name == "dog"
+    finally:
+        service.shutdown()
+    assert service.closed
+    assert not any(name.startswith("danbooru_multi_search.ui") for name in sys.modules)
+
+
 def _probe_qt_scheduling() -> None:
     from PySide6.QtCore import QCoreApplication
     from danbooru_multi_search.tasks import QtScheduler
@@ -344,6 +444,14 @@ def test_query_coordinator_executes_and_closes_with_a_small_model_without_ui(tmp
     _run_probe("coordinator", tmp_path)
 
 
+def test_tag_rules_and_csv_index_work_without_qt_network_app_or_ui(tmp_path):
+    _run_probe("tag-rules", tmp_path)
+
+
+def test_tag_service_executes_local_and_csv_work_without_ui(tmp_path):
+    _run_probe("tag-service", tmp_path)
+
+
 def test_legacy_qt_scheduler_imports_and_timer_cancellation(tmp_path):
     _run_probe("qt", tmp_path)
 
@@ -388,6 +496,10 @@ if __name__ == "__main__":
         _probe_settings_and_check_output(Path(sys.argv[2]))
     elif sys.argv[1] == "coordinator":
         _probe_query_coordinator()
+    elif sys.argv[1] == "tag-rules":
+        _probe_tag_rules(Path(sys.argv[2]))
+    elif sys.argv[1] == "tag-service":
+        _probe_tag_service(Path(sys.argv[2]))
     elif sys.argv[1] == "qt":
         _probe_qt_scheduling()
     elif sys.argv[1] == "forms":

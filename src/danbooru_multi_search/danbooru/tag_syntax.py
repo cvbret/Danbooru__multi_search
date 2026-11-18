@@ -216,3 +216,24 @@ def normalize_tag_name(value: str) -> str:
             f"当前阶段不支持元标签 {recognized_metatag}:。",
         )
     return normalized
+
+
+def normalize_tag_fragment(value: str) -> str:
+    """Normalize an incomplete ASCII fragment without damaging punctuation."""
+
+    if not isinstance(value, str):
+        raise ValueError("Tag fragment must be text.")
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("Tag fragment cannot be empty.")
+    if not stripped.isascii():
+        raise ValueError("Remote tag fragments must contain only ASCII characters.")
+    if any(character.isspace() for character in stripped):
+        raise ValueError("Tag fragment cannot contain whitespace.")
+    if any(ord(character) < 33 or ord(character) > 126 for character in stripped):
+        raise ValueError("Tag fragment contains unsupported control characters.")
+    if stripped.startswith(("-", "~")) or "*" in stripped:
+        raise ValueError("Tag fragment contains unsupported search syntax.")
+    if stripped.casefold() in QUERY_OPERATOR_NAMES:
+        raise ValueError("Tag fragment contains an unsupported query operator.")
+    return stripped.casefold()
