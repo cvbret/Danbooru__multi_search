@@ -7,7 +7,7 @@ from typing import Any
 _EXPORT_GROUPS = {
     "danbooru_multi_search.integrations.eagle.contracts": (
         "EagleBridge", "EagleConnectionInfo", "EagleFolderInfo",
-        "EagleImportResult", "EagleLibraryInfo",
+        "EagleImportResult", "EagleLibraryInfo", "EagleItemInfo", "EagleItemPage",
     ),
     "danbooru_multi_search.integrations.eagle.client": (
         "DEFAULT_EAGLE_BASE_URL", "EagleWebApiBridge",
@@ -33,6 +33,8 @@ __all__ = [
     "EagleHttpRequest",
     "EagleHttpResponse",
     "EagleImportResult",
+    "EagleItemInfo",
+    "EagleItemPage",
     "EagleLibraryInfo",
     "EagleProtocolError",
     "EagleResponseTooLargeError",

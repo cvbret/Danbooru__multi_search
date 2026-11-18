@@ -10,6 +10,8 @@ from danbooru_multi_search.integrations.eagle.contracts import (
     EagleConnectionInfo,
     EagleFolderInfo,
     EagleImportResult,
+    EagleItemInfo,
+    EagleItemPage,
     EagleLibraryInfo,
 )
 from danbooru_multi_search.core.results import (
@@ -45,6 +47,35 @@ class UnavailableEagleBridge:
         return self._unavailable_result()
 
     def create_folder(self, name: str, *, parent_identifier: str | None = None) -> ValueResult[EagleFolderInfo]:
+        return self._unavailable_result()
+
+    def get_items(
+        self,
+        *,
+        item_identifier: str | None = None,
+        url: str | None = None,
+        annotation: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> ValueResult[EagleItemPage]:
+        return self._unavailable_result()
+
+    def add_item_from_file(
+        self,
+        file_path: Path,
+        *,
+        folder_identifier: str | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> ValueResult[EagleImportResult]:
+        return self._unavailable_result()
+
+    def update_item_metadata(
+        self,
+        item_identifier: str,
+        *,
+        tags: tuple[str, ...],
+        annotation: str,
+    ) -> ValueResult[EagleItemInfo]:
         return self._unavailable_result()
 
     def import_file(

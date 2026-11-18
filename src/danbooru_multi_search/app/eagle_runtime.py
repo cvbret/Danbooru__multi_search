@@ -1,11 +1,15 @@
 """Qt scheduling for Eagle use cases; factories own backend resources."""
 
+from concurrent.futures import Future
 from dataclasses import replace
+from pathlib import Path
 from threading import Event
 import time
 
 from PySide6.QtCore import QObject, Property, QThread, Qt, Signal, Slot
+from PySide6.QtGui import QImageReader
 
+from danbooru_multi_search.app.eagle_import_types import EaglePostImportError
 from danbooru_multi_search.app.eagle_service import (
     EagleBackend,
     EagleBackendFactory,
@@ -27,6 +31,21 @@ from danbooru_multi_search.tasks.queue import (
 )
 
 
+def validate_eagle_media(path: Path, extension: str) -> None:
+    """Decode the image or first animation frame on the Eagle worker thread."""
+    if extension not in {"jpg", "jpeg", "png", "gif", "webp", "avif"}:
+        return
+    reader = QImageReader(str(path))
+    image = reader.read()
+    if image.isNull():
+        raise EaglePostImportError("eagle_file_invalid", reader.errorString())
+
+
+def _confirmed_import(result: EagleResult | None) -> bool:
+    return bool(result and not result.error_code and not result.uncertain and result.import_result
+                and result.import_result.state in {"imported", "updated", "skipped"})
+
+
 class _EagleWorker(QObject):
     completed = Signal(object)
 
@@ -35,8 +54,8 @@ class _EagleWorker(QObject):
         self._factory = factory
         self._closing = closing
 
-    @Slot(object, object)
-    def execute(self, request: EagleRequest, cancelled: Event) -> None:
+    @Slot(object, object, object)
+    def execute(self, request: EagleRequest, cancelled: Event, import_completion: Future[EagleResult] | None) -> None:
         backend: EagleBackend | None = None
         result: EagleResult | None = None
         def stopped() -> bool:
@@ -44,17 +63,26 @@ class _EagleWorker(QObject):
 
         try:
             with self._factory(stopped, time.monotonic() + 15) as backend:
+                if backend.validate_media is None:
+                    backend = replace(backend, validate_media=validate_eagle_media)
                 result = execute_eagle_request(request, backend, stopped)
         except Exception as exc:
-            started = backend.post_sent() if backend else False
-            result = EagleResult(
-                request.request_id,
-                error_code="eagle_worker_error",
-                diagnostic=str(exc),
-                post_started=started,
-                uncertain=started,
-                created_identifier=result.created_identifier if result else None,
-            )
+            if _confirmed_import(result):
+                # A backend teardown error cannot undo an acknowledged and recorded item.
+                result = replace(result, diagnostic=str(exc))
+            else:
+                started = backend.post_sent() if backend else False
+                result = EagleResult(
+                    request.request_id,
+                    error_code="eagle_worker_error",
+                    diagnostic=str(exc),
+                    post_started=started,
+                    uncertain=started,
+                    created_identifier=result.created_identifier if result else None,
+                    import_result=result.import_result if result else None,
+                )
+        if import_completion is not None:
+            import_completion.set_result(result)
         self.completed.emit(result)
         if self._closing.is_set():
             QThread.currentThread().quit()
@@ -76,7 +104,7 @@ class EagleRuntime(QObject):
     """
     changed = Signal()
     completed = Signal(object)
-    _dispatch = Signal(object, object)
+    _dispatch = Signal(object, object, object)
 
     def __init__(
         self, factory: EagleBackendFactory, availability: ServiceAvailability,
@@ -90,6 +118,7 @@ class EagleRuntime(QObject):
         self._cancel: Event | None = None
         self._task_id: str | None = None
         self._completion = None
+        self._import_completion: Future[EagleResult] | None = None
         self._worker_busy = False
         self._thread: QThread | None = None
         self._worker: _EagleWorker | None = None
@@ -130,6 +159,8 @@ class EagleRuntime(QObject):
         if self._closing or not self.availability.available or self.busy:
             return False
         cancel = Event()
+        import_completion: Future[EagleResult] | None = Future() if request.post_import else None
+        self._import_completion = import_completion
         self._request = request
         self._cancel = cancel
         self.changed.emit()
@@ -154,7 +185,7 @@ class EagleRuntime(QObject):
             self._ensure_worker()
             self._worker_busy = True
             self._completion = completion
-            self._dispatch.emit(request, cancel)
+            self._dispatch.emit(request, cancel, import_completion)
             return _Cancellation(cancel)
 
         try:
@@ -193,7 +224,7 @@ class EagleRuntime(QObject):
         request = self._request
         if request is None or request.request_id != result.request_id or self._closing:
             return
-        if self.cancelling:
+        if self.cancelling and not _confirmed_import(result):
             result = replace(
                 result, snapshot=None, error_code="eagle_cancelled",
                 uncertain=result.uncertain or result.post_started and result.snapshot is None,
@@ -243,3 +274,11 @@ class EagleRuntime(QObject):
     def shutdown_completed(self) -> bool:
         # A Python wrapper can outlive engine deletion; do not query dead QThread.
         return self._closed and self._stopped
+
+    def stopped_import_result(self, request_id: str) -> EagleResult | None:
+        """Recover the worker result after join, even if Qt never delivered its signal."""
+        completion = self._import_completion
+        if not self.shutdown_completed or not request_id or completion is None or not completion.done():
+            return None
+        result = completion.result()
+        return result if result.request_id == request_id else None

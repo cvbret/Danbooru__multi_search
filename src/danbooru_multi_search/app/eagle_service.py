@@ -3,8 +3,12 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import ContextManager, TypeAlias
 
+from danbooru_multi_search.app.eagle_import import execute_eagle_post_import
+from danbooru_multi_search.app.eagle_import_types import EaglePostImportRequest, EaglePostImportOutcome
+from danbooru_multi_search.storage.eagle_imports import EagleImportRepository
 from danbooru_multi_search.integrations.eagle.contracts import (
     EagleBridge,
     EagleConnectionInfo,
@@ -16,6 +20,8 @@ from danbooru_multi_search.integrations.eagle.contracts import (
 class EagleOperation(StrEnum):
     REFRESH = "refresh"
     CREATE_FOLDER = "create_folder"
+    PRECHECK_POST = "precheck_post"
+    IMPORT_POST = "import_post"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +38,7 @@ class EagleRequest:
     library_identifier: str | None = None
     name: str = ""
     parent_identifier: str | None = None
+    post_import: EaglePostImportRequest | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.request_id, str) or not self.request_id:
@@ -43,6 +50,9 @@ class EagleRequest:
                 raise ValueError("Folder creation requires a captured library identifier.")
             if not isinstance(self.name, str) or not self.name.strip():
                 raise ValueError("Folder name must not be empty.")
+        if self.operation in {EagleOperation.PRECHECK_POST, EagleOperation.IMPORT_POST}:
+            if not isinstance(self.post_import, EaglePostImportRequest):
+                raise ValueError("Post import requires a captured immutable payload.")
         if self.parent_identifier is not None:
             if not isinstance(self.parent_identifier, str) or not self.parent_identifier.strip():
                 raise ValueError("Parent folder identifier is invalid.")
@@ -57,12 +67,15 @@ class EagleResult:
     post_started: bool = False
     uncertain: bool = False
     created_identifier: str | None = None
+    import_result: EaglePostImportOutcome | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class EagleBackend:
     bridge: EagleBridge
     post_sent: Callable[[], bool]
+    imports: EagleImportRepository | None = None
+    validate_media: Callable[[Path, str], None] | None = None
 
 
 EagleBackendFactory: TypeAlias = Callable[
@@ -86,6 +99,20 @@ def execute_eagle_request(
     Pre/post library reads detect observed changes. The server has no atomic
     expected-library condition, so they do not establish server-side isolation.
     """
+    if request.operation in {EagleOperation.PRECHECK_POST, EagleOperation.IMPORT_POST}:
+        outcome = execute_eagle_post_import(
+            request.post_import, backend, cancelled,
+            precheck=request.operation is EagleOperation.PRECHECK_POST,
+        )
+        return EagleResult(
+            request.request_id,
+            error_code=outcome.error_code,
+            diagnostic=outcome.diagnostic,
+            post_started=outcome.post_started,
+            uncertain=outcome.uncertain,
+            created_identifier=outcome.item_identifier if outcome.post_started else None,
+            import_result=outcome,
+        )
     bridge = backend.bridge
     created_identifier = None
 

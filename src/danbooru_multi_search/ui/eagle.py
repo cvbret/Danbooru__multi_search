@@ -102,6 +102,10 @@ class EagleController(QObject):
                 name = "素材库根目录" if identifier is None else folder.name
         return {"key": key, "name": name, "valid": bool(key)}
 
+    def selected_target(self, revision: int) -> tuple[str, str | None] | None:
+        """Capture an explicitly selected target from the displayed folder revision."""
+        return self._target if revision == self._revision and self.target["valid"] else None
+
     @Slot(result=bool)
     def refresh(self) -> bool:
         return self._start(EagleRequest(uuid4().hex, EagleOperation.REFRESH))

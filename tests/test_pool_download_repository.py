@@ -126,5 +126,6 @@ def test_v11_to_v12_preserves_progress_and_download_rows_and_rolls_back(tmp_path
             assert connection.execute('SELECT MAX(version) FROM schema_migrations').fetchone()[0] == 11
             assert not connection.execute("SELECT name FROM sqlite_master WHERE name='pool_download_pages'").fetchone()
     else:
+        monkeypatch.setattr(module, 'MIGRATIONS', migrations[:12])
         assert database.initialize() == database.initialize() == 12
     assert downloads.get_batch(old.batch_id) == old and progress.get(record.source, 7) == record

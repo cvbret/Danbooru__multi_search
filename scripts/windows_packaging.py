@@ -20,7 +20,7 @@ from typing import Mapping, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_VERSION = "0.1.0"
-DATABASE_SCHEMA_VERSION = 12
+DATABASE_SCHEMA_VERSION = 13
 WINDOWS_RESOURCE_VERSION = "0.1.0.0"
 WINDOWS_RESOURCE_VERSION_TUPLE = (0, 1, 0, 0)
 PYINSTALLER_VERSION = "6.22.3"
@@ -97,6 +97,7 @@ QML_FILES = (
     "PoolReaderPage.qml",
     "PoolDownloadPanel.qml",
     "EaglePanel.qml",
+    "EagleImportDialog.qml",
     "PoolReaderItem.qml",
     "PoolMembershipPanel.qml",
     "ImageViewer.qml",

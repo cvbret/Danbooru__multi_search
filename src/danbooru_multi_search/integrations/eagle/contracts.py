@@ -37,6 +37,25 @@ class EagleImportResult:
     item_identifier: str
 
 
+@dataclass(frozen=True, slots=True)
+class EagleItemInfo:
+    identifier: str
+    name: str
+    url: str
+    tags: tuple[str, ...]
+    folders: tuple[str, ...]
+    annotation: str
+    is_deleted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EagleItemPage:
+    items: tuple[EagleItemInfo, ...]
+    total: int
+    offset: int
+    limit: int
+
+
 @runtime_checkable
 class EagleBridge(Protocol):
     """Detect Eagle, read its current library and import a local file."""
@@ -80,6 +99,38 @@ class EagleBridge(Protocol):
     def create_folder(self, name: str, *, parent_identifier: str | None = None) -> ValueResult[EagleFolderInfo]:
         """Create one explicitly requested folder in the currently open library."""
 
+        ...
+
+    def get_items(
+        self,
+        *,
+        item_identifier: str | None = None,
+        url: str | None = None,
+        annotation: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> ValueResult[EagleItemPage]:
+        """Read one bounded page for an explicit identity, URL or annotation filter."""
+        ...
+
+    def add_item_from_file(
+        self,
+        file_path: Path,
+        *,
+        folder_identifier: str | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> ValueResult[EagleImportResult]:
+        """Send one validated local path after application target checks."""
+        ...
+
+    def update_item_metadata(
+        self,
+        item_identifier: str,
+        *,
+        tags: tuple[str, ...],
+        annotation: str,
+    ) -> ValueResult[EagleItemInfo]:
+        """Update only tags and annotation, leaving the file and other metadata alone."""
         ...
 
     def import_file(

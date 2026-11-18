@@ -70,6 +70,14 @@ class PoolBrowserController(QObject):
         """Expose the confirmed pool for an independent reader session."""
         return self._pool
 
+    def known_pools_for(self, post_id: int) -> tuple[DanbooruPool, ...]:
+        """Return loaded membership information belonging to this specific post."""
+        pools = self._membership_values if self._membership_post == post_id else ()
+        current = self._pool
+        if current and post_id in current.post_ids and all(pool.id != current.id for pool in pools):
+            return (*pools, current)
+        return pools
+
     @property
     def loaded_slots(self) -> tuple[PoolPageSlot, ...]:
         return self._model.slots

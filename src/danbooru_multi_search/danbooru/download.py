@@ -74,6 +74,7 @@ class DownloadAttemptHooks:
     can_continue: Callable[[], bool] | None = None
     commit: Callable[[Path, Path], None] | None = None
     cleanup_error: Callable[[str], None] | None = None
+    require_media_response: bool = False
 
 
 def start_media_download_attempt(
@@ -270,6 +271,12 @@ class _QtDownloadAttempt(QObject):
                 error_code=error_code,
                 http_status=http_status,
             )
+        elif self._hooks.require_media_response and not self._media_response(reply):
+            result = TaskAttemptResult.failure(
+                "下载响应的 Content-Type 不是支持的媒体类型。",
+                error_code=DownloadErrorKind.INVALID_REQUEST,
+                http_status=http_status,
+            )
         elif self._bytes_written == 0:
             result = TaskAttemptResult.failure(
                 "Danbooru media response was empty.",
@@ -281,6 +288,13 @@ class _QtDownloadAttempt(QObject):
 
         self._complete(result)
         self.deleteLater()
+
+    @staticmethod
+    def _media_response(reply: QNetworkReply) -> bool:
+        media_type = bytes(reply.rawHeader("Content-Type")).partition(b";")[0].strip().lower()
+        return media_type.startswith((b"image/", b"video/")) or media_type in {
+            b"application/octet-stream", b"application/zip", b"application/x-shockwave-flash",
+        }
 
     def _commit_download(self, http_status: int | None) -> TaskAttemptResult:
         stream = self._stream
@@ -361,6 +375,7 @@ class DanbooruDownloadController(QObject):
         network_manager: QNetworkAccessManager | None = None,
         task_queue: BoundedTaskQueue | None = None,
         queue_config: TaskQueueConfig | None = None,
+        require_media_response: bool = False,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -368,6 +383,7 @@ class DanbooruDownloadController(QObject):
             raise ValueError("maximum_bytes must be greater than zero")
         self._timeout_ms = timeout_ms
         self._maximum_bytes = maximum_bytes
+        self._hooks = DownloadAttemptHooks(require_media_response=require_media_response)
         self._network_manager = network_manager or QNetworkAccessManager(self)
         self._owns_queue = task_queue is None
         if task_queue is None:
@@ -440,6 +456,7 @@ class DanbooruDownloadController(QObject):
                     self._maximum_bytes,
                     completion,
                     self,
+                    hooks=self._hooks,
                 )
             except OSError as exc:
                 completion(

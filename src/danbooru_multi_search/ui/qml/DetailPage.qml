@@ -18,6 +18,7 @@ Item {
     signal importTagsRequested()
     signal addTagToQueryRequested(string tagName)
     signal downloadPrepared(string token)
+    signal eagleImportRequested(string key, int revision)
     signal poolsRequested(string key, int revision)
 
     function syncMedia() {
@@ -145,6 +146,17 @@ Item {
                         const token = page.downloads.captureDetailPost(pressedAction.key, pressedAction.revision)
                         if (token.length) page.downloadPrepared(token)
                     }
+                    pressedAction = null
+                }
+            }
+            ActionButton {
+                objectName: "detailEagleImportButton"
+                text: qsTr("导入 Eagle")
+                enabled: controller.isOpen && !eagleImport.busy
+                property var pressedAction: null
+                onPressed: pressedAction = {key: controller.postIdText, revision: eagleImport.sourceRevision}
+                onClicked: {
+                    if (pressedAction) page.eagleImportRequested(pressedAction.key, pressedAction.revision)
                     pressedAction = null
                 }
             }

@@ -20,6 +20,8 @@ from danbooru_multi_search.integrations.eagle.contracts import (
     EagleConnectionInfo,
     EagleFolderInfo,
     EagleImportResult,
+    EagleItemInfo,
+    EagleItemPage,
     EagleLibraryInfo,
 )
 from danbooru_multi_search.integrations.eagle.transport import (
@@ -293,6 +295,121 @@ class EagleWebApiBridge:
                     f"Eagle folder was not found: {checked_folder_identifier}",
                 )
 
+        return self._add_file(absolute_path, checked_folder_identifier, payload)
+
+    def get_items(
+        self,
+        *,
+        item_identifier: str | None = None,
+        url: str | None = None,
+        annotation: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> ValueResult[EagleItemPage]:
+        """Read a filtered page without the server-dependent fields parameter."""
+        try:
+            filters = {"id": item_identifier, "url": url, "annotation": annotation}
+            if not any(value is not None for value in filters.values()):
+                raise _EagleClientError("eagle_invalid_item_query", "An explicit item filter is required.")
+            query: dict[str, str | int] = {}
+            for name, value in filters.items():
+                if value is not None:
+                    if not isinstance(value, str) or not value.strip():
+                        raise _EagleClientError("eagle_invalid_item_query", "Item filters must be non-empty text.")
+                    query[name] = value
+            if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 1000:
+                raise _EagleClientError("eagle_invalid_item_query", "Invalid item pagination.")
+            query.update(offset=offset, limit=limit)
+            data = self._request_data("item/get?" + urlencode(query))
+            page = self._parse_item_page(data, expected_offset=offset, expected_limit=limit)
+            if item_identifier is not None and any(item.identifier != item_identifier for item in page.items):
+                raise _EagleClientError("eagle_invalid_items", "The item response did not match its requested identifier.")
+            return ValueResult(succeeded=True, value=page)
+        except _EagleClientError as exc:
+            return self._failure(exc)
+
+    def add_item_from_file(
+        self,
+        file_path: Path,
+        *,
+        folder_identifier: str | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> ValueResult[EagleImportResult]:
+        """Send item/add once; the application has checked the captured target."""
+        try:
+            absolute_path = self._validate_import_file(file_path)
+            payload = self._validate_import_metadata(metadata)
+            checked_folder_identifier = self._validate_folder_identifier(folder_identifier)
+        except _EagleClientError as exc:
+            return self._failure(exc)
+        return self._add_file(absolute_path, checked_folder_identifier, payload)
+
+    def update_item_metadata(
+        self,
+        item_identifier: str,
+        *,
+        tags: tuple[str, ...],
+        annotation: str,
+    ) -> ValueResult[EagleItemInfo]:
+        """Send only id/tags/annotation; never replace a file or folder assignment."""
+        try:
+            if not isinstance(item_identifier, str) or not item_identifier.strip():
+                raise _EagleClientError("eagle_invalid_item_identifier", "Item identifier must not be empty.")
+            payload = self._validate_import_metadata({"tags": tags, "annotation": annotation})
+            payload["id"] = item_identifier
+            data = self._request_data("item/update", method="POST", payload=payload)
+            item = self._parse_item(data)
+            if item.identifier != item_identifier:
+                raise _EagleClientError("eagle_invalid_items", "Updated item identifier did not match the request.")
+            return ValueResult(succeeded=True, value=item)
+        except _EagleClientError as exc:
+            return self._failure(exc)
+
+    @staticmethod
+    def _parse_item(data: object) -> EagleItemInfo:
+        if not isinstance(data, dict):
+            raise _EagleClientError("eagle_invalid_items", "Eagle item must be an object.")
+        identifier = data.get("id")
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise _EagleClientError("eagle_invalid_items", "Eagle item identifier is missing.")
+        for name in ("name", "url", "annotation"):
+            if not isinstance(data.get(name), str):
+                raise _EagleClientError("eagle_invalid_items", f"Eagle item {name} must be text.")
+        for name in ("tags", "folders"):
+            values = data.get(name)
+            if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+                raise _EagleClientError("eagle_invalid_items", f"Eagle item {name} must contain text values.")
+        if type(data.get("isDeleted")) is not bool:
+            raise _EagleClientError("eagle_invalid_items", "Eagle item isDeleted must be a boolean.")
+        return EagleItemInfo(
+            identifier, data["name"], data["url"], tuple(data["tags"]),
+            tuple(data["folders"]), data["annotation"], data["isDeleted"],
+        )
+
+    @classmethod
+    def _parse_item_page(
+        cls, data: object, *, expected_offset: int, expected_limit: int,
+    ) -> EagleItemPage:
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            raise _EagleClientError("eagle_invalid_items", "Eagle item page is invalid.")
+        total, offset, limit = data.get("total"), data.get("offset"), data.get("limit")
+        if type(total) is not int or total < 0 or type(offset) is not int or offset != expected_offset:
+            raise _EagleClientError("eagle_invalid_items", "Eagle item page has invalid counts.")
+        if type(limit) is not int or limit != expected_limit or len(data["data"]) > limit:
+            raise _EagleClientError("eagle_invalid_items", "Eagle item page has an unexpected limit.")
+        if offset + len(data["data"]) > total:
+            raise _EagleClientError("eagle_invalid_items", "Eagle item page exceeds its total.")
+        items = tuple(cls._parse_item(value) for value in data["data"])
+        if len({item.identifier for item in items}) != len(items):
+            raise _EagleClientError("eagle_invalid_items", "Eagle item page contains repeated identifiers.")
+        return EagleItemPage(items, total, offset, limit)
+
+    def _add_file(
+        self,
+        absolute_path: Path,
+        checked_folder_identifier: str | None,
+        payload: Mapping[str, object],
+    ) -> ValueResult[EagleImportResult]:
         request_payload: dict[str, object] = {"path": str(absolute_path)}
         request_payload.update(payload)
         if checked_folder_identifier is not None:

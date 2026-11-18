@@ -49,6 +49,13 @@ ApplicationWindow {
         theme: root.theme
     }
     EaglePanel { id: eaglePanel; controller: eagleController; theme: root.theme }
+    EagleImportDialog {
+        id: eagleImportDialog
+        controller: eagleImport
+        connection: eagleController
+        theme: root.theme
+        onChooseTarget: eaglePanel.open()
+    }
 
     FavoriteTransferDialog {
         id: favoriteTransferDialog
@@ -931,6 +938,7 @@ ApplicationWindow {
             favorites: detailFavorites
             downloads: downloadUi
             onDownloadPrepared: function(token) { downloadRequestDialog.showRequest(token) }
+            onEagleImportRequested: function(key, revision) { eagleImportDialog.showPost(key, revision) }
             onPoolsRequested: function(key, revision) { poolNavigation.requestDetailMemberships(key, revision) }
             complexQueryActionsEnabled: true
             onBackRequested: root.returnToGallery()

@@ -131,6 +131,19 @@ def test_http_error_leaves_no_complete_or_temporary_file(
     assert _part_files(tmp_path) == []
 
 
+def test_eagle_download_rejects_json_response_before_committing(local_http_server, tmp_path):
+    server = local_http_server(b'{"error":"unavailable"}')
+    controller = DanbooruDownloadController(
+        require_media_response=True, queue_config=TaskQueueConfig(minimum_interval_seconds=0),
+    )
+    try:
+        result = _wait_for_download(controller, _post(server.base_url + "/original.jpg"), tmp_path)
+        assert not result.succeeded and "Content-Type" in result.message
+        assert not list(tmp_path.iterdir())
+    finally:
+        controller.shutdown()
+
+
 def test_empty_response_leaves_no_complete_file(local_http_server, tmp_path):
     server = local_http_server(b"")
     controller = DanbooruDownloadController(

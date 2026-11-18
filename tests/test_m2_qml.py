@@ -95,6 +95,9 @@ from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
 from danbooru_multi_search.app.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.ui.eagle import EagleController
+from danbooru_multi_search.app.eagle_import_job import EagleImportJob
+from danbooru_multi_search.ui.eagle_import import EagleImportController
+from danbooru_multi_search.danbooru.download import DanbooruDownloadController
 from danbooru_multi_search.app.eagle_runtime import EagleRuntime
 from danbooru_multi_search.ui.launcher import create_eagle_backend_factory
 from danbooru_multi_search.integrations.eagle import EagleWebApiBridge
@@ -382,8 +385,12 @@ def _create_window(tmp_path):
     pool_downloads = PoolDownloadController(pool_download_manager, settings_controller, download_ui, pool_browser, pool_reader,
         submission=download_submission)
     eagle_bridge = EagleWebApiBridge()
-    eagle_runtime = EagleRuntime(create_eagle_backend_factory(eagle_bridge), eagle_bridge.availability, task_queue)
+    eagle_runtime = EagleRuntime(create_eagle_backend_factory(eagle_bridge, database.path), eagle_bridge.availability, task_queue)
     eagle = EagleController(eagle_runtime)
+    eagle_import_job = EagleImportJob(eagle_runtime, DanbooruDownloadController(
+        network_manager=network_manager, task_queue=task_queue, require_media_response=True,
+    ), tmp_path / "eagle-imports")
+    eagle_import = EagleImportController(eagle_import_job, eagle, detail_navigation, bridge, pool_browser)
     pool_reader.changed.connect(download_ui.refresh_snapshot_source)
     collection.poolRequested.connect(pool_navigation.openFavoritePool)
     images = ImageCacheController(tmp_path / "image-cache")
@@ -420,6 +427,7 @@ def _create_window(tmp_path):
     context.setContextProperty("poolReader", pool_reader)
     context.setContextProperty("poolDownloads", pool_downloads)
     context.setContextProperty("eagleController", eagle)
+    context.setContextProperty("eagleImport", eagle_import)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
     assert engine.rootObjects(), [error.toString() for error in engine.warnings()]
     root = engine.rootObjects()[0]
@@ -460,6 +468,8 @@ def _create_window(tmp_path):
         "pool_download_manager": pool_download_manager,
         "pool_downloads": pool_downloads,
         "eagle": eagle,
+        "eagle_import": eagle_import,
+        "eagle_import_job": eagle_import_job,
         "eagle_runtime": eagle_runtime,
         "qml_warnings": qml_warnings,
     }
@@ -467,6 +477,7 @@ def _create_window(tmp_path):
 
 def _close_window(values) -> None:
     values["eagle"].shutdown()
+    values["eagle_import_job"].begin_shutdown()
     values["eagle_runtime"].begin_shutdown()
     values["pool_downloads"].shutdown()
     values["pool_download_manager"].begin_shutdown()
@@ -484,6 +495,7 @@ def _close_window(values) -> None:
     values["saved_queries"].shutdown()
     values["transfer"].shutdown()
     values["eagle_runtime"].shutdown()
+    values["eagle_import_job"].finish_shutdown()
     values["pool_download_manager"].finish_shutdown()
     values["pool_progress"].finish_shutdown()
     values["collection"].shutdown()

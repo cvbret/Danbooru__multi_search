@@ -390,6 +390,39 @@ MIGRATIONS = (
             "CREATE INDEX pool_download_pages_work ON pool_download_pages(plan_id,state,page_number)",
         ),
     ),
+    Migration(
+        version=13,
+        name="eagle_post_imports",
+        statements=(
+            """CREATE TABLE eagle_import_items (
+                library_id TEXT NOT NULL CHECK (length(trim(library_id)) > 0),
+                item_id TEXT NOT NULL CHECK (length(trim(item_id)) > 0),
+                sha256 TEXT CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+                PRIMARY KEY (library_id, item_id)
+            )""",
+            """CREATE INDEX eagle_import_items_hash ON eagle_import_items(library_id, sha256)
+                WHERE sha256 IS NOT NULL""",
+            """CREATE TABLE eagle_import_posts (
+                library_id TEXT NOT NULL,
+                post_id INTEGER NOT NULL CHECK (typeof(post_id) = 'integer' AND post_id > 0),
+                item_id TEXT NOT NULL,
+                page_url TEXT NOT NULL CHECK (length(trim(page_url)) > 0),
+                PRIMARY KEY (library_id, post_id),
+                FOREIGN KEY (library_id, item_id) REFERENCES eagle_import_items(library_id, item_id)
+            )""",
+            """CREATE INDEX eagle_import_posts_item ON eagle_import_posts(library_id, item_id)""",
+            """CREATE TABLE eagle_import_attempts (
+                token TEXT PRIMARY KEY NOT NULL,
+                library_id TEXT NOT NULL CHECK (length(trim(library_id)) > 0),
+                post_id INTEGER NOT NULL CHECK (typeof(post_id) = 'integer' AND post_id > 0),
+                sha256 TEXT NOT NULL CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
+                file_path TEXT CHECK (length(file_path) > 0),
+                page_url TEXT CHECK (length(trim(page_url)) > 0),
+                UNIQUE (library_id, post_id),
+                UNIQUE (library_id, sha256)
+            )""",
+        ),
+    ),
 )
 
 
