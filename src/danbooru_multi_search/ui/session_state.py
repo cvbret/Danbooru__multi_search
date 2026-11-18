@@ -19,6 +19,7 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from danbooru_multi_search.app.cache_cleanup import delete_history
 from danbooru_multi_search.danbooru.query_controller import DanbooruM2QueryController
 from danbooru_multi_search.danbooru.query_events import (
     GalleryQueryAccepted,
@@ -462,8 +463,11 @@ class BrowserSessionController(QObject):
         return bool(self._query_bridge.cancel())
 
     @Slot()
-    def clearHistory(self, expected=None, on_cleared: Callable[[], None] | None = None) -> bool:
-        return bool(self._clear_m2_history(expected, on_cleared))
+    def clearHistory(
+        self, expected=None, on_cleared: Callable[[], None] | None = None,
+        delete_operation: Callable[[], None] | None = None,
+    ) -> bool:
+        return bool(self._clear_m2_history(expected, on_cleared, delete_operation))
 
     @Slot(int, int, int, int, bool, bool)
     def updateWindowState(
@@ -1619,7 +1623,10 @@ class BrowserSessionController(QObject):
         ):
             controller.cancel()
 
-    def _clear_m2_history(self, expected=None, on_cleared: Callable[[], None] | None = None):
+    def _clear_m2_history(
+        self, expected=None, on_cleared: Callable[[], None] | None = None,
+        delete_operation: Callable[[], None] | None = None,
+    ):
         if self._closed or self._clearing_history:
             return
         self._clearing_history = True
@@ -1642,10 +1649,10 @@ class BrowserSessionController(QObject):
         self._pending_history_id = None
         self._invalidate_m2_restore(cancel=False)
         try:
-            if expected is None:
-                self._repository.clear_history()
-            else:
-                self._repository.clear_history(expected=expected)
+            if delete_operation is None:
+                delete_history(self._repository, expected)
+            elif delete_operation() is False:
+                raise HistoryError("历史删除操作未完成。")
         except HistoryError as exc:
             self._m2_clear_cutoff = previous_cutoff
             self._m2_history_epoch = previous_epoch

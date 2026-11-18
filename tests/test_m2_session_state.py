@@ -1413,3 +1413,57 @@ def test_view_arriving_before_session_accept_slot_is_replayed(tmp_path):
     assert active is not None
     assert active.definition == viewed
     assert active.last_committed_page == 1
+
+
+def test_injected_history_delete_runs_inside_cutoff_then_retires_before_model_notice(tmp_path):
+    from danbooru_multi_search.app.cache_cleanup import delete_history
+
+    repository, core, _bridge, session = _build(tmp_path)
+    core.start(_definition("cat"))
+    core.accept(query_tags=("cat",))
+    epoch = session._m2_history_epoch
+    order = []
+
+    def delete():
+        assert session._clearing_history
+        assert session._m2_history_epoch == epoch + 1
+        assert session._m2_clear_cutoff == session._m2_current_identity()
+        order.append("delete")
+        delete_history(repository)
+
+    def retired():
+        assert repository.list_queries() == ()
+        order.append("retire")
+
+    session.historyModel.countChanged.connect(lambda: order.append("model"))
+    assert session.clearHistory(delete_operation=delete, on_cleared=retired)
+    assert order[:2] == ["delete", "retire"]
+    assert order.index("model") > order.index("retire")
+
+
+@pytest.mark.parametrize("failure", ["raise", "false"])
+def test_injected_history_delete_failure_restores_original_session_state(tmp_path, failure):
+    repository, core, _bridge, session = _build(tmp_path)
+    core.start(_definition("cat"))
+    core.accept(query_tags=("cat",))
+    session.selectHistory(0)
+    names = (
+        "_m2_clear_cutoff", "_m2_history_epoch", "_pending_history_id",
+        "_restore_generation", "_m2_restore_token", "_restore_ready",
+        "_restore_ready_revision", "_restore_application",
+        "_restore_ready_fallback_index", "_restore_ready_fallback_scroll",
+    )
+    before = tuple(getattr(session, name) for name in names)
+    records = repository.list_queries()
+    retired = []
+
+    def delete():
+        assert session._clearing_history
+        if failure == "raise":
+            raise HistoryError("injected deletion failure")
+        return False
+
+    assert not session.clearHistory(delete_operation=delete, on_cleared=lambda: retired.append(True))
+    assert tuple(getattr(session, name) for name in names) == before
+    assert not session._clearing_history
+    assert repository.list_queries() == records and retired == []

@@ -60,6 +60,8 @@ from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
 from danbooru_multi_search.ui.saved_queries import SavedQueryController
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
 from danbooru_multi_search.app.query_checkpoints import QueryCheckpointService
+from danbooru_multi_search.app.cache_cleanup import CacheCleanupService
+from danbooru_multi_search.app.cache_protection import CacheProtectionService
 from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
 from danbooru_multi_search.storage.cache_protection import CacheProtectionRepository
 from danbooru_multi_search.ui.cache_protection import CacheProtectionController
@@ -374,8 +376,10 @@ def _create_window(tmp_path):
     pool_reader.changed.connect(download_ui.refresh_snapshot_source)
     collection.poolRequested.connect(pool_navigation.openFavoritePool)
     images = ImageCacheController(tmp_path / "image-cache")
-    protection = CacheProtectionController(CacheProtectionRepository(database), favorites, images, access=write_access)
-    cleanup = CacheCleanupController(session._repository, checkpoint_repository, checkpoint_service, session, write_access, images)
+    protection_service = CacheProtectionService(CacheProtectionRepository(database), write_access)
+    protection = CacheProtectionController(protection_service, favorites, images)
+    cleanup_service = CacheCleanupService(session._repository, checkpoint_repository, checkpoint_service, write_access)
+    cleanup = CacheCleanupController(cleanup_service, session, write_access, images)
     factory = ImageNetworkAccessManagerFactory(images)
     configure_controls_style()
     engine = QQmlApplicationEngine()
@@ -431,6 +435,8 @@ def _create_window(tmp_path):
         "checkpoints": checkpoints,
         "checkpoint_service": checkpoint_service,
         "cache_protection": protection,
+        "cache_protection_service": protection_service,
+        "cache_cleanup_service": cleanup_service,
         "cache_cleanup": cleanup,
         "selection": selection,
         "detail_favorites": detail_favorites,
@@ -479,7 +485,7 @@ def _close_window(values) -> None:
     values["appearance"].shutdown()
     values["tags"].shutdown()
     values["images"].shutdown()
-    values["cache_protection"].shutdown()
+    values["cache_protection_service"].shutdown()
     values["root"].close()
     values["engine"].deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
@@ -495,7 +501,7 @@ def test_m2_root_loads_split_panels_and_has_no_pagination(tmp_path):
             values[name]._access is access
             for name in (
                 "transfer", "combinations", "saved_queries", "checkpoints",
-                "cache_protection", "cache_cleanup",
+                "cache_protection_service", "cache_cleanup_service", "cache_cleanup",
             )
         )
         assert values["combinations"]._favorite_repository is values["favorites"]._repository

@@ -1,40 +1,41 @@
-"""Stable user confirmations for history, checkpoints and ordinary images."""
+"""Qt confirmations and image/session adapters for cache cleanup."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import uuid4
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from danbooru_multi_search.app.cache_cleanup import CacheCleanupService, CleanupSnapshot
 from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError
-from danbooru_multi_search.storage.history import HistoryError, HistoryRepository, HistoryCleanupIdentity
-from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository, CheckpointCleanupIdentity
+from danbooru_multi_search.storage.history import HistoryError
 from danbooru_multi_search.ui.image_cache import ImageCacheController
-from danbooru_multi_search.app.query_checkpoints import QueryCheckpointService
 from danbooru_multi_search.ui.session_state import BrowserSessionController
 
 
 @dataclass(frozen=True, slots=True)
 class _Cleanup:
     token: str
-    kind: str
-    identities: tuple[HistoryCleanupIdentity | CheckpointCleanupIdentity, ...]
-    count: int
+    snapshot: CleanupSnapshot
     message: str
 
 
 class CacheCleanupController(QObject):
     changed = Signal()
 
-    def __init__(self, history: HistoryRepository, checkpoints: QueryCheckpointRepository,
-                 checkpoint_service: QueryCheckpointService, session: BrowserSessionController,
-                 access: SharedWriteAccess, images: ImageCacheController,
-                 parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        service: CacheCleanupService,
+        session: BrowserSessionController,
+        access: SharedWriteAccess,
+        images: ImageCacheController,
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent)
-        self._history, self._checkpoints = history, checkpoints
-        self._checkpoint_service, self._session = checkpoint_service, session
+        self._service, self._session = service, session
         self._access, self._images = access, images
         self._pending: _Cleanup | None = None
         self._closed = False
@@ -52,9 +53,13 @@ class CacheCleanupController(QObject):
 
     @Property("QVariantMap", notify=changed)
     def confirmation(self) -> dict[str, object]:
-        if self._pending is None:
+        pending = self._pending
+        if pending is None:
             return {"token": "", "kind": "", "count": 0, "message": ""}
-        return {"token": self._pending.token, "kind": self._pending.kind, "count": self._pending.count, "message": self._pending.message}
+        return {
+            "token": pending.token, "kind": pending.snapshot.kind,
+            "count": pending.snapshot.count, "message": pending.message,
+        }
 
     @Slot(str, result=bool)
     def prepareCleanup(self, kind: str) -> bool:
@@ -66,24 +71,21 @@ class CacheCleanupController(QObject):
         if not self.canWrite:
             return self._fail(ValueError("收藏正在变更，请稍后再清理。"))
         try:
+            image_count = 0
+            if kind == "images":
+                cache = self._images.cache
+                image_count = len(cache.entries()) if cache is not None and hasattr(cache, "entries") else 0
+            snapshot = self._service.capture(kind, image_count=image_count)
+            count = snapshot.count
             if kind == "history":
-                identities = self._history.capture_cleanup()
-                count = len(identities)
                 message = f"清理 {count} 条查询历史、对应检查点及最近使用标签？将停止相关活动查询，保留当前画廊和草稿。"
             elif kind == "checkpoints":
-                identities = self._checkpoints.capture_cleanup()
-                count = len(identities)
                 message = f"清理 {count} 条执行检查点及保存的扫描结果？将停止相关活动查询，保留历史条件、当前画廊和草稿。清理后这些历史只能从头执行。"
-            elif kind == "images":
-                identities = ()
-                cache = self._images.cache
-                count = len(cache.entries()) if cache is not None and hasattr(cache, "entries") else 0
-                message = f"当前有 {count} 张已缓存图片。确认后清理未收藏的图片缓存，并按确认时的最新收藏保留受保护图片。图片请求会停止，查询和下载任务继续运行。"
             else:
-                raise ValueError("请选择有效的清理范围。")
+                message = f"当前有 {count} 张已缓存图片。确认后清理未收藏的图片缓存，并按确认时的最新收藏保留受保护图片。图片请求会停止，查询和下载任务继续运行。"
             if self._closed or self._generation != generation:
                 return False
-            pending = _Cleanup(uuid4().hex, kind, identities, count, message)
+            pending = _Cleanup(uuid4().hex, snapshot, message)
             self._pending, self._notice = pending, ""
             self.changed.emit()
             return not self._closed and self._pending is pending
@@ -97,55 +99,46 @@ class CacheCleanupController(QObject):
             self._pending = None
             self.changed.emit()
 
-    @staticmethod
-    def _owners(pending: _Cleanup) -> frozenset[tuple[int, str]]:
-        if pending.kind == "history":
-            return frozenset((item.history_id, item.checkpoint_owner) for item in pending.identities if item.checkpoint_owner is not None)
-        return frozenset((item.history_id, item.owner) for item in pending.identities)
+    def _clear_history(
+        self, delete_operation: Callable[[], None], on_cleared: Callable[[], None],
+    ) -> None:
+        if not self._session.clearHistory(
+            delete_operation=delete_operation, on_cleared=on_cleared,
+        ):
+            raise HistoryError(self._session.noticeText or "历史清理未完成。")
+
+    def _clear_images(self) -> str:
+        if not self._images.clearCache():
+            raise ValueError(self._images.statusText or "图片缓存清理未完成。")
+        return self._images.statusText or "图片缓存清理完成。"
 
     @Slot(str, result=bool)
     def confirmCleanup(self, token: str) -> bool:
         pending = self._pending
         if not self.canWrite or pending is None or not token or pending.token != token:
             return False
-        owner = uuid4().hex
-        if not self._access.begin_external_write(owner, maintenance=True):
-            return False
-        try:
-            if self._closed or self._pending is not pending:
-                return False
-            if pending.kind in {"history", "checkpoints"}:
-                current = self._history.capture_cleanup() if pending.kind == "history" else self._checkpoints.capture_cleanup()
-                if self._closed or self._pending is not pending:
-                    return False
-                if current != pending.identities:
-                    self._checkpoint_service.reconcile_ownership()
-                    raise ValueError("记录归属已改变，请重新打开清理确认。")
-                owners = self._owners(pending)
-                self._checkpoint_service.cancel_if_owned(owners)
-                if self._closed or self._pending is not pending:
-                    return False
-                if pending.kind == "history":
-                    if not self._session.clearHistory(expected=pending.identities,
-                        on_cleared=lambda: self._checkpoint_service.retire_checkpoints(owners)):
-                        raise HistoryError(self._session.noticeText or "历史清理未完成。")
-                else:
-                    self._checkpoints.clear_checkpoints(expected=pending.identities)
-                    self._checkpoint_service.retire_checkpoints(owners)
-                    self._session._refresh_history()
-                notice = f"已清理 {pending.count} 条" + ("查询历史及对应检查点。" if pending.kind == "history" else "执行检查点；历史条件和当前画廊已保留。")
-            else:
-                if not self._images.clearCache():
-                    raise ValueError(self._images.statusText or "图片缓存清理未完成。")
-                notice = self._images.statusText or "图片缓存清理完成。"
-            if not self._closed and self._pending is pending:
+
+        def current() -> bool:
+            return not self._closed and self._pending is pending
+
+        def publish(notice: str) -> None:
+            if current():
                 self._pending, self._notice = None, notice
                 self.changed.emit()
-            return True
-        except (CheckpointError, HistoryError, OSError, RuntimeError, ValueError) as exc:
-            return self._fail(exc)
-        finally:
-            self._access.finish_external_write(owner)
+
+        def failed(error: Exception) -> None:
+            if current():
+                self._fail(error)
+
+        return self._service.execute(
+            pending.snapshot,
+            guard=current,
+            clear_history=self._clear_history,
+            refresh_history=self._session._refresh_history,
+            clear_images=self._clear_images,
+            publish=publish,
+            failed=failed,
+        )
 
     def _fail(self, error: Exception) -> bool:
         if not self._closed:

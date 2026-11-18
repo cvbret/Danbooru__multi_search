@@ -4,6 +4,8 @@ from dataclasses import replace
 
 import pytest
 
+from danbooru_multi_search.app.cache_cleanup import CacheCleanupService
+from danbooru_multi_search.app.cache_protection import CacheProtectionService
 from danbooru_multi_search.core.favorites import FavoriteCandidate
 from danbooru_multi_search.danbooru.query_types import QueryExecutionLimits, QueryExecutionState
 from danbooru_multi_search.danbooru.result_processing import ResultFilterSpec
@@ -20,8 +22,8 @@ def setup(tmp_path):
     values = build(tmp_path)
     harness, database, history, shared, bridge, repository, checkpoints, session = values
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(CacheProtectionRepository(database), shared, images, access=shared._writes.access)
-    cleanup = CacheCleanupController(history, repository, checkpoints._service, session, shared._writes.access, images)
+    protection = CacheProtectionController(CacheProtectionService(CacheProtectionRepository(database), shared._writes.access), shared, images)
+    cleanup = CacheCleanupController(CacheCleanupService(history, repository, checkpoints._service, shared._writes.access), session, shared._writes.access, images)
     harness.controller.start_standard("a", limits=QueryExecutionLimits(page_size=1))
     harness.dispatch()
     harness.succeed((_post(1, "a"),))
@@ -33,7 +35,7 @@ def finish(data):
     cleanup.shutdown()
     close(values)
     images.shutdown()
-    protection.shutdown()
+    protection._service.shutdown()
 
 
 def test_cancel_confirmation_leaves_query_and_records_untouched(tmp_path):
@@ -197,7 +199,7 @@ def test_close_from_image_cleanup_notice_allows_final_query_save_under_own_occup
             cleanup.shutdown()
             close(values)
             images.shutdown()
-            protection.shutdown()
+            protection._service.shutdown()
         images.statusChanged.connect(shutdown)
         cleanup.confirmCleanup(cleanup.confirmation["token"])
         assert closed == [True] and checkpoints._closed

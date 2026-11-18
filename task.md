@@ -4,9 +4,9 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第二轮结构整改
 - 当前里程碑：`第二轮结构整改完成`
-- 当前主要任务：`R5-004 查询进度协调`
+- 当前主要任务：`R5-005 缓存清理与收藏图片保护`
 - 当前状态：待提交
-- 执行状态：用户于 2026-11-18 明确要求继续；从 R5-004 恢复第二轮结构整改，沿用已通过结果，只执行当前修改的直接相关检查。
+- 执行状态：用户于 2026-11-18 明确要求继续；按第 45 节推进第二轮结构整改，沿用已通过结果，只执行当前修改的直接相关检查。
 - 最后更新：2026-11-18
 
 ## 1. 阶段进度
@@ -2974,7 +2974,7 @@ M2 里程碑回归检查与提交。
 
 ### 45.6 当前任务 R5-004
 
-- 状态：待提交，2026-11-18。用户已明确恢复；代码起点为 `255d91c4318de482cebb06d46de9d760895477a0`。恢复时只有本文件的既有暂停交接修改，生产代码与测试没有未提交修改。
+- 状态：已完成，2026-11-18。用户已明确恢复；代码起点为 `255d91c4318de482cebb06d46de9d760895477a0`。恢复时只有本文件的既有暂停交接修改，生产代码与测试没有未提交修改。
 - 目标：查询进度保存、记录归属、续扫领取及两阶段关闭迁入应用服务；删除 UI 中已经迁移的协调实现，保留现有保存屏障、事务及交互行为。
 - 负责人：developer 编码及最小直接检查；reviewer 独立静态审查和聚焦验证；intergrator 在获准后精确本地提交；主 Agent 维护范围、状态及后续批次。
 - 准确生产/打包范围 9 个路径：新增 `src/danbooru_multi_search/app/query_checkpoints.py`、`danbooru/query_events.py`；修改 `ui/query_checkpoints.py`、`ui/session_state.py`、`ui/cache_cleanup.py`、`ui/launcher.py`、`danbooru/query_controller.py`、`danbooru/__init__.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用同一 src 前缀，不修改 query_types、仓库、保存格式、schema、QML 或实际请求执行器。
@@ -2990,3 +2990,22 @@ M2 里程碑回归检查与提交。
 - 另发现并修正真实关闭边界：`persist_execution` 原先在 closed 之前判断 closing，最终关闭后的迟到调用仍可能返回 True。新服务将 closed 拒绝置于入口，防止其他分支放行迟到请求。新增 `test_finished_service_rejects_a_late_network_persistence_barrier` 和正式导入持锁/最终历史保存复查共 2 项通过，1.70 秒；正式关闭项是必要重复，不重复计入 61 个不同场景。正常关闭期间的延后结算与维护许可保留。
 - 独立静态审查暂无其他确定阻断，现等待冻结后的独立聚焦验证。没有执行全量回归、完整构建、原生界面、真实服务或 Linux；临时检查数据留在项目 `.tools`，不提交，M4 成果窗口未操作。
 - reviewer 最终独立选择 26 项全部通过，8.48 秒。覆盖新服务全部直接场景（含最终关闭后迟到屏障 False 且不改数据库、正常关闭结算）、纯事件冷导入/旧出口同对象/不可变值、初始 history+检查点在 starter 前提交及失败回滚、候选/时间精度/视图恢复、领取中断保留其他归属、草稿关闭及释放通知期间新查询、旧失败隔离、末页故障关闭恢复、清理后不重建与维护关闭最后保存、真实历史续扫/零请求重启、正式导入持锁关闭、M2/spec。准确 9 个生产/打包、7 个测试及本记录共 17 个路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r5-004-reviewer*` 保留且不提交，未执行全量回归或构建。
+- 本地提交：`0705146efae81881557feb72ca44c4a30ec0d3a6`（`refactor(checkpoints): separate persistence and resume coordination`），准确包含批准的 17 个路径及上述真实关闭边界修复。提交后工作树与暂存区干净，未推送。
+
+### 45.7 当前任务 R5-005
+
+- 状态：待提交；起点 `0705146efae81881557feb72ca44c4a30ec0d3a6`，从干净工作树开始。目标是把缓存清理与收藏图片保护的应用流程移出 UI，删除迁出后的重复状态和实现，保持确认交互、历史恢复及实际 Qt 缓存处理。
+- 负责人：developer 编码及直接检查；reviewer 独立静态审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
+- 准确生产/打包范围 7 个路径：新增 `src/danbooru_multi_search/app/cache_cleanup.py`、`app/cache_protection.py`；修改 `ui/cache_cleanup.py`、`ui/cache_protection.py`、`ui/session_state.py`、`ui/launcher.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用同一 src 前缀，不修改仓库事务、Qt 图片缓存、R5-004 服务、schema 或 QML。
+- 准确测试范围 7 个路径：新增 `tests/test_cache_cleanup_service.py`、`tests/test_cache_protection_service.py`；修改 `tests/test_cache_cleanup.py`、`tests/test_cache_protection.py`、`tests/test_m2_qml.py`、`tests/test_m2_session_state.py`、`tests/test_windows_packaging.py`。其他真实 Qt 缓存/QML/关闭检查只选择直接相关原节点，不预先修改文件。
+- 清理应用服务以不可变 `CleanupSnapshot(kind/identities/count)` 捕获记录身份，通过现有检查点服务的公开归属接口工作，不读取私有 target/leases。执行保持维护占用申请、guard、重新捕获并核对身份、取消命中执行、再次 guard、删除、退休旧归属、刷新/同步发布、finally 释放本次 owner 的顺序；成功和失败发布均发生在释放之前。UI 保留确认令牌、generation、显示消息和 Qt 图片计数/操作。
+- `session.clearHistory()` 直接调用保持兼容；新增可选删除回调，在原有数据库调用所在 try 内执行。未提供时调用应用层实际 `delete_history(repository, expected)`，None 仍使用原无参数仓库调用。UI cutoff/epoch/恢复操作先失效，失败在原处恢复相同状态；成功先执行 on_cleared 退休，再发送模型/选择通知。禁止提前在 session 外删除或返回后再退休。
+- 保护应用服务唯一保存 snapshot、pending_aliases、两种错误及关闭状态，负责刷新、重定向保存、占用判断及锁上下文；UI 保留 Qt URL/缓存键转换、图片 provider 和状态/收藏事实连接。首次缓存维护前须完成状态回调、保护读取与 provider 连接，不为旧内部方法保留空转发。
+- `protection(convert_keys)` 先进入 `locked_snapshot`，在首次 yield 前执行 UI 转换；准备失败先关闭 ExitStack，再仅 yield None 一次并返回。成功后独立在持有 stack 的上下文内 yield keys；消费期间异常原样传播一次，不落回准备阶段异常分支。数据库锁必须覆盖实际缓存删除，空别名刷新不得清除快照读取/转换错误。
+- 复用唯一 SharedWriteAccess，保护占用仍只看本地写入或外来 owner，不把 closed 当作占用。直接检查覆盖确认 guard/维护发布顺序/记录变化、默认及注入历史删除的失败回滚与通知顺序、转换失败保留缓存、删除期间仍持锁、消费异常单次传播、错误隔离及实际 Qt/QML/维护关闭。未完成结构整改里程碑前不运行全量回归或完整构建；提交编号待完成记录。
+- 7 个生产/打包文件初稿及消费者接入已形成，直接应用模块/正式装配导入通过。独立静态审查确认历史删除位置、False 回滚、退休后通知、维护发布及实际 UI 适配保持；测试迁移和职责检查正在进行，尚未冻结。
+- reviewer 发现并交回当前范围修正：保护准备阶段进入数据库锁后，转换若抛出原三类可恢复错误之外的异常（如 RuntimeError/OSError），尚未进入后续 with stack，未明确关闭 stack。要求所有准备异常都显式释放资源；原三类继续仅 yield None 一次，其余异常原样传播，成功 yield 仍在准备 catch 之外。补充直接检查须验证保留异常/traceback 引用时锁也已释放，不能依赖垃圾回收。此项属于真实资源释放修正，不能仅记录为移动代码。
+- 开发完成修正并冻结准确 7 个生产/打包及 7 个测试路径，另含本记录。14 个文件语法/空白通过，应用模块没有 UI 导入，spec 模块存在且无重复；UI 旧保护状态、业务和空转发已删除，历史实际删除统一在应用函数中，session 仍在原 try 调用。
+- 本轮 53 个不同直接场景全部通过：迁移既有检查 27 项、新服务及注入删除边界 13 项、QML/无参数清理/装配关闭 12 项、应用冷导入和实际读写 1 项。保留异常/traceback 后独立写入者仍能立即写入；转换和整个消费期间实际 SQLite 锁、准备失败在 yield None 前释放、消费异常原样一次传播均已验证。删除 False/HistoryError 原位恢复、退休先于模型通知、维护发布后释放、正式导入持锁最后保存保持。
+- reviewer 已静态确认资源释放修正及其余连接暂无确定阻断，等待冻结后的独立聚焦验证。仓库、实际 Qt 缓存、R5-004 服务、QML/schema 未改，没有全量回归或完整构建。临时检查数据位于项目 `.tools`，不提交，成果窗口未操作。
+- reviewer 最终独立选择 28 项全部通过，9.08 秒。两个新服务的全部 11 项覆盖持有 traceback 的未知准备异常释放、已知错误保留缓存、消费异常单次传播和全过程持锁、维护/guard/重捕获/取消/退休/发布后释放及实际冷导入；其余覆盖注入删除时序/HistoryError 和 False 回滚、旧无参数清理/模型通知期间新查询、真实 Qt 别名/读取错误/失败重试、维护关闭最后保存、外来 owner 确认失效、窄窗 QML 历史/检查点及最新收藏图片清理、M2/正式导入持锁关闭/spec。准确 7 个生产/打包、7 个测试及本记录共 15 个路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r5-005-reviewer*` 保留且不提交，未执行全量回归或完整构建。

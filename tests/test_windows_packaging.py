@@ -169,6 +169,8 @@ def test_pyinstaller_spec_is_onedir_windowed_amd64_with_project_resources() -> N
         "danbooru_multi_search.app.favorites",
         "danbooru_multi_search.app.write_access",
         "danbooru_multi_search.app.query_checkpoints",
+        "danbooru_multi_search.app.cache_cleanup",
+        "danbooru_multi_search.app.cache_protection",
         "danbooru_multi_search.danbooru.query_events",
         "danbooru_multi_search.ui.pool_downloads",
         "danbooru_multi_search.storage.pool_progress",

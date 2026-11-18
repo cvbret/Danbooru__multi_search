@@ -24,6 +24,7 @@ from dataclasses import replace
 
 import pytest
 
+from danbooru_multi_search.app.cache_protection import CacheProtectionService
 from danbooru_multi_search.core.favorites import FavoriteCandidate
 from danbooru_multi_search.storage.cache_protection import CacheProtectionError, CacheProtectionRepository
 from danbooru_multi_search.storage.database import Database
@@ -104,16 +105,16 @@ def test_empty_cache_initialization_keeps_protection_read_failure_visible(tmp_pa
         connection.execute("DELETE FROM favorite_collection_state")
     images = ImageCacheController(tmp_path / "images")
     shared = controller_for(favorites)
-    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
+    protection = CacheProtectionController(CacheProtectionService(repository, shared._writes.access), shared, images)
     try:
         assert images._ensure_cache() is not None
-        assert "缺失" in images.statusText and not protection.can_store()
+        assert "缺失" in images.statusText and not protection._service.can_store()
         assert images.setMaximumBytes(2 * MINIMUM_IMAGE_CACHE_BYTES)
         assert "缺失" in images.statusText
         assert not images.clearCache() and "缺失" in images.statusText
     finally:
         images.shutdown()
-        protection.shutdown()
+        protection._service.shutdown()
 
 
 def test_initialization_and_shrink_keep_real_protected_overflow_message(tmp_path):
@@ -132,7 +133,7 @@ def test_initialization_and_shrink_keep_real_protected_overflow_message(tmp_path
     images = ImageCacheController(tmp_path / "images", maximum_bytes=2 * MINIMUM_IMAGE_CACHE_BYTES, disk_cache_factory=lambda parent: TinyCache(parent,
         key=cache_key, protection=images._protection_provider, status=images._set_status))
     shared = controller_for(favorites)
-    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
+    protection = CacheProtectionController(CacheProtectionService(repository, shared._writes.access), shared, images)
     try:
         assert images._ensure_cache() is not None
         assert "超过容量上限" in images.statusText
@@ -140,7 +141,7 @@ def test_initialization_and_shrink_keep_real_protected_overflow_message(tmp_path
         assert "超过容量上限" in images.statusText
     finally:
         images.shutdown()
-        protection.shutdown()
+        protection._service.shutdown()
 
 
 def test_local_redirect_is_protected_before_qt_prepare_and_survives_restart(tmp_path):
@@ -153,7 +154,7 @@ def test_local_redirect_is_protected_before_qt_prepare_and_survives_restart(tmp_
     favorites.add_favorite(FavoriteCandidate.for_post(replace(post(42), preview_url=server.url, file_url=None)))
     images = ImageCacheController(tmp_path / "images")
     shared = controller_for(favorites)
-    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
+    protection = CacheProtectionController(CacheProtectionService(repository, shared._writes.access), shared, images)
     parent = QObject()
     manager = images.create_manager(parent)
     cache = images.cache
@@ -170,19 +171,19 @@ def test_local_redirect_is_protected_before_qt_prepare_and_survives_restart(tmp_
         assert payload and observed
         assert cache.metaData(QUrl(server.final_url)).isValid()
         images.shutdown()
-        protection.shutdown()
+        protection._service.shutdown()
         _dispose(reply, manager, parent, images, protection)
         restarted = ImageCacheController(tmp_path / "images")
         restarted_shared = controller_for(favorites)
-        restarted_protection = CacheProtectionController(CacheProtectionRepository(database), restarted_shared, restarted,
-            access=restarted_shared._writes.access)
+        restarted_protection = CacheProtectionController(CacheProtectionService(CacheProtectionRepository(database), restarted_shared._writes.access),
+            restarted_shared, restarted)
         try:
             assert restarted.clearCache()
             assert restarted.cache.metaData(QUrl(server.final_url)).isValid()
             assert server.paths == ["/redirect", "/image.png"]
         finally:
             restarted.shutdown()
-            restarted_protection.shutdown()
+            restarted_protection._service.shutdown()
     finally:
         server.close()
 
@@ -209,7 +210,7 @@ def test_successful_state_read_does_not_reload_collection_and_cancel_or_import_r
     value = replace(post(42), preview_url=url, file_url=None)
     shared = controller_for(favorites)
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
+    protection = CacheProtectionController(CacheProtectionService(repository, shared._writes.access), shared, images)
     reads = []
     original = repository.load_snapshot
     def read():
@@ -236,7 +237,7 @@ def test_successful_state_read_does_not_reload_collection_and_cancel_or_import_r
         assert images.clearCache() and not cache.metaData(QUrl(url)).isValid()
     finally:
         images.shutdown()
-        protection.shutdown()
+        protection._service.shutdown()
 
 
 def test_alias_write_failure_does_not_cache_untracked_redirect_and_can_retry_later(tmp_path):
@@ -251,22 +252,22 @@ def test_alias_write_failure_does_not_cache_untracked_redirect_and_can_retry_lat
         connection.execute("CREATE TRIGGER reject_alias BEFORE INSERT ON image_cache_redirects BEGIN SELECT RAISE(ABORT, 'alias failure'); END")
     images = ImageCacheController(tmp_path / "images")
     shared = controller_for(favorites)
-    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
+    protection = CacheProtectionController(CacheProtectionService(repository, shared._writes.access), shared, images)
     parent = QObject()
     manager = images.create_manager(parent)
     try:
         reply, payload = _fetch(manager, server.url)
         assert payload and not images.cache.metaData(QUrl(server.final_url)).isValid()
-        assert "alias failure" in images.statusText and not protection.can_store()
+        assert "alias failure" in images.statusText and not protection._service.can_store()
         with database.connect() as connection:
             connection.execute("DROP TRIGGER reject_alias")
-        protection._busy_changed()
-        assert protection.can_store() and (server.url, server.final_url) in repository.load_snapshot().aliases
+        protection._service._access_changed()
+        assert protection._service.can_store() and (server.url, server.final_url) in repository.load_snapshot().aliases
         assert server.paths == ["/redirect", "/image.png"]
         _dispose(reply)
     finally:
         images.shutdown()
-        protection.shutdown()
+        protection._service.shutdown()
         _dispose(manager, parent, images, protection)
         server.close()
 
@@ -279,13 +280,13 @@ def test_empty_alias_flush_does_not_clear_unresolved_collection_read_error(tmp_p
         connection.execute("DELETE FROM favorite_collection_state")
     shared = controller_for(favorites)
     images = ImageCacheController(tmp_path / "images")
-    protection = CacheProtectionController(repository, shared, images, access=shared._writes.access)
+    protection = CacheProtectionController(CacheProtectionService(repository, shared._writes.access), shared, images)
     try:
         assert shared._writes.access.begin_external_write("other")
         shared._writes.access.finish_external_write("other")
-        protection.remember_redirect("https://example.invalid/a", "https://cdn.invalid/b")
-        assert not protection.can_store() and protection._error
+        protection._service.remember_redirect("https://example.invalid/a", "https://cdn.invalid/b")
+        assert not protection._service.can_store() and protection._service.error
         assert "缺失" in images.statusText
     finally:
         images.shutdown()
-        protection.shutdown()
+        protection._service.shutdown()

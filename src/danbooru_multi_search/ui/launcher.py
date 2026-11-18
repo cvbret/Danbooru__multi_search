@@ -41,6 +41,8 @@ from danbooru_multi_search.storage.cache_protection import CacheProtectionReposi
 from danbooru_multi_search.storage.downloads import DownloadRepository
 from danbooru_multi_search.app.favorites import FavoriteWriteService
 from danbooru_multi_search.app.query_checkpoints import QueryCheckpointService
+from danbooru_multi_search.app.cache_cleanup import CacheCleanupService
+from danbooru_multi_search.app.cache_protection import CacheProtectionService
 from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.app.download_manager import PersistentDownloadManager
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
@@ -217,9 +219,11 @@ class _UiSession(QObject):
         self.write_access = SharedWriteAccess(self)
         self.favorite_writes = FavoriteWriteService(favorite_repository, self.write_access)
         self.favorite_controller = FavoriteController(favorite_repository, self.favorite_writes, self)
+        self.cache_protection_service = CacheProtectionService(
+            CacheProtectionRepository(database), self.write_access,
+        )
         self.cache_protection = CacheProtectionController(
-            CacheProtectionRepository(database), self.favorite_controller, self.image_cache_controller, self,
-            access=self.write_access,
+            self.cache_protection_service, self.favorite_controller, self.image_cache_controller, self,
         )
         self.gallery_selection = GallerySelectionController(
             self.query_controller.posts_model, self.favorite_controller, self
@@ -319,9 +323,11 @@ class _UiSession(QObject):
             checkpoint_service=self.checkpoint_service,
         )
         self.query_checkpoints.attach_session(self.session_controller)
+        self.cache_cleanup_service = CacheCleanupService(
+            self.history_repository, checkpoint_repository, self.checkpoint_service, self.write_access,
+        )
         self.cache_cleanup = CacheCleanupController(
-            self.history_repository, checkpoint_repository, self.checkpoint_service,
-            self.session_controller, self.write_access, self.image_cache_controller, self,
+            self.cache_cleanup_service, self.session_controller, self.write_access, self.image_cache_controller, self,
         )
         self._closed = False
         self._closing = False
@@ -370,7 +376,7 @@ class _UiSession(QObject):
             self.tag_controller.begin_shutdown,
             self.tag_controller.shutdown,
             self.image_cache_controller.shutdown,
-            self.cache_protection.shutdown,
+            self.cache_protection_service.shutdown,
             self.task_queue.shutdown,
         )
         try:
@@ -409,7 +415,7 @@ class _UiSession(QObject):
             and self.query_checkpoints._closed
             and self.checkpoint_service.closed
             and self.cache_cleanup._closed
-            and self.cache_protection._closed
+            and self.cache_protection_service.closed
             and self.favorite_collection._closed
             and self.favorite_controller._closed
             and self.gallery_selection._closed

@@ -126,6 +126,8 @@ hidden_imports = [
     "danbooru_multi_search.app.favorites",
     "danbooru_multi_search.app.write_access",
     "danbooru_multi_search.app.query_checkpoints",
+    "danbooru_multi_search.app.cache_cleanup",
+    "danbooru_multi_search.app.cache_protection",
     "danbooru_multi_search.danbooru.query_events",
     "danbooru_multi_search.storage.favorites",
     "danbooru_multi_search.storage.history",
