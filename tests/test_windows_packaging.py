@@ -184,6 +184,7 @@ def test_pyinstaller_spec_is_onedir_windowed_amd64_with_project_resources() -> N
         "danbooru_multi_search.ui.pool_navigation",
         "danbooru_multi_search.danbooru.pool_parsing",
         "danbooru_multi_search.danbooru.pools",
+        "danbooru_multi_search.danbooru.http_diagnostics",
         "PySide6.QtQuick",
         "PySide6.QtQuickControls2",
         "PySide6.QtQml",

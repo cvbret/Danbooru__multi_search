@@ -399,3 +399,36 @@ def test_real_qt_loopback_response_parses_original_pool_positions(local_http_ser
         service.shutdown()
         queue.shutdown()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.parametrize("status,error,expected,retry_after", [
+    (429, QNetworkReply.NetworkError.TimeoutError, "http", "2"),
+    (200, QNetworkReply.NetworkError.TimeoutError, "timeout", None),
+    (None, QNetworkReply.NetworkError.ConnectionRefusedError, "network", None),
+])
+def test_pool_failure_diagnostics_keep_qt_text_and_never_parse(
+    status, error, expected, retry_after
+):
+    from danbooru_multi_search.danbooru.pools import _QtPoolRequestAttempt
+
+    reply = FakeReply(b"not JSON", status=status, error=error, retry_after=b" 2 ")
+    manager = FakeManager()
+    manager.replies.append(reply)
+    results = []
+
+    def parser(payload):
+        pytest.fail("transport failures must not parse pools")
+
+    _QtPoolRequestAttempt(
+        manager, build_pool_request("https://example.invalid", 1), results.append,
+        APPLICATION, parser=parser, maximum_bytes=1024,
+    )
+    reply.finish()
+    assert len(results) == 1
+    result = results[0]
+    assert result.error_code == expected and result.http_status == status
+    assert result.retry_after == retry_after
+    assert result.error == (
+        "作品池请求返回 HTTP 429。" if expected == "http"
+        else "作品池请求失败：controlled network failure"
+    )

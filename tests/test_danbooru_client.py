@@ -343,3 +343,37 @@ def test_controller_shutdown_is_idempotent_and_aborts_active_reply():
     assert outcomes[0].state == RequestState.CANCELLED
     reply.finish()
     assert len(outcomes) == 1
+
+
+@pytest.mark.parametrize("status,error,expected,retry_after", [
+    (429, QNetworkReply.NetworkError.TimeoutError, "http", "2"),
+    (200, QNetworkReply.NetworkError.TimeoutError, "timeout", None),
+    (None, QNetworkReply.NetworkError.ConnectionRefusedError, "network", None),
+])
+def test_posts_failure_diagnostics_keep_results_and_never_call_parser(
+    monkeypatch, status, error, expected, retry_after
+):
+    reply = FakeReply(b"not JSON")
+    monkeypatch.setattr(reply, "attribute", lambda attribute: status)
+    monkeypatch.setattr(reply, "error", lambda: error)
+    monkeypatch.setattr(reply, "errorString", lambda: "original network details")
+    monkeypatch.setattr(reply, "rawHeader", lambda name: b" 2 ")
+    results = []
+
+    def parser(payload):
+        pytest.fail("transport failures must not enter the response parser")
+
+    QtPostsRequestAttempt(
+        FakeNetworkManager([reply]), build_posts_request("https://example.invalid", "cat"),
+        results.append, APPLICATION, parser=parser,
+    )
+    reply.finish()
+    assert len(results) == 1
+    result = results[0]
+    assert result.error_code == expected and result.http_status == status
+    assert result.retry_after == retry_after
+    assert result.error == {
+        "http": "Danbooru 返回 HTTP 429。",
+        "timeout": "Danbooru 请求超时。",
+        "network": "Danbooru 网络错误：original network details",
+    }[expected]

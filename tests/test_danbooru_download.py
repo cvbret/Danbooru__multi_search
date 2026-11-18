@@ -8,8 +8,9 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtCore import QEventLoop, QTimer, QObject, Signal
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtNetwork import QNetworkReply
 
 import danbooru_multi_search.danbooru.download as download_module
 from danbooru_multi_search.danbooru import (
@@ -392,4 +393,90 @@ def test_application_shutdown_is_idempotent_and_cleans_active_download(
     assert len(outcomes) == 1
     assert outcomes[0].state == DownloadState.CANCELLED
     assert not (tmp_path / "321.jpg").exists()
+    assert _part_files(tmp_path) == []
+
+
+class _DiagnosticDownloadReply(QObject):
+    metaDataChanged = Signal()
+    readyRead = Signal()
+    finished = Signal()
+
+    def __init__(self, status, error, payload=b"response bytes"):
+        super().__init__(APPLICATION)
+        self.status = status
+        self.network_error = error
+        self.payload = payload
+
+    def attribute(self, attribute):
+        return self.status
+
+    def error(self):
+        return self.network_error
+
+    def errorString(self):
+        return "original network details"
+
+    def rawHeader(self, name):
+        return b" 2 " if name == "Retry-After" else b"0"
+
+    def readAll(self):
+        payload, self.payload = self.payload, b""
+        return payload
+
+    def abort(self):
+        pass
+
+
+def _diagnostic_attempt(tmp_path, reply, results, *, maximum_bytes=1024):
+    from types import SimpleNamespace
+
+    destination = tmp_path / "existing.png"
+    destination.write_bytes(b"confirmed original")
+    attempt = download_module._QtDownloadAttempt(
+        SimpleNamespace(get=lambda request: reply),
+        download_module.build_media_request("https://example.invalid/file.png"),
+        destination, "https://example.invalid/file.png", maximum_bytes,
+        results.append, APPLICATION,
+        hooks=download_module.DownloadAttemptHooks(
+            commit=lambda *args: pytest.fail("failed responses must never commit files"),
+        ),
+    )
+    return destination, attempt
+
+
+@pytest.mark.parametrize("status,error,expected,retry_after", [
+    (429, QNetworkReply.NetworkError.TimeoutError, "http", "2"),
+    (200, QNetworkReply.NetworkError.TimeoutError, "timeout", None),
+    (None, QNetworkReply.NetworkError.ConnectionRefusedError, "network", None),
+])
+def test_media_failure_diagnostics_preserve_existing_file_and_never_commit(
+    tmp_path, status, error, expected, retry_after
+):
+    reply = _DiagnosticDownloadReply(status, error)
+    results = []
+    destination, attempt = _diagnostic_attempt(tmp_path, reply, results)
+    reply.finished.emit()
+    assert attempt is not None and len(results) == 1
+    result = results[0]
+    assert result.error_code == expected and result.http_status == status
+    assert result.retry_after == retry_after
+    assert result.error == {
+        "http": "Danbooru media request returned HTTP 429.",
+        "timeout": "Danbooru media request timed out.",
+        "network": "Danbooru media network error: original network details",
+    }[expected]
+    assert destination.read_bytes() == b"confirmed original"
+    assert _part_files(tmp_path) == []
+
+
+def test_finished_media_keeps_last_read_size_failure_before_http_diagnostics(tmp_path):
+    reply = _DiagnosticDownloadReply(503, QNetworkReply.NetworkError.TimeoutError)
+    results = []
+    destination, attempt = _diagnostic_attempt(
+        tmp_path, reply, results, maximum_bytes=1,
+    )
+    reply.finished.emit()
+    assert attempt is not None and len(results) == 1
+    assert results[0].error_code == DownloadErrorKind.RESPONSE_TOO_LARGE
+    assert destination.read_bytes() == b"confirmed original"
     assert _part_files(tmp_path) == []

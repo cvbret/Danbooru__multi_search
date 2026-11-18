@@ -13,6 +13,7 @@ from PySide6.QtNetwork import (
     QSslSocket,
 )
 
+from danbooru_multi_search.danbooru.http_diagnostics import read_reply_diagnostics
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.danbooru.parsing import (
     DanbooruParseError,
@@ -156,32 +157,24 @@ class QtPostsRequestAttempt(QObject):
         self._reply = None
 
         payload = bytes(reply.readAll())
-        network_error = reply.error()
-        network_error_text = reply.errorString()
-        status_value = reply.attribute(
-            QNetworkRequest.Attribute.HttpStatusCodeAttribute
-        )
-        http_status = int(status_value) if status_value is not None else None
-        retry_after_bytes = bytes(reply.rawHeader("Retry-After"))
-        retry_after = (
-            retry_after_bytes.decode("ascii", errors="replace").strip() or None
-        )
+        diagnostics = read_reply_diagnostics(reply)
+        http_status = diagnostics.http_status
         reply.deleteLater()
 
-        if http_status is not None and not 200 <= http_status < 300:
+        if diagnostics.failure_kind == "http":
             result = TaskAttemptResult.failure(
                 f"Danbooru 返回 HTTP {http_status}。",
                 error_code=RequestErrorKind.HTTP,
                 http_status=http_status,
-                retry_after=retry_after,
+                retry_after=diagnostics.retry_after,
             )
-        elif network_error != QNetworkReply.NetworkError.NoError:
-            if network_error == QNetworkReply.NetworkError.TimeoutError:
+        elif diagnostics.failure_kind is not None:
+            if diagnostics.failure_kind == "timeout":
                 error_code = RequestErrorKind.TIMEOUT
                 message = "Danbooru 请求超时。"
             else:
                 error_code = RequestErrorKind.NETWORK
-                message = f"Danbooru 网络错误：{network_error_text}"
+                message = f"Danbooru 网络错误：{diagnostics.network_error_text}"
             result = TaskAttemptResult.failure(
                 message,
                 error_code=error_code,

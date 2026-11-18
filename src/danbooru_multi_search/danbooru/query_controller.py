@@ -1,4 +1,4 @@
-"""M2 query orchestration independent from the existing M1 gallery controller."""
+"""M2 query orchestration for planning, execution and result views."""
 
 from __future__ import annotations
 

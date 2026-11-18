@@ -12,6 +12,7 @@ from typing import BinaryIO, Callable
 from PySide6.QtCore import QCoreApplication, QObject, QUrl, Signal, Slot
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from danbooru_multi_search.danbooru.http_diagnostics import read_reply_diagnostics
 from danbooru_multi_search.core.downloads import (
     DEFAULT_MAX_DOWNLOAD_BYTES, DanbooruDownloadOutcome, DownloadedFile, DownloadErrorKind, DownloadState,
 )
@@ -241,16 +242,8 @@ class _QtDownloadAttempt(QObject):
             self._ready_read()
 
         self._reply = None
-        status_value = reply.attribute(
-            QNetworkRequest.Attribute.HttpStatusCodeAttribute
-        )
-        http_status = int(status_value) if status_value is not None else None
-        network_error = reply.error()
-        network_error_text = reply.errorString()
-        retry_after_bytes = bytes(reply.rawHeader("Retry-After"))
-        retry_after = (
-            retry_after_bytes.decode("ascii", errors="replace").strip() or None
-        )
+        diagnostics = read_reply_diagnostics(reply)
+        http_status = diagnostics.http_status
         reply.deleteLater()
 
         if self._completion is None:
@@ -258,20 +251,20 @@ class _QtDownloadAttempt(QObject):
             self.deleteLater()
             return
 
-        if http_status is not None and not 200 <= http_status < 300:
+        if diagnostics.failure_kind == "http":
             result = TaskAttemptResult.failure(
                 f"Danbooru media request returned HTTP {http_status}.",
                 error_code=DownloadErrorKind.HTTP,
                 http_status=http_status,
-                retry_after=retry_after,
+                retry_after=diagnostics.retry_after,
             )
-        elif network_error != QNetworkReply.NetworkError.NoError:
-            if network_error == QNetworkReply.NetworkError.TimeoutError:
+        elif diagnostics.failure_kind is not None:
+            if diagnostics.failure_kind == "timeout":
                 error_code = DownloadErrorKind.TIMEOUT
                 message = "Danbooru media request timed out."
             else:
                 error_code = DownloadErrorKind.NETWORK
-                message = f"Danbooru media network error: {network_error_text}"
+                message = f"Danbooru media network error: {diagnostics.network_error_text}"
             result = TaskAttemptResult.failure(
                 message,
                 error_code=error_code,

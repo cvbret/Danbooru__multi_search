@@ -101,6 +101,7 @@ hidden_imports = [
     "danbooru_multi_search.ui.query_forms",
     "danbooru_multi_search.danbooru.autocomplete",
     "danbooru_multi_search.danbooru.client",
+    "danbooru_multi_search.danbooru.http_diagnostics",
     "danbooru_multi_search.danbooru.details",
     "danbooru_multi_search.danbooru.download",
     "danbooru_multi_search.danbooru.gallery",

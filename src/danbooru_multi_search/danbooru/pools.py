@@ -9,6 +9,7 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, Property, QTimer, QUrl, QUrlQuery, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from danbooru_multi_search.danbooru.http_diagnostics import read_reply_diagnostics
 from danbooru_multi_search.core.pools import (
     DEFAULT_POOL_LIST_LIMIT,
     DanbooruPool,
@@ -151,26 +152,18 @@ class _QtPoolRequestAttempt(QObject):
         reply, self._reply = self._reply, None
         if reply is None:
             return
-        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        status = int(status) if status is not None else None
-        error, error_text = reply.error(), reply.errorString()
-        retry_after = (
-            bytes(reply.rawHeader("Retry-After"))
-            .decode("ascii", errors="replace").strip() or None
-        )
+        diagnostics = read_reply_diagnostics(reply)
+        status = diagnostics.http_status
         reply.deleteLater()
-        if status is not None and not 200 <= status < 300:
+        if diagnostics.failure_kind == "http":
             result = TaskAttemptResult.failure(
                 f"作品池请求返回 HTTP {status}。",
-                error_code="http", http_status=status, retry_after=retry_after,
+                error_code="http", http_status=status, retry_after=diagnostics.retry_after,
             )
-        elif error != QNetworkReply.NetworkError.NoError:
-            code = (
-                "timeout" if error == QNetworkReply.NetworkError.TimeoutError
-                else "network"
-            )
+        elif diagnostics.failure_kind is not None:
+            code = diagnostics.failure_kind
             result = TaskAttemptResult.failure(
-                f"作品池请求失败：{error_text}", error_code=code, http_status=status,
+                f"作品池请求失败：{diagnostics.network_error_text}", error_code=code, http_status=status,
             )
         else:
             try:
