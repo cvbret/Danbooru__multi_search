@@ -272,8 +272,8 @@ def test_close_during_started_import_waits_for_commit_and_suppresses_publication
 
 
 def test_import_invalidates_collection_confirmation_without_gui_identity_reads(tmp_path, monkeypatch):
-    from danbooru_multi_search.danbooru.details import DanbooruDetailController
-    from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
+    from danbooru_multi_search.ui.details import DanbooruDetailController
+    from danbooru_multi_search.ui.gallery import DanbooruPostListModel
     from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
     from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
     from danbooru_multi_search.ui.favorite_collection import FavoriteCollectionController

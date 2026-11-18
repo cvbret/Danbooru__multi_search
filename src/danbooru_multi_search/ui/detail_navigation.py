@@ -7,8 +7,8 @@ import math
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
-from danbooru_multi_search.danbooru.details import DanbooruDetailController
-from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
+from danbooru_multi_search.ui.details import DanbooruDetailController
+from danbooru_multi_search.ui.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.models import DanbooruPost
 
 

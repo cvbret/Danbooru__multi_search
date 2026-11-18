@@ -10,8 +10,8 @@ from danbooru_multi_search.core.downloads import DownloadError, DownloadTaskStat
 from danbooru_multi_search.app.settings import SettingsController
 from danbooru_multi_search.core.settings import AppSettings, SettingsError
 from danbooru_multi_search.storage.settings import SettingsStore
-from danbooru_multi_search.danbooru.details import DanbooruDetailController
-from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
+from danbooru_multi_search.ui.details import DanbooruDetailController
+from danbooru_multi_search.ui.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController

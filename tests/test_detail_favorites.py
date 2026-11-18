@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from danbooru_multi_search.core.favorites import FavoriteIdentity, FavoriteObjectType
-from danbooru_multi_search.danbooru.details import DanbooruDetailController
+from danbooru_multi_search.ui.details import DanbooruDetailController
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 from danbooru_multi_search.ui.detail_favorites import DetailFavoritesController
 from tests.test_favorite_controller import build, post

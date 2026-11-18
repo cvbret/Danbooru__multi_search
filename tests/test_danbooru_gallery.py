@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -126,3 +128,47 @@ def test_clear_removes_empty_m2_gallery_operation_identity():
 
     assert model.display_operation_id is None
     assert model.revision == revision + 1
+
+
+def test_rating_labels_share_one_ui_table_and_keep_original_lookup_rules():
+    from danbooru_multi_search.core.favorites import (
+        FavoriteIdentity, FavoriteItem, FavoriteObjectType,
+    )
+    from danbooru_multi_search.danbooru import DanbooruDetailController
+    from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
+    from danbooru_multi_search.ui import details, favorite_models, gallery
+
+    assert DanbooruPostListModel is gallery.DanbooruPostListModel
+    assert PostRole is gallery.PostRole
+    assert DanbooruDetailController is details.DanbooruDetailController
+    assert gallery.RATING_LABELS is details.RATING_LABELS is favorite_models.RATING_LABELS
+    model = DanbooruPostListModel()
+    detail = DanbooruDetailController("https://example.invalid", TagTranslationStore())
+    favorites = favorite_models.FavoriteListModel()
+    when = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def show(post):
+        model.set_posts((post,))
+        detail.open_post(post)
+        favorites.replace((FavoriteItem(
+            1, FavoriteIdentity(FavoriteObjectType.POST, str(post.id)),
+            "Saved post", None, when, when, post=post,
+        ),))
+
+    try:
+        post = _post_model(1, score=0, fav_count=0)
+        for rating, text in (
+            ("g", "General"), ("s", "Sensitive"),
+            ("q", "Questionable"), ("e", "Explicit"),
+        ):
+            show(replace(post, rating=rating))
+            assert model.data(model.index(0), int(PostRole.RATING_TEXT)) == text
+            assert detail.ratingText == text
+            assert favorites.mapping(0)["ratingText"] == text
+        show(replace(post, rating="invalid"))
+        with pytest.raises(KeyError, match="invalid"):
+            model.data(model.index(0), int(PostRole.RATING_TEXT))
+        assert detail.ratingText == ""
+        assert favorites.mapping(0)["ratingText"] == ""
+    finally:
+        detail.shutdown()

@@ -15,8 +15,8 @@ from danbooru_multi_search.app.settings import SettingsController
 from danbooru_multi_search.core.settings import SettingsError
 from danbooru_multi_search.app.download_manager import PersistentDownloadManager
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
-from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
-from danbooru_multi_search.danbooru.details import DanbooruDetailController
+from danbooru_multi_search.ui.gallery import DanbooruPostListModel
+from danbooru_multi_search.ui.details import DanbooruDetailController
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.storage.downloads import DownloadBatchSummary, DownloadRepository
 from danbooru_multi_search.ui.download_models import DownloadBatchListModel, DownloadItemListModel, ERROR_TEXT

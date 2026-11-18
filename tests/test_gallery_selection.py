@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
+from danbooru_multi_search.ui.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.result_processing import ProcessedPost
 from danbooru_multi_search.ui.gallery_selection import GallerySelectionController
 from danbooru_multi_search.ui.favorites import post_identity

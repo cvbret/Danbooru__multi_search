@@ -20,7 +20,7 @@ from PySide6.QtCore import (
 )
 
 from danbooru_multi_search.app.cache_cleanup import delete_history
-from danbooru_multi_search.danbooru.query_controller import DanbooruM2QueryController
+from danbooru_multi_search.ui.query_controller import DanbooruM2QueryController
 from danbooru_multi_search.danbooru.query_events import (
     GalleryQueryAccepted,
     GalleryQueryOrigin,

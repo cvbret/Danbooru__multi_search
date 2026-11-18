@@ -8,6 +8,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+from PySide6.QtCore import QObject
+
 from danbooru_multi_search.danbooru import (
     DanbooruM2QueryController,
     DanbooruMultiBranchExecutor,
@@ -254,6 +256,38 @@ def _harness(
         model,
         store,
     )
+
+
+@pytest.mark.parametrize("supplied", [False, True])
+def test_ui_controller_keeps_public_identity_model_type_and_parent_ownership(supplied):
+    from danbooru_multi_search.danbooru import query_controller as coordinator_module
+    from danbooru_multi_search.ui.query_controller import (
+        DanbooruM2QueryController as UiController,
+    )
+
+    parent = QObject()
+    model_parent = QObject()
+    model = DanbooruPostListModel(model_parent) if supplied else None
+    controller = UiController("https://example.invalid", posts_model=model, parent=parent)
+    try:
+        assert UiController is DanbooruM2QueryController
+        assert coordinator_module.DanbooruM2QueryController is UiController
+        assert coordinator_module.__dict__["DanbooruM2QueryController"] is UiController
+        assert "DanbooruM2QueryController" in dir(coordinator_module)
+        with pytest.raises(AttributeError, match="unknown_controller"):
+            getattr(coordinator_module, "unknown_controller")
+        assert isinstance(controller, coordinator_module.M2QueryCoordinator)
+        assert type(controller.posts_model) is DanbooruPostListModel
+        assert controller.parent() is parent
+        if supplied:
+            assert controller.posts_model is model
+            assert model.parent() is model_parent
+        else:
+            assert controller.posts_model.parent() is controller
+        assert controller.executor.parent() is controller
+        assert controller.operation_id is None and controller.last_snapshot is None
+    finally:
+        controller.shutdown()
 
 
 def test_query_definition_is_immutable_and_enforces_mode_shapes():

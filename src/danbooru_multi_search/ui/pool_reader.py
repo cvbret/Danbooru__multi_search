@@ -11,7 +11,7 @@ from danbooru_multi_search.core.pool_reader import (
     READER_DIRECTORY_SIZE, READER_MEDIA_RADIUS, ReaderMode, reader_range,
 )
 from danbooru_multi_search.core.pools import DanbooruPool, PoolCategory
-from danbooru_multi_search.danbooru.details import DanbooruDetailController
+from danbooru_multi_search.ui.details import DanbooruDetailController
 from danbooru_multi_search.danbooru.pool_pages import PoolPageRequestService
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 from danbooru_multi_search.ui.downloads import DownloadUiController

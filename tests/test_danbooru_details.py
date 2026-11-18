@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import danbooru_multi_search.danbooru.details as details_module
+import danbooru_multi_search.ui.details as details_module
 
 from danbooru_multi_search.danbooru import (
     DanbooruDetailController,

@@ -4,7 +4,7 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第二轮结构整改
 - 当前里程碑：`第二轮结构整改完成`
-- 当前主要任务：`R6-002 设置、结果输出与启动装配分离`
+- 当前主要任务：`R6-003 画廊与详情归属及评级显示`
 - 当前状态：待提交
 - 执行状态：用户于 2026-11-18 明确要求继续；按第 45 节推进第二轮结构整改，沿用已通过结果，只执行当前修改的直接相关检查。
 - 最后更新：2026-11-18
@@ -3045,7 +3045,7 @@ M2 里程碑回归检查与提交。
 
 ### 45.10 当前任务 R6-002
 
-- 状态：待提交；起点 `2d7072dd33fc47c6e92e880827bdc77b5b8bef5d`，从干净工作树开始。目标是将设置值、文件存储、更新协调、检查结果输出及启动装配放入各自实际负责的模块，删除已迁出的内部实现。
+- 状态：已完成；起点 `2d7072dd33fc47c6e92e880827bdc77b5b8bef5d`，从干净工作树开始。目标是将设置值、文件存储、更新协调、检查结果输出及启动装配放入各自实际负责的模块，删除已迁出的内部实现。
 - 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
 - 准确生产/打包范围 13 个物理路径：新增 `src/danbooru_multi_search/app/bootstrap.py`、`app/settings.py`、`storage/settings.py`；删除 `core/bootstrap.py`；修改 `core/settings.py`、`core/__init__.py`、`__main__.py`、`ui/launcher.py`、`app/download_submission.py`、`ui/appearance.py`、`ui/downloads.py`、`ui/pool_downloads.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用同一 src 前缀，不修改 CLI 行为、脚本、pyproject、schema、QML 或既有设置格式。
 - 准确测试范围 22 个路径：`tests/test_settings.py`、`test_appearance.py`、`test_download_submission.py`、`test_download_ui.py`、`test_pool_download_ui.py`、`test_m2_qml.py`、`test_qml_appearance.py`、`test_qml_downloads.py`、`test_bootstrap.py`、`m2_qml_harness.py`、`test_qml_checkpoints.py`、`test_qml_artist_combinations.py`、`test_qml_favorites.py`、`test_qml_eagle.py`、`test_qml_favorite_collection.py`、`test_qml_favorite_transfer.py`、`test_qml_pool_reader.py`、`test_qml_saved_queries.py`、`test_qml_shell.py`、`test_qml_session_state.py`、`test_import_boundaries.py`、`test_windows_packaging.py`。测试短路径均沿用 tests 前缀；多数仅更新导入，包含 download_submission 的进程代码字符串及 qml_pool_reader 的两处函数内导入。不据文件清单重跑全部测试。
@@ -3059,3 +3059,20 @@ M2 里程碑回归检查与提交。
 - 开发已冻结准确 15 个生产/打包及 23 个测试物理路径，另含本记录。36 个现存代码文件语法/空白通过，两个旧 core 文件已删除，spec 四个新模块完整无重复。静态逐项比较确认 AppSettings 校验、Store/Controller、RuntimeContext 和初始化正文保持，check_output 整份文件逐字一致；原子替换与硬链接不覆盖各自保持，未留下旧内部转发。独立生产静态审查暂无确定阻断，等待最终聚焦验证。
 - 本轮 31 个不同直接场景全部通过：值/存储/启动/输出/真实冷进程 19 项，0.83 秒；必要消费者/装配/CLI/资源 12 项，5.84 秒。覆盖真实 replace 失败保留旧文件字节和内存对象并清理临时文件、并发字段合并、旧配置默认/不重写及损坏配置阻止数据库初始化、检查结果竞争/序列化/fsync/清理、阻断 Qt/UI/platform 的实际读写和更新、唯一设置实例的两装配分支、外观/普通与整池下载保存失败、透明度实际鼠标键盘保存失败、M2 和 CLI 原子结果/已有结果拒绝/spec。未按 23 个测试文件重跑整组；数据 `.tools/pytest-r6-002-{values,compat}` 保留且不提交，没有全量回归、完整构建、原生界面、真实服务或 Linux，成果窗口未操作。
 - reviewer 最终独立选择 20 项全部通过，4.73 秒。覆盖原校验位置/旧默认、真实 replace 失败保留旧字节和同一快照、并发合并、合法/损坏配置启动边界、输出竞争/fsync/无父目录/序列化失败、实际无 Qt/UI/platform 的设置及输出、外观和普通/池下载设置失败、两装配分支启动关闭、CLI 原子结果及启动前拒绝已有输出/spec；唯一控制器注入同时经生产静态确认。准确 15 个生产/打包、23 个测试及本记录共 39 个物理路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r6-002-reviewer*` 保留且不提交，没有全量回归或构建。
+- 本地提交：`7e8eb96dec92491ddf214e6a8f0b51ba1c21b321`（`refactor(core): separate persistence and runtime assembly`），按 no-renames 核对准确 39 个物理路径。Git 默认因两次文件迁移显示 37 条记录，不改变批准范围。提交后工作树与暂存区干净，未推送。
+
+### 45.11 当前任务 R6-003
+
+- 状态：待提交；起点 `7e8eb96dec92491ddf214e6a8f0b51ba1c21b321`，从干净工作树开始。目标是将实际画廊/详情视图模型归入 UI，查询运行通过必要模型接口提交结果，并完成 R7 三份相同评级显示表的合并。
+- 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
+- 准确生产/打包范围 18 个物理路径：新增 `src/danbooru_multi_search/ui/gallery.py`、`ui/details.py`、`ui/query_controller.py`、`ui/post_labels.py`；删除 `danbooru/gallery.py`、`danbooru/details.py`；修改 `danbooru/query_controller.py`、`danbooru/__init__.py`、`ui/favorite_models.py`、`ui/gallery_selection.py`、`ui/downloads.py`、`ui/detail_navigation.py`、`ui/detail_favorites.py`、`ui/pool_reader.py`、`ui/query_state.py`、`ui/session_state.py`、`ui/launcher.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用 src 前缀，不修改 QML、query_execution、M1 client/smoke、数据结构或保存格式。
+- 准确测试范围 10 个路径：`tests/test_detail_favorites.py`、`test_download_ui.py`、`test_favorite_collection.py`、`test_gallery_selection.py`、`test_favorite_transfer_controller.py`、`test_danbooru_details.py`、`test_danbooru_gallery.py`、`test_query_controller.py`、`test_import_boundaries.py`、`test_windows_packaging.py`。测试短路径沿用 tests 前缀；details 的模块对象及 datetime monkeypatch 指向实际新所有者。M2/QML/会话/媒体关闭等只选择必要原节点，不预先修改其他文件。
+- 原 query_controller 保留真实运行协调实现并命名 M2QueryCoordinator，要求传入仅含 display_operation_id 和 set_processed_posts(operation_id, tuple[ProcessedPost, ...]) -> bool 的小模型协议。保留准备操作、执行器/标签存储默认构造、事件连接、查询与视图身份、提交前后复查及关闭行为；它仍使用 Qt 运行时，不直接导入 UI。
+- 新 UI 的 DanbooruM2QueryController 保留原公开构造签名及实际 posts_model 类型，承担默认画廊模型构造。默认模型可先无 parent 创建、传给协调器，QObject 初始化完成后设 parent 为当前控制器；已核对该构造链不发请求或模型通知。调用者传入模型保留原对象及 parent，默认执行器/标签存储仍归控制器持有，不新增工厂框架。
+- danbooru 包既有公开名称改为按需导向 UI 实际所有者；旧 query_controller.DanbooruM2QueryController 直接入口按名称加载并缓存同一个 UI 类，普通导入及构造/执行协调器不得因此加载 UI。原事件和 GalleryResultSummary 别名仍指向纯模块同对象。旧 gallery/details 直接消费者全已登记，迁移后删除两文件，不保留空转发；有真实 isinstance 检查的地方也必须使用唯一模型类。
+- details 中媒体候选、质量/状态、标签展示值、格式化及详情控制器整体进入 UI，保留标签模型父对象、媒体 generation/attempt/URL 核对和同步通知后的再次检查。DanbooruPost、ProcessedPost 及纯查询事件继续留在现有数据归属。
+- ui/post_labels 仅共用 g/s/q/e 的 General/Sensitive/Questionable/Explicit 显示表。画廊继续用索引，详情/收藏继续 get 空字符串及无作品空串行为；查询输入别名、历史会话格式和其他评级规则不改，不新增通用格式化框架。
+- 验收覆盖公开包/旧直接控制器/UI 所有者同一身份、默认及外部模型 parent、阻止 UI 导入时真实协调器用小模型完成结果提交/关闭、原同步通知重入、四种评级在三个界面的显示、详情媒体关闭/格式化/导航/收藏及正式 M2 装配/spec。只执行直接相关聚焦检查，完整回归和构建继续留在结构整改里程碑；提交编号待完成记录。
+- 开发已冻结准确 18 个生产/打包及 10 个测试物理路径，另含本记录。26 个现存文件语法/空白通过，两个旧 gallery/details 文件已删除，spec 四个 UI 新模块完整并移除旧两模块，无重复。静态比较确认两个视图模块的类正文除评级表引用外保持，协调器执行/通知/关闭正文保持；旧公开入口仍指唯一 UI 类，查询评级输入规则未改。独立生产静态审查暂无确定阻断，等待最终聚焦验证。
+- 本轮 31 个不同直接场景通过：模型/公开身份/无 UI 的实际协调/parent/显示/重入及媒体边界 18 项，必要消费者/实际 QML/资源 13 项（4.05 秒）。初稿的详情模块残留一份旧评级字典，被新检查发现后删除，仅复查失败单项通过，其余 17 项未重跑；另一次最初节点名称错误未执行用例，不计入场景。覆盖实际 M2 结果提交/装配关闭、收藏/下载/导入消费者、图片解码重试回退及远页详情返回。检查数据 `.tools/pytest-r6-003-{models,labels-fixed,compat}` 保留且不提交，没有全量回归、完整构建、原生界面、真实服务或 Linux，成果窗口未操作。
+- reviewer 最终独立选择 17 项全部通过，2.75 秒。覆盖无 UI 冷导入的小模型真实查询/关闭、旧直接/包级/UI 类同一身份与默认/外部 parent、唯一四评级表及原未知码行为、同步完成/模型通知期间新查询和关闭、同对象排行不重复 reset、媒体代次/attempt/URL 与同步关闭、实际 M2/远页详情返回/真实解码回退/正式装配关闭/spec。准确 18 个生产/打包、10 个测试及本记录共 29 个物理路径获准提交，无剩余阻断；协调器仅承诺无 UI 依赖，不承诺无 Qt。独立数据 `.tools/pytest-r6-003-reviewer*` 保留且不提交，没有全量回归或构建。

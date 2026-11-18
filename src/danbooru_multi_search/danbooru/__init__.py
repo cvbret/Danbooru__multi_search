@@ -63,7 +63,7 @@ _EXPORT_GROUPS = {
         "build_media_request",
         "download_destination",
     ),
-    "danbooru_multi_search.danbooru.details": (
+    "danbooru_multi_search.ui.details": (
         "DanbooruDetailController",
         "DetailMediaState",
         "DetailTagEntry",
@@ -77,7 +77,7 @@ _EXPORT_GROUPS = {
         "format_file_size_readable",
         "format_local_created_at",
     ),
-    "danbooru_multi_search.danbooru.gallery": (
+    "danbooru_multi_search.ui.gallery": (
         "DanbooruPostListModel",
         "PostRole",
     ),
@@ -116,7 +116,7 @@ _EXPORT_GROUPS = {
         "GalleryQueryDefinition",
         "QueryMode",
     ),
-    "danbooru_multi_search.danbooru.query_controller": (
+    "danbooru_multi_search.ui.query_controller": (
         "DanbooruM2QueryController",
     ),
     "danbooru_multi_search.danbooru.query_events": (

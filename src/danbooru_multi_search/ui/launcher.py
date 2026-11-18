@@ -15,13 +15,13 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtNetwork import QNetworkAccessManager, QSslSocket
 
 from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.ui.query_controller import DanbooruM2QueryController
+from danbooru_multi_search.ui.details import DanbooruDetailController
 from danbooru_multi_search.core.settings import (
     AppSettings,
 )
 from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.danbooru import (
-    DanbooruDetailController,
-    DanbooruM2QueryController,
     DanbooruMultiBranchExecutor,
     DanbooruTagSuggestionController,
     TagTranslationStore,

@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 from danbooru_multi_search.core.favorites import (
     FavoriteIdentity, FavoriteObjectType, FavoriteTagCategory,
 )
-from danbooru_multi_search.danbooru.details import DanbooruDetailController
+from danbooru_multi_search.ui.details import DanbooruDetailController
 from danbooru_multi_search.ui.favorites import FavoriteController, post_identity
 
 

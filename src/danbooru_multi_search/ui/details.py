@@ -20,17 +20,12 @@ from PySide6.QtCore import (
 )
 
 from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.ui.post_labels import RATING_LABELS
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 
 
 _STATIC_EXTENSIONS = frozenset({"jpg", "jpeg", "png", "webp", "avif"})
 _RESTRICTED_EXTENSIONS = frozenset({"webm", "mp4", "zip", "swf"})
-_RATING_LABELS = {
-    "g": "General",
-    "s": "Sensitive",
-    "q": "Questionable",
-    "e": "Explicit",
-}
 _QUALITY_LABELS = {
     "preview": "预览图",
     "large": "较大图片",
@@ -442,7 +437,7 @@ class DanbooruDetailController(QObject):
 
     @Property(str, notify=detailChanged)
     def ratingText(self) -> str:
-        return _RATING_LABELS.get(self._current_post.rating, "") if self._current_post else ""
+        return RATING_LABELS.get(self._current_post.rating, "") if self._current_post else ""
 
     @Property(str, notify=detailChanged)
     def scoreText(self) -> str:

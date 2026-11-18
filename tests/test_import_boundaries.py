@@ -178,6 +178,91 @@ def _probe_settings_and_check_output(data_root: Path) -> None:
     )
 
 
+def _probe_query_coordinator() -> None:
+    class RejectUi(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path, target=None):
+            if fullname == "danbooru_multi_search.ui" or fullname.startswith("danbooru_multi_search.ui."):
+                raise AssertionError(f"Query coordinator imported {fullname}")
+            return None
+
+    sys.meta_path.insert(0, RejectUi())
+    from PySide6.QtCore import QCoreApplication
+    from danbooru_multi_search.danbooru import query_controller as coordinator_module
+    from danbooru_multi_search.danbooru.models import DanbooruPost
+    from danbooru_multi_search.danbooru.query_controller import M2QueryCoordinator
+    from danbooru_multi_search.danbooru.query_events import GalleryQueryAccepted
+    from danbooru_multi_search.danbooru.query_execution import DanbooruMultiBranchExecutor
+    from danbooru_multi_search.danbooru.query_types import (
+        GalleryResultSummary, QueryExecutionState,
+    )
+    from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
+    from danbooru_multi_search.tasks import TaskAttemptResult
+
+    class SmallModel:
+        def __init__(self):
+            self.display_operation_id = None
+            self.items = ()
+
+        def set_processed_posts(self, display_operation_id, items):
+            self.display_operation_id = display_operation_id
+            self.items = items
+            return True
+
+    class Abortable:
+        def abort(self):
+            pass
+
+    application = QCoreApplication([])
+    requests = []
+    post = DanbooruPost(
+        1, "https://example.invalid/preview.jpg", None, None,
+        0, 0, "g", 100, 100, "jpg", general_tags=("cat",),
+    )
+
+    def attempt(request, attempt_number, completion):
+        requests.append((request.url().toString(), attempt_number))
+        completion(TaskAttemptResult.success((post,)))
+        return Abortable()
+
+    executor = DanbooruMultiBranchExecutor("https://example.invalid", attempt_factory=attempt)
+    model = SmallModel()
+    controller = M2QueryCoordinator(
+        "https://example.invalid", posts_model=model,
+        executor=executor, tag_store=TagTranslationStore(),
+    )
+    assert requests == [] and model.display_operation_id is None
+    assert coordinator_module.GalleryQueryAccepted is GalleryQueryAccepted
+    assert coordinator_module.GalleryResultSummary is GalleryResultSummary
+    assert "DanbooruM2QueryController" in dir(coordinator_module)
+    assert "DanbooruM2QueryController" not in coordinator_module.__dict__
+    accepted = []
+    controller.queryAccepted.connect(accepted.append)
+    try:
+        operation_id = controller.start_standard("cat")
+        for _ in range(50):
+            application.processEvents()
+            if controller.last_snapshot is not None and controller.last_snapshot.state is QueryExecutionState.COMPLETE:
+                break
+        assert len(requests) == 1
+        assert len(accepted) == 1 and isinstance(accepted[0], GalleryQueryAccepted)
+        assert controller.last_snapshot.state is QueryExecutionState.COMPLETE
+        assert controller.posts_model is model and model.display_operation_id == operation_id
+        assert len(model.items) == 1 and model.items[0].post is post
+        assert controller.last_processed.visible_count == 1
+    finally:
+        controller.shutdown()
+    assert controller.closed and executor.closed
+    try:
+        controller.start_standard("dog")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Closed coordinator accepted another operation")
+    for old_module in ("danbooru.gallery", "danbooru.details"):
+        assert importlib.util.find_spec("danbooru_multi_search." + old_module) is None
+    assert not any(name.startswith("danbooru_multi_search.ui") for name in sys.modules)
+
+
 def _probe_qt_scheduling() -> None:
     from PySide6.QtCore import QCoreApplication
     from danbooru_multi_search.tasks import QtScheduler
@@ -255,6 +340,10 @@ def test_settings_and_check_output_work_without_qt_ui_or_platform(tmp_path):
     _run_probe("settings", tmp_path)
 
 
+def test_query_coordinator_executes_and_closes_with_a_small_model_without_ui(tmp_path):
+    _run_probe("coordinator", tmp_path)
+
+
 def test_legacy_qt_scheduler_imports_and_timer_cancellation(tmp_path):
     _run_probe("qt", tmp_path)
 
@@ -297,6 +386,8 @@ if __name__ == "__main__":
         _probe_pure_imports(Path(sys.argv[2]))
     elif sys.argv[1] == "settings":
         _probe_settings_and_check_output(Path(sys.argv[2]))
+    elif sys.argv[1] == "coordinator":
+        _probe_query_coordinator()
     elif sys.argv[1] == "qt":
         _probe_qt_scheduling()
     elif sys.argv[1] == "forms":

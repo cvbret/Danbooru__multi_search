@@ -15,9 +15,9 @@ from PySide6.QtCore import (
 )
 
 from danbooru_multi_search.core.artist_combinations import ArtistCombinationMode
+from danbooru_multi_search.ui.query_controller import DanbooruM2QueryController
 
 from danbooru_multi_search.danbooru.query_controller import (
-    DanbooruM2QueryController,
     GalleryQueryAccepted,
     GalleryResultEvent,
     GalleryViewDefinitionChanged,

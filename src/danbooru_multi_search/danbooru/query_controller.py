@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from typing import Protocol
 
 from PySide6.QtCore import QObject, Signal
 
@@ -15,7 +16,6 @@ from danbooru_multi_search.danbooru.query_events import (
     GalleryResultEvent,
     GalleryViewDefinitionChanged,
 )
-from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError, ExecutionCheckpoint, QueryCheckpoint, source_identity
 from danbooru_multi_search.danbooru.query_definition import (
     GalleryQueryDefinition,
@@ -49,6 +49,7 @@ from danbooru_multi_search.danbooru.query_planning import (
     normalize_plan_rating,
 )
 from danbooru_multi_search.danbooru.result_processing import (
+    ProcessedPost,
     ProcessedQueryResults,
     QueryResultSession,
     ResultFilterSpec,
@@ -59,6 +60,19 @@ from danbooru_multi_search.danbooru.result_processing import (
     validate_result_configuration,
 )
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
+
+
+class QueryResultsModel(Protocol):
+    """Submit processed views and observe which operation is displayed."""
+
+    @property
+    def display_operation_id(self) -> int | None: ...
+
+    def set_processed_posts(
+        self,
+        display_operation_id: int,
+        items: tuple[ProcessedPost, ...],
+    ) -> bool: ...
 
 
 @dataclass(slots=True)
@@ -80,7 +94,7 @@ class _PreparedOperation:
     seen_snapshot_keys: set[tuple[object, ...]] = field(default_factory=set)
 
 
-class DanbooruM2QueryController(QObject):
+class M2QueryCoordinator(QObject):
     """Coordinate parse, plan, execute, process, and M2 model submission."""
 
     queryAccepted = Signal(object)
@@ -93,7 +107,7 @@ class DanbooruM2QueryController(QObject):
         *,
         executor: DanbooruMultiBranchExecutor | None = None,
         tag_store: TagTranslationStore | None = None,
-        posts_model: DanbooruPostListModel | None = None,
+        posts_model: QueryResultsModel,
         clock: Callable[[], datetime] | None = None,
         parent: QObject | None = None,
     ) -> None:
@@ -104,7 +118,7 @@ class DanbooruM2QueryController(QObject):
             parent=self,
         )
         self._tag_store = tag_store or TagTranslationStore(parent=self)
-        self._posts_model = posts_model or DanbooruPostListModel(self)
+        self._posts_model = posts_model
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._operation_counter = 0
         self._pending_operation: _PreparedOperation | None = None
@@ -118,7 +132,7 @@ class DanbooruM2QueryController(QObject):
         self._executor.snapshotChanged.connect(self._snapshot_changed)
 
     @property
-    def posts_model(self) -> DanbooruPostListModel:
+    def posts_model(self) -> QueryResultsModel:
         return self._posts_model
 
     @property
@@ -835,3 +849,17 @@ class DanbooruM2QueryController(QObject):
     def _ensure_open(self) -> None:
         if self._closed or self._closing:
             raise RuntimeError("The M2 query controller has been shut down.")
+
+
+def __getattr__(name: str) -> type[M2QueryCoordinator]:
+    """Resolve the historical UI controller only when explicitly requested."""
+    if name == "DanbooruM2QueryController":
+        from danbooru_multi_search.ui.query_controller import DanbooruM2QueryController
+
+        globals()[name] = DanbooruM2QueryController
+        return DanbooruM2QueryController
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | {"DanbooruM2QueryController"})

@@ -16,15 +16,8 @@ from PySide6.QtCore import (
 )
 
 from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.ui.post_labels import RATING_LABELS
 from danbooru_multi_search.danbooru.result_processing import ProcessedPost
-
-
-_RATING_LABELS = {
-    "g": "General",
-    "s": "Sensitive",
-    "q": "Questionable",
-    "e": "Explicit",
-}
 
 
 class PostRole(IntEnum):
@@ -115,7 +108,7 @@ class DanbooruPostListModel(QAbstractListModel):
                 str(post.fav_count) if post.fav_count is not None else "暂无数据"
             ),
             PostRole.RATING_CODE: post.rating,
-            PostRole.RATING_TEXT: _RATING_LABELS[post.rating],
+            PostRole.RATING_TEXT: RATING_LABELS[post.rating],
             PostRole.WIDTH: post.width,
             PostRole.HEIGHT: post.height,
             PostRole.DIMENSIONS_TEXT: f"{post.width} × {post.height}",

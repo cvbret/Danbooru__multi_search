@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from danbooru_multi_search.core.favorites import FavoriteError
-from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
+from danbooru_multi_search.ui.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.ui.favorites import FavoriteController, post_identity
 

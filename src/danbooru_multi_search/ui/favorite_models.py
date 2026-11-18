@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from PySide6.QtCore import QAbstractListModel, QByteArray, QModelIndex, Property, Qt, Signal
 
 from danbooru_multi_search.core.favorites import FavoriteItem
+from danbooru_multi_search.ui.post_labels import RATING_LABELS
 
 
 class FavoriteListModel(QAbstractListModel):
@@ -55,7 +56,7 @@ class FavoriteListModel(QAbstractListModel):
             "postKey": str(post.id) if post else "", "previewUrl": post.display_url if post else "",
             "scoreText": str(post.score) if post and post.score is not None else "暂无数据",
             "favoriteText": str(post.fav_count) if post and post.fav_count is not None else "暂无数据",
-            "ratingCode": post.rating if post else "", "ratingText": {"g": "General", "s": "Sensitive", "q": "Questionable", "e": "Explicit"}.get(post.rating, "") if post else "",
+            "ratingCode": post.rating if post else "", "ratingText": RATING_LABELS.get(post.rating, "") if post else "",
             "dimensionsText": f"{post.width} × {post.height}" if post else "",
             "fileExtension": post.file_ext.upper() if post else "",
             "mediaLabel": post.media_kind if post and post.media_kind != "image" else "",
