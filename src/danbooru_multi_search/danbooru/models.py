@@ -3,7 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from typing import Any
+
+
+class MediaQuality(StrEnum):
+    PREVIEW = "preview"
+    LARGE = "large"
+    ORIGINAL = "original"
+
+    @property
+    def label(self) -> str:
+        return {"preview": "预览图", "large": "较大图片", "original": "原图"}[self]
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +49,11 @@ class DanbooruPost:
         """Return only the original media URL matching ``file_ext``."""
 
         return self.file_url or ""
+
+    def media_url(self, quality: MediaQuality) -> str:
+        """Return exactly the rendition requested, leaving fallback to the caller."""
+        return {MediaQuality.ORIGINAL: self.file_url, MediaQuality.LARGE: self.large_file_url,
+                MediaQuality.PREVIEW: self.preview_url}[quality] or ""
 
     @property
     def media_kind(self) -> str:

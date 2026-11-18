@@ -70,6 +70,9 @@ from danbooru_multi_search.app.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.ui.pool_progress import PoolProgressController
 from danbooru_multi_search.ui.eagle import EagleController
+from danbooru_multi_search.ui.eagle_batch import EagleBatchController
+from danbooru_multi_search.app.eagle_batch import EagleBatchJob
+from danbooru_multi_search.app.query_candidates import QueryCandidateService
 from danbooru_multi_search.ui.eagle_import import EagleImportController
 from danbooru_multi_search.app.eagle_import_job import EagleImportJob
 from danbooru_multi_search.storage.eagle_imports import EagleImportRepository
@@ -123,6 +126,30 @@ def create_eagle_backend_factory(bridge: EagleBridge, database_path: Path | None
         finally:
             transport.close()
     return backend
+
+
+def create_eagle_import_controllers(
+    eagle: EagleController, navigation: DetailNavigationController, query: M2QueryBridgeController,
+    selection: GallerySelectionController, pools: PoolBrowserController, base_url: str,
+    network_manager: QNetworkAccessManager, task_queue: BoundedTaskQueue, staging_root: Path,
+    parent: QObject | None = None,
+) -> tuple[EagleImportJob, EagleImportController, EagleBatchController]:
+    def item_job() -> EagleImportJob:
+        downloader = DanbooruDownloadController(
+            network_manager=network_manager, task_queue=task_queue, require_media_response=True, parent=parent,
+        )
+        return EagleImportJob(eagle.runtime, downloader, staging_root, parent)
+
+    single = item_job()
+    supplement = DanbooruMultiBranchExecutor(base_url, network_manager=network_manager, task_queue=task_queue, parent=parent)
+    candidates = QueryCandidateService(
+        query.core_controller, supplement, is_closing=lambda: query.closing or query.detached, parent=parent,
+    )
+    batch_job = EagleBatchJob(candidates, item_job(), parent)
+    batch = EagleBatchController(batch_job, eagle, selection, query, navigation.detail_controller.translation_store,
+                                 pools, base_url, lambda: bool(single.stage), parent)
+    detail = EagleImportController(single, eagle, navigation, query, pools, parent, batch_busy=lambda: batch_job.busy)
+    return single, detail, batch
 
 
 def configure_controls_style() -> None:
@@ -251,14 +278,10 @@ class _UiSession(QObject):
             self.favorite_controller, self,
         )
         self.pool_navigation = PoolNavigationController(self.pool_browser, self.detail_navigation, self)
-        self.eagle_import_job = EagleImportJob(
-            self.eagle_runtime,
-            DanbooruDownloadController(network_manager=self.network_manager, task_queue=self.task_queue,
-                                      require_media_response=True, parent=self),
+        self.eagle_import_job, self.eagle_import, self.eagle_batch = create_eagle_import_controllers(
+            self.eagle, self.detail_navigation, self.query_bridge, self.gallery_selection, self.pool_browser,
+            danbooru_base_url, self.network_manager, self.task_queue,
             (runtime.paths.data_dir if runtime else temporary_path) / "eagle-imports", self,
-        )
-        self.eagle_import = EagleImportController(
-            self.eagle_import_job, self.eagle, self.detail_navigation, self.query_bridge, self.pool_browser, self,
         )
         self.query_executor.executionBound.connect(lambda event: self.pool_navigation.invalidate())
         self.favorite_transfer = FavoriteTransferController(database.path, self.favorite_controller, self.write_access, self)
@@ -356,6 +379,7 @@ class _UiSession(QObject):
         steps = (
             self.eagle.shutdown,
             self.eagle_import_job.begin_shutdown,
+            self.eagle_batch.job.begin_shutdown,
             self.eagle_runtime.begin_shutdown,
             self.pool_downloads.shutdown,
             self.pool_download_manager.begin_shutdown,
@@ -379,6 +403,7 @@ class _UiSession(QObject):
             self.favorite_transfer.shutdown,
             self.eagle_runtime.shutdown,
             self.eagle_import_job.finish_shutdown,
+            self.eagle_batch.job.finish_shutdown,
             self.pool_download_manager.finish_shutdown,
             self.pool_progress.finish_shutdown,
             self.checkpoint_service.finish_shutdown,
@@ -424,6 +449,7 @@ class _UiSession(QObject):
             and self.eagle._closed
             and self.eagle_runtime.shutdown_completed
             and self.eagle_import_job.closed and not self.eagle_import_job.stage
+            and self.eagle_batch.job.closed and not self.eagle_batch.job.busy
             and self.favorite_transfer.shutdown_completed
             and self.download_manager.closed
             and self.download_ui._closed
@@ -514,6 +540,7 @@ def _create_qml_session(
     engine.rootContext().setContextProperty("poolDownloads", session.pool_downloads)
     engine.rootContext().setContextProperty("eagleController", session.eagle)
     engine.rootContext().setContextProperty("eagleImport", session.eagle_import)
+    engine.rootContext().setContextProperty("eagleBatch", session.eagle_batch)
     engine.rootContext().setContextProperty("favoriteCollection", session.favorite_collection)
     engine.rootContext().setContextProperty("favoriteController", session.favorite_controller)
     engine.rootContext().setContextProperty("gallerySelection", session.gallery_selection)

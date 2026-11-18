@@ -1,10 +1,12 @@
 """Present one confirmed detail snapshot and its Eagle import result."""
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from danbooru_multi_search.app.eagle_import_types import EaglePostImportRequest
 from danbooru_multi_search.app.eagle_import_job import EagleImportJob
-from danbooru_multi_search.app.eagle_service import EagleOperation
+from danbooru_multi_search.app.eagle_service import EagleOperation, EagleResult
 from danbooru_multi_search.storage.query_serialization import encode_query_definition
 from danbooru_multi_search.ui.detail_navigation import DetailNavigationController
 from danbooru_multi_search.ui.eagle import EagleController
@@ -23,6 +25,7 @@ _ERRORS = {
     "eagle_media_download": "原文件下载失败。",
     "eagle_media_staging": "无法准备本地暂存文件。",
     "eagle_missing_original": "此作品缺少原文件地址。",
+    "eagle_missing_media": "所选清晰度缺少可用文件。",
     "eagle_duplicate_conflict": "重复检查匹配到相互冲突的素材。",
     "eagle_search_incomplete": "素材查询未完成，请检查 Eagle 后重试。",
     "eagle_unresolved_attempt": "先前的导入结果待核实，请在 Eagle 中查看这件作品。",
@@ -33,12 +36,33 @@ _ERRORS = {
 }
 
 
+def post_import_result_text(result: EagleResult) -> str:
+    outcome = result.import_result
+    identifier = (outcome.item_identifier if outcome else None) or result.created_identifier
+    suffix = f" · 素材编号 {identifier}" if identifier else ""
+    if result.uncertain:
+        if result.post_started:
+            return "本次写入请求已发送，结果待核实。请在 Eagle 中查看这件作品。" + suffix
+        return _ERRORS["eagle_unresolved_attempt"] + suffix
+    if result.error_code:
+        return _ERRORS.get(result.error_code, ERROR_TEXT.get(result.error_code, "Eagle 导入失败。")) + suffix
+    if outcome and identifier:
+        if outcome.state == "imported":
+            return "已导入 Eagle" + suffix
+        if outcome.state == "updated":
+            return "已更新已有素材的标签和注释" + suffix
+        if outcome.state == "skipped":
+            return "已跳过重复作品，" + _DUPLICATE_REASONS.get(outcome.reason, "已有匹配素材") + suffix
+    return "未收到有效的导入结果。"
+
+
 class EagleImportController(QObject):
     changed = Signal()
 
     def __init__(self, job: EagleImportJob, eagle: EagleController,
                  navigation: DetailNavigationController, query: M2QueryBridgeController,
-                 pools: PoolBrowserController, parent: QObject | None = None) -> None:
+                 pools: PoolBrowserController, parent: QObject | None = None, *,
+                 batch_busy: Callable[[], bool] = lambda: False) -> None:
         super().__init__(parent)
         self._job = job
         self._eagle = eagle
@@ -46,6 +70,7 @@ class EagleImportController(QObject):
         self._detail = navigation.detail_controller
         self._query = query
         self._pools = pools
+        self._batch_busy = batch_busy
         self._source_revision = 0
         self._last_post = ""
         self._source_error = ""
@@ -96,23 +121,7 @@ class EagleImportController(QObject):
         result = self._job.result
         if result is None:
             return ""
-        outcome = result.import_result
-        identifier = (outcome.item_identifier if outcome else None) or result.created_identifier
-        suffix = f" · 素材编号 {identifier}" if identifier else ""
-        if result.uncertain:
-            if result.post_started:
-                return "本次写入请求已发送，结果待核实。请在 Eagle 中查看这件作品。" + suffix
-            return _ERRORS["eagle_unresolved_attempt"] + suffix
-        if result.error_code:
-            return _ERRORS.get(result.error_code, ERROR_TEXT.get(result.error_code, "Eagle 导入失败。")) + suffix
-        if outcome and identifier:
-            if outcome.state == "imported":
-                return "已导入 Eagle" + suffix
-            if outcome.state == "updated":
-                return "已更新已有素材的标签和注释" + suffix
-            if outcome.state == "skipped":
-                return "已跳过重复作品，" + _DUPLICATE_REASONS.get(outcome.reason, "已有匹配素材") + suffix
-        return "未收到有效的导入结果。"
+        return post_import_result_text(result)
 
     @Property(str, notify=changed)
     def detailsText(self) -> str:
@@ -128,7 +137,7 @@ class EagleImportController(QObject):
         detail = self._detail
         target = self._eagle.selected_target(target_revision)
         post = detail.current_post
-        if (self._job.closed or self.busy or self._eagle.busy or target is None
+        if (self._job.closed or self.busy or self._batch_busy() or self._eagle.busy or target is None
                 or not detail.isOpen or post is None or str(post.id) != post_key
                 or source_revision != self._source_revision):
             return False

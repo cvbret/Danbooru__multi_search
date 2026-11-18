@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
-from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.danbooru.models import DanbooruPost, MediaQuality
 
 
 class EaglePostImportError(RuntimeError):
@@ -54,6 +54,9 @@ class EaglePostImportRequest:
     translations: tuple[tuple[str, tuple[str, ...]], ...] = ()
     query_text: str = ""
     pool_text: str = ""
+    requested_quality: MediaQuality = MediaQuality.ORIGINAL
+    fallback_quality: MediaQuality | None = None
+    selected_quality: MediaQuality | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.library_identifier, str) or not self.library_identifier.strip():
@@ -66,6 +69,16 @@ class EaglePostImportRequest:
             raise ValueError("An exact Danbooru post URL is required.")
         if self.file_path is not None and not isinstance(self.file_path, Path):
             raise ValueError("The import file path must be a Path.")
+        for name in ("requested_quality", "fallback_quality", "selected_quality"):
+            value = getattr(self, name)
+            if value is not None or name == "requested_quality":
+                object.__setattr__(self, name, MediaQuality(value))
+        if self.fallback_quality is not None and (
+            self.requested_quality != MediaQuality.ORIGINAL or self.fallback_quality == MediaQuality.ORIGINAL
+        ):
+            raise ValueError("Only an original import can fall back to a large image or preview.")
+        if self.selected_quality is not None and self.selected_quality not in self.media_choices:
+            raise ValueError("Selected media is outside the requested renditions.")
         for name in ("update_duplicates", "include_general", "include_meta", "include_chinese"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean.")
@@ -78,6 +91,20 @@ class EaglePostImportRequest:
                 raise ValueError("Invalid translation entry.")
             if not isinstance(pair[1], tuple) or any(not isinstance(name, str) or not name for name in pair[1]):
                 raise ValueError("Translation aliases must be immutable non-empty text.")
+
+    @property
+    def media_choices(self) -> tuple[MediaQuality, ...]:
+        """Return available, authorized renditions in download order, without duplicate URLs."""
+        choices = []
+        for quality in (self.requested_quality, self.fallback_quality):
+            if quality is None:
+                continue
+            url = self.post.media_url(quality)
+            if url:
+                actual = MediaQuality.ORIGINAL if url == self.post.file_url else quality
+                if actual not in choices:
+                    choices.append(actual)
+        return tuple(choices)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +119,8 @@ class EaglePostImportOutcome:
     diagnostic: str = ""
     post_started: bool = False
     uncertain: bool = False
+    actual_quality: MediaQuality | None = None
+    actual_extension: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.state) is not str or self.state not in {"ready", "skipped", "imported", "updated", "error", "uncertain"}:

@@ -6,8 +6,9 @@ from pathlib import Path
 import re
 from uuid import uuid4
 
+from danbooru_multi_search.app.eagle_import_files import rendition_extension
 from danbooru_multi_search.danbooru.download import download_destination
-from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.danbooru.models import DanbooruPost, MediaQuality
 
 
 def _file_stamp(path: Path) -> str:
@@ -23,11 +24,12 @@ class EagleMediaFile:
     _submitted_stamp: str = ""
 
     @classmethod
-    def prepare(cls, root: Path, post: DanbooruPost) -> "EagleMediaFile":
+    def prepare(cls, root: Path, post: DanbooruPost, quality: MediaQuality = MediaQuality.ORIGINAL) -> "EagleMediaFile":
         """Claim a previous download atomically, or prepare a private destination."""
-        source_key = sha256(post.download_url.encode("utf-8")).hexdigest()
+        source_key = sha256(post.media_url(quality).encode("utf-8")).hexdigest()
         source_dir = root / source_key
-        retry_path = download_destination(post, source_dir)
+        retry_path = (download_destination(post, source_dir) if quality == MediaQuality.ORIGINAL
+                      else source_dir / f"{post.id}.media")
         work_dir = source_dir / uuid4().hex
         work_dir.mkdir(parents=True)
         path = work_dir / retry_path.name
@@ -42,6 +44,11 @@ class EagleMediaFile:
 
     def capture_for_import(self) -> None:
         self._submitted_stamp = _file_stamp(self.path)
+
+    def name_rendition(self) -> None:
+        """Name the private download by its bytes, even when the source URL has no suffix."""
+        extension = rendition_extension(self.path)
+        self.path = self.path.rename(self.path.with_suffix("." + extension))
 
     def finish(self, *, retain: bool) -> Path | None:
         """Return the retry path only if this request retained its own file."""

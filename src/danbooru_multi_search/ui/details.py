@@ -19,18 +19,13 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from danbooru_multi_search.danbooru.models import DanbooruPost
+from danbooru_multi_search.danbooru.models import DanbooruPost, MediaQuality
 from danbooru_multi_search.ui.post_labels import RATING_LABELS
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore
 
 
 _STATIC_EXTENSIONS = frozenset({"jpg", "jpeg", "png", "webp", "avif"})
 _RESTRICTED_EXTENSIONS = frozenset({"webm", "mp4", "zip", "swf"})
-_QUALITY_LABELS = {
-    "preview": "预览图",
-    "large": "较大图片",
-    "original": "原图",
-}
 _SOURCE_FIELDS = {
     "preview": "preview_file_url",
     "large": "large_file_url",
@@ -43,12 +38,6 @@ _TAG_GROUPS = (
     ("general", "普通标签", "general_tags"),
     ("meta", "元数据", "meta_tags"),
 )
-
-
-class MediaQuality(StrEnum):
-    PREVIEW = "preview"
-    LARGE = "large"
-    ORIGINAL = "original"
 
 
 class DetailMediaState(StrEnum):
@@ -69,7 +58,7 @@ class MediaCandidate:
 
     @property
     def quality_text(self) -> str:
-        text = _QUALITY_LABELS[self.quality.value]
+        text = self.quality.label
         if self.same_as_original:
             return f"{text}（与原图相同）"
         return text
@@ -195,15 +184,10 @@ def build_media_candidates(
             ),
         }[requested]
 
-    urls = {
-        MediaQuality.PREVIEW: post.preview_url,
-        MediaQuality.LARGE: post.large_file_url,
-        MediaQuality.ORIGINAL: post.file_url,
-    }
     seen: set[str] = set()
     candidates: list[MediaCandidate] = []
     for quality in order:
-        url = urls[quality]
+        url = post.media_url(quality)
         if not url or url in seen:
             continue
         seen.add(url)
@@ -472,7 +456,7 @@ class DanbooruDetailController(QObject):
 
     @Property(str, notify=mediaChanged)
     def requestedQualityText(self) -> str:
-        return _QUALITY_LABELS[self._requested_quality.value]
+        return self._requested_quality.label
 
     @Property(str, notify=mediaChanged)
     def actualQualityText(self) -> str:

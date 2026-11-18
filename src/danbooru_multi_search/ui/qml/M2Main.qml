@@ -56,6 +56,13 @@ ApplicationWindow {
         theme: root.theme
         onChooseTarget: eaglePanel.open()
     }
+    EagleBatchDialog {
+        id: eagleBatchDialog
+        controller: eagleBatch
+        connection: eagleController
+        theme: root.theme
+        onChooseTarget: eaglePanel.open()
+    }
 
     FavoriteTransferDialog {
         id: favoriteTransferDialog
@@ -737,6 +744,14 @@ ApplicationWindow {
                         spacing: 8
                         ActionButton { objectName: "eagleButton"; text: qsTr("Eagle"); onClicked: eaglePanel.open() }
                         ActionButton {
+                            objectName: "collectQueryEagle"
+                            text: qsTr("采集查询结果")
+                            enabled: searchController.hasDisplayedGallery && !searchController.oldGalleryVisible && !eagleImport.busy && !eagleBatch.busy
+                            property int revision: -1
+                            onPressed: revision = gallerySelection.modelRevision
+                            onClicked: eagleBatchDialog.showScope(eagleBatch.capture(false, revision, gallerySelection.revision), false)
+                        }
+                        ActionButton {
                             objectName: "imageCacheButton"
                             text: qsTr("缓存")
                             onClicked: imageCachePopup.open()
@@ -803,7 +818,19 @@ ApplicationWindow {
                             pressedAction = null
                         }
                     }
+                    ActionButton {
+                        objectName: "collectSelectedEagle"
+                        text: qsTr("采集已勾选作品")
+                        enabled: gallerySelection.selectedCount > 0 && searchController.hasDisplayedGallery && !searchController.oldGalleryVisible && !eagleImport.busy && !eagleBatch.busy
+                        property var pressedAction: null
+                        onPressed: pressedAction = {selection: gallerySelection.revision, model: gallerySelection.modelRevision}
+                        onClicked: {
+                            if (pressedAction) eagleBatchDialog.showScope(eagleBatch.capture(true, pressedAction.model, pressedAction.selection), true)
+                            pressedAction = null
+                        }
+                    }
                 }
+                Label { Layout.fillWidth: true; visible: text.length > 0; text: eagleBatch.errorText; color: theme.error; wrapMode: Text.Wrap }
                 Label { Layout.fillWidth: true; text: downloadUi.errorText || downloadUi.noticeText; visible: text.length > 0; color: downloadUi.errorText.length ? theme.error : theme.secondaryText; wrapMode: Text.Wrap }
                 RowLayout {
                     Layout.fillWidth: true

@@ -18,6 +18,7 @@ from danbooru_multi_search.app.eagle_import_types import (
     normalized_post_url,
 )
 from danbooru_multi_search.integrations.eagle.contracts import EagleBridge, EagleItemInfo
+from danbooru_multi_search.danbooru.models import MediaQuality
 from danbooru_multi_search.storage.database import DatabaseError
 from danbooru_multi_search.storage.eagle_imports import EagleImportRecord, EagleImportRepository
 
@@ -49,6 +50,8 @@ class _PostImporter:
         self.cancelled = cancelled
         self.page_url = normalized_post_url(request.post_url, request.post.id)
         self.checked: CheckedImportFile | None = None
+        self.file_quality = request.selected_quality or request.requested_quality
+        self.file_extension: str | None = None
         self.token: str | None = None
         self.item_identifier: str | None = None
         self.recovered_paths: list[Path] = []
@@ -264,6 +267,8 @@ class _PostImporter:
                 self.checked.path if self.checked else self.request.file_path
             ),
             recovered_paths=tuple(self.recovered_paths), post_started=self.backend.post_sent(), **changes,
+            actual_quality=self.file_quality if self.checked else None,
+            actual_extension=self.file_extension if self.checked else None,
         )
 
     def run(self, *, precheck: bool) -> EaglePostImportOutcome:
@@ -274,11 +279,14 @@ class _PostImporter:
         digest = None
         if not precheck:
             if self.request.file_path is None:
-                raise EaglePostImportError("eagle_file_invalid", "A checked local original file is required.")
+                raise EaglePostImportError("eagle_file_invalid", "A local media file is required.")
+            original = self.file_quality == MediaQuality.ORIGINAL
+            self.file_extension = (self.request.post.file_ext if original
+                                   else self.request.file_path.suffix.lstrip(".").lower())
             self.checked = check_import_file(
                 self.request.file_path,
-                extension=self.request.post.file_ext,
-                expected_size=self.request.post.file_size if self.request.post.file_size else None,
+                extension=self.file_extension,
+                expected_size=(self.request.post.file_size or None) if original else None,
                 cancelled=self.cancelled, validate_media=self.backend.validate_media,
             )
             digest = self.checked.sha256
@@ -314,6 +322,7 @@ class _PostImporter:
             sha256=candidate.known_sha256 if candidate else digest,
             source_sha256=digest, attempt_token=self.token,
             previous=candidate.item.annotation if candidate else "",
+            quality=self.file_quality, extension=self.file_extension, creating=candidate is None,
         )
         assert_file_unchanged(self.checked)
         if candidate:

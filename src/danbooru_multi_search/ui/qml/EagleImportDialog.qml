@@ -137,7 +137,7 @@ Dialog {
             text: qsTr("确认导入")
             primary: true
             enabled: dialog.currentSource && dialog.connection.target.valid
-                     && !dialog.connection.busy && !dialog.controller.busy
+                     && !dialog.connection.busy && !dialog.controller.busy && !eagleBatch.busy
             property var pressedAction: null
             onPressed: pressedAction = {key: dialog.postKey, source: dialog.sourceRevision,
                                        target: dialog.connection.revision, update: duplicates.currentIndex === 1,

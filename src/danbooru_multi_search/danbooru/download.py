@@ -402,6 +402,18 @@ class DanbooruDownloadController(QObject):
             application.aboutToQuit.connect(self.shutdown)
 
     def download(self, post: DanbooruPost, download_directory: Path) -> None:
+        if not post.download_url:
+            self._emit_error("The Danbooru post has no original file URL.", DownloadErrorKind.INVALID_REQUEST)
+            return
+        try:
+            destination = download_destination(post, Path(download_directory))
+        except ValueError as exc:
+            self._emit_error(str(exc), DownloadErrorKind.INVALID_REQUEST)
+            return
+        self.download_source(post.download_url, destination)
+
+    def download_source(self, source_url: str, destination: Path) -> None:
+        """Download one explicit rendition to its caller-owned destination using the shared queue."""
         if self._shutdown:
             self._emit_error(
                 "Application is shutting down; no download can start.",
@@ -415,20 +427,12 @@ class DanbooruDownloadController(QObject):
             )
             return
 
-        source_url = post.download_url
-        if not source_url:
-            self._emit_error(
-                "The Danbooru post has no original file URL.",
-                DownloadErrorKind.INVALID_REQUEST,
-            )
-            return
-
         try:
-            directory = Path(download_directory).expanduser().resolve()
+            directory = destination.parent.expanduser().resolve()
             directory.mkdir(parents=True, exist_ok=True)
             if not directory.is_dir():
                 raise OSError("Download destination is not a directory.")
-            destination = download_destination(post, directory)
+            destination = directory / destination.name
             request = build_media_request(source_url, timeout_ms=self._timeout_ms)
         except ValueError as exc:
             self._emit_error(str(exc), DownloadErrorKind.INVALID_REQUEST)

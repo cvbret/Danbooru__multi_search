@@ -152,7 +152,7 @@ Item {
             ActionButton {
                 objectName: "detailEagleImportButton"
                 text: qsTr("导入 Eagle")
-                enabled: controller.isOpen && !eagleImport.busy
+                enabled: controller.isOpen && !eagleImport.busy && !eagleBatch.busy
                 property var pressedAction: null
                 onPressed: pressedAction = {key: controller.postIdText, revision: eagleImport.sourceRevision}
                 onClicked: {

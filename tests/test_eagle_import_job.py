@@ -57,15 +57,14 @@ class Media(QObject):
         super().__init__()
         self.calls = []
 
-    def download(self, post, directory):
-        self.calls.append((post, directory))
+    def download_source(self, url, path):
+        self.calls.append((url, path))
 
     def finish(self, data=b"owned bytes"):
-        post, directory = self.calls[-1]
-        path = directory / f"{post.id}.{post.file_ext}"
+        url, path = self.calls[-1]
         path.write_bytes(data)
         self.downloadCompleted.emit(DanbooruDownloadOutcome(
-            DownloadState.SUCCESS, "", DownloadedFile(path, post.file_url, len(data))))
+            DownloadState.SUCCESS, "", DownloadedFile(path, url, len(data))))
         return path
 
     def cancelCurrentDownload(self):

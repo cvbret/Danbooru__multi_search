@@ -584,7 +584,7 @@ def _matches_filters(post: _ValidatedPost, spec: _ValidatedFilter) -> bool:
             return False
         if spec.maximum_age is not None and age > spec.maximum_age:
             return False
-    if spec.file_categories is not None and not _matches_file_category(
+    if spec.file_categories is not None and not matches_file_category(
         value.file_ext,
         spec.file_categories,
     ):
@@ -607,10 +607,11 @@ def _matches_filters(post: _ValidatedPost, spec: _ValidatedFilter) -> bool:
     return True
 
 
-def _matches_file_category(
+def matches_file_category(
     extension: str,
     categories: frozenset[PostFileCategory],
 ) -> bool:
+    """Match the shared static/GIF/WebM/MP4 categories for a file extension."""
     return (
         PostFileCategory.STATIC in categories and extension in _STATIC_EXTENSIONS
     ) or (

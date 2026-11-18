@@ -6,12 +6,13 @@ from uuid import uuid4
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from danbooru_multi_search.app.eagle_import_types import EaglePostImportRequest
+from danbooru_multi_search.app.eagle_import_types import EaglePostImportError, EaglePostImportRequest
 from danbooru_multi_search.app.eagle_media import EagleMediaFile
 from danbooru_multi_search.app.eagle_runtime import EagleRuntime
 from danbooru_multi_search.app.eagle_service import EagleOperation, EagleRequest, EagleResult
 from danbooru_multi_search.core.downloads import DanbooruDownloadOutcome, DownloadState
 from danbooru_multi_search.danbooru.download import DanbooruDownloadController
+from danbooru_multi_search.danbooru.models import MediaQuality
 
 
 class EagleImportJob(QObject):
@@ -77,13 +78,18 @@ class EagleImportJob(QObject):
         else:
             self._finish(result)
 
-    def _prepare_media(self) -> None:
+    def _prepare_media(self, quality: MediaQuality | None = None) -> None:
         post = self.payload.post
-        if not post.download_url:
-            self._finish(EagleResult("", error_code="eagle_missing_original"))
+        choices = self.payload.media_choices
+        if not choices:
+            code = ("eagle_missing_original" if self.payload.requested_quality == MediaQuality.ORIGINAL
+                    and self.payload.fallback_quality is None else "eagle_missing_media")
+            self._finish(EagleResult("", error_code=code))
             return
+        quality = quality or choices[0]
+        self.payload = replace(self.payload, selected_quality=quality)
         try:
-            self._media = EagleMediaFile.prepare(self._root, post)
+            self._media = EagleMediaFile.prepare(self._root, post, quality)
         except (OSError, ValueError) as exc:
             self._finish(EagleResult("", error_code="eagle_media_staging", diagnostic=str(exc)))
             return
@@ -94,7 +100,7 @@ class EagleImportJob(QObject):
         self.stage = "download"
         self.changed.emit()
         if not self.closed and self.payload is payload and not self.cancelling:
-            self._downloader.download(post, self._media.path.parent)
+            self._downloader.download_source(post.media_url(quality), self._media.path)
 
     @Slot(object)
     def _download_finished(self, outcome: DanbooruDownloadOutcome) -> None:
@@ -104,13 +110,19 @@ class EagleImportJob(QObject):
             self._finish(EagleResult("", error_code="eagle_cancelled"))
         elif outcome.succeeded and outcome.downloaded_file and outcome.downloaded_file.path == self._media.path:
             self._import_file()
+        elif (outcome.http_status in (404, 410) and self.payload.selected_quality == MediaQuality.ORIGINAL
+              and len(self.payload.media_choices) == 2):
+            self._release_file(retain=False)
+            self._prepare_media(self.payload.media_choices[1])
         else:
             self._finish(EagleResult("", error_code="eagle_media_download", diagnostic=outcome.message))
 
     def _import_file(self) -> None:
         try:
+            if self.payload.selected_quality != MediaQuality.ORIGINAL:
+                self._media.name_rendition()
             self._media.capture_for_import()
-        except OSError as exc:
+        except (EaglePostImportError, OSError) as exc:
             self._finish(EagleResult("", error_code="eagle_file_invalid", diagnostic=str(exc)))
             return
         self.payload = replace(self.payload, file_path=self._media.path)
@@ -124,11 +136,11 @@ class EagleImportJob(QObject):
         try:
             if keep_path:
                 media.mark_stopped()
-                self.file_notice = f"待核实的原文件保存在：{media.path}"
+                self.file_notice = f"待核实的文件保存在：{media.path}"
             else:
                 saved = media.finish(retain=retain)
                 if saved:
-                    self.file_notice = f"已保留原文件供重试：{saved}"
+                    self.file_notice = f"已保留文件供重试：{saved}"
         except OSError as exc:
             self.file_notice = f"暂存文件处理失败（{media.path}）：{exc}"
 
@@ -140,7 +152,7 @@ class EagleImportJob(QObject):
         self._release_file(retain=not confirmed and not invalid_media, keep_path=result.uncertain)
         pending_write = result.uncertain or result.error_code == "eagle_unresolved_attempt"
         if pending_write and not self.file_notice and outcome and outcome.file_path:
-            self.file_notice = f"待核实的原文件路径：{outcome.file_path}"
+            self.file_notice = f"待核实的文件路径：{outcome.file_path}"
         self._request_id = ""
         self.result = result
         self.stage = ""

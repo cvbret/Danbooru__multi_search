@@ -44,6 +44,7 @@ EXPECTED_QML_MEMBERS = (
     "danbooru_multi_search/ui/qml/PoolDownloadPanel.qml",
     "danbooru_multi_search/ui/qml/EaglePanel.qml",
     "danbooru_multi_search/ui/qml/EagleImportDialog.qml",
+    "danbooru_multi_search/ui/qml/EagleBatchDialog.qml",
     "danbooru_multi_search/ui/qml/PoolReaderItem.qml",
     "danbooru_multi_search/ui/qml/PoolMembershipPanel.qml",
     "danbooru_multi_search/ui/qml/ImageViewer.qml",

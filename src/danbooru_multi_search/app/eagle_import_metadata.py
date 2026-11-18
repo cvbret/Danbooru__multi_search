@@ -14,6 +14,7 @@ from danbooru_multi_search.app.eagle_import_types import (
     normalized_post_url,
 )
 from danbooru_multi_search.danbooru.post_validation import validate_post_values
+from danbooru_multi_search.danbooru.models import MediaQuality
 
 
 _BEGIN = "[DanbooruMultiSearch:v1]"
@@ -129,6 +130,9 @@ def build_annotation(
     attempt_token: str,
     source_sha256: str | None = None,
     previous: str = "",
+    quality: MediaQuality | None = None,
+    extension: str | None = None,
+    creating: bool = False,
 ) -> str:
     """Replace this post's complete block, preserving user text and other posts."""
     post = request.post
@@ -155,6 +159,12 @@ def build_annotation(
             "导入时间": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         },
     }
+    if quality is not None and extension is not None:
+        data["details"]["本次采集清晰度"] = quality.label
+        data["details"]["本次采集文件格式"] = extension
+        if creating:
+            data["details"]["首次导入清晰度"] = quality.label
+            data["details"]["首次导入文件格式"] = extension
     matching = [
         marker for marker in annotation_markers(previous)
         if marker.library_id == request.library_identifier
@@ -170,6 +180,8 @@ def build_annotation(
         if isinstance(old_details, dict):
             for key, supplied in (
                 ("导入时间", False),
+                ("首次导入清晰度", False),
+                ("首次导入文件格式", False),
                 ("查询条件", bool(request.query_text and request.query_text != "未取得")),
                 ("所属作品池", bool(request.pool_text and request.pool_text != "未取得")),
             ):

@@ -98,6 +98,7 @@ QML_FILES = (
     "PoolDownloadPanel.qml",
     "EaglePanel.qml",
     "EagleImportDialog.qml",
+    "EagleBatchDialog.qml",
     "PoolReaderItem.qml",
     "PoolMembershipPanel.qml",
     "ImageViewer.qml",

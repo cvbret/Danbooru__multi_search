@@ -105,6 +105,19 @@ def _check_mp4_boxes(path: Path, size: int, cancelled: Callable[[], bool]) -> No
     raise EaglePostImportError("eagle_file_invalid", "The MP4 structure is truncated or exceeds verification limits.")
 
 
+def rendition_extension(path: Path) -> str:
+    """Identify downloaded sample bytes before giving Eagle a file with the matching suffix."""
+    with path.open("rb") as stream:
+        size = os.fstat(stream.fileno()).st_size
+        prefix = stream.read(65536)
+        stream.seek(max(0, size - 65557))
+        tail = stream.read(65557)
+    for extension in ("jpg", "png", "gif", "webp", "avif", "mp4", "webm", "zip", "swf"):
+        if _valid_signature(extension, prefix, tail, size):
+            return extension
+    raise EaglePostImportError("eagle_file_invalid", "The selected rendition has no recognized media signature.")
+
+
 def check_import_file(
     path: Path,
     *,
