@@ -31,7 +31,7 @@ from danbooru_multi_search.integrations.eagle.transport import (
     EagleTransportError,
     UrllibEagleHttpTransport,
 )
-from danbooru_multi_search.platform.contracts import ServiceAvailability, ValueResult
+from danbooru_multi_search.core.results import ServiceAvailability, ValueResult
 
 
 DEFAULT_EAGLE_BASE_URL = "http://localhost:41595/api/v2/"

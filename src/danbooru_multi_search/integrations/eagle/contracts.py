@@ -4,13 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Mapping, Protocol, runtime_checkable
+from typing import Callable, Mapping, Protocol, runtime_checkable
 
-if TYPE_CHECKING:
-    from danbooru_multi_search.platform.contracts import (
-        ServiceAvailability,
-        ValueResult,
-    )
+from danbooru_multi_search.core.results import ServiceAvailability, ValueResult
 
 
 @dataclass(frozen=True, slots=True)

@@ -12,7 +12,7 @@ from danbooru_multi_search.integrations.eagle.contracts import (
     EagleImportResult,
     EagleLibraryInfo,
 )
-from danbooru_multi_search.platform.contracts import (
+from danbooru_multi_search.core.results import (
     ServiceAvailability,
     ValueResult,
 )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import FrozenInstanceError, fields
+from typing import get_type_hints
 
 import pytest
 
@@ -37,6 +39,15 @@ def test_override_paths_are_isolated_and_created(tmp_path):
     assert paths.download_dir == tmp_path / "downloads"
     assert paths.config_dir.is_dir()
     assert paths.data_dir.is_dir()
+    paths.ensure_directories()
+    assert all(
+        path.is_dir() for path in (
+            paths.config_dir, paths.data_dir, paths.cache_dir,
+            paths.log_dir, paths.temp_dir, paths.download_dir,
+        )
+    )
+    assert not paths.settings_file.exists()
+    assert not paths.database_file.exists()
 
 
 @pytest.mark.parametrize(
@@ -221,3 +232,65 @@ def test_non_windows_eagle_bridge_never_connects_or_reads_files(
     assert all(result.succeeded is False for result in results)
     assert all(result.code == expected_code for result in results)
     assert not isolated_root.exists()
+
+
+def test_result_values_keep_legacy_identity_defaults_slots_and_generic_parameter():
+    from danbooru_multi_search.core import results
+    from danbooru_multi_search import platform
+    from danbooru_multi_search.platform import contracts
+
+    for name in ("ServiceAvailability", "OperationResult", "ValueResult"):
+        assert getattr(contracts, name) is getattr(results, name)
+        assert getattr(platform, name) is getattr(results, name)
+    assert contracts.ResultValue is results.ResultValue
+    assert results.ValueResult.__parameters__ == (results.ResultValue,)
+    examples = (
+        (results.ServiceAvailability(True), ("available", "code", "message")),
+        (results.OperationResult(True), ("succeeded", "code", "message")),
+        (results.ValueResult[int](True), ("succeeded", "value", "code", "message")),
+    )
+    for value, names in examples:
+        assert tuple(field.name for field in fields(value)) == names
+        assert type(value).__slots__ == names
+        assert not hasattr(value, "__dict__")
+        assert value.code is None and value.message is None
+        if isinstance(value, results.ValueResult):
+            assert value.value is None
+        with pytest.raises(FrozenInstanceError):
+            value.code = "changed"
+        unavailable = type(value).unavailable("unavailable", "reason")
+        assert unavailable.code == "unavailable" and unavailable.message == "reason"
+        assert not (unavailable.available if isinstance(value, results.ServiceAvailability) else unavailable.succeeded)
+
+
+def test_application_paths_keep_all_legacy_entry_points_as_one_class():
+    from danbooru_multi_search import platform
+    from danbooru_multi_search.platform import contracts, paths
+
+    assert platform.ApplicationPaths is contracts.ApplicationPaths is paths.ApplicationPaths
+    assert tuple(field.name for field in fields(contracts.ApplicationPaths)) == (
+        "config_dir", "data_dir", "cache_dir", "log_dir", "temp_dir",
+        "download_dir", "settings_file", "database_file",
+    )
+
+
+def test_platform_and_eagle_protocol_type_hints_resolve_bound_runtime_objects():
+    from danbooru_multi_search.core.results import ValueResult
+    from danbooru_multi_search.integrations.eagle.contracts import EagleBridge, EagleLibraryInfo
+    from danbooru_multi_search.platform import contracts, paths
+
+    assert get_type_hints(contracts.PlatformServices)["eagle"] is EagleBridge
+    assert get_type_hints(contracts.PlatformPaths.resolve)["return"] is contracts.ApplicationPaths
+    assert get_type_hints(paths.QtPlatformPaths.resolve)["return"] is contracts.ApplicationPaths
+    assert get_type_hints(EagleBridge.get_current_library)["return"] == ValueResult[EagleLibraryInfo]
+    for protocol in (
+        EagleBridge, contracts.PlatformPaths, contracts.WallpaperService,
+        contracts.MediaCapabilityService, contracts.ExternalOpenService,
+        contracts.CredentialStore, contracts.SystemInfoService,
+    ):
+        for name, member in vars(protocol).items():
+            if name.startswith("_"):
+                continue
+            function = member.fget if isinstance(member, property) else member
+            if callable(function):
+                assert get_type_hints(function)

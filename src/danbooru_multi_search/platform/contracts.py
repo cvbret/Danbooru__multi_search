@@ -5,11 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Generic, Protocol, TypeVar, runtime_checkable
+from typing import Protocol, runtime_checkable
 
-if TYPE_CHECKING:
-    from danbooru_multi_search.integrations.eagle.contracts import EagleBridge
-    from danbooru_multi_search.platform.paths import ApplicationPaths
+from danbooru_multi_search.core.results import (
+    OperationResult,
+    ResultValue,
+    ServiceAvailability,
+    ValueResult,
+)
+from danbooru_multi_search.integrations.eagle.contracts import EagleBridge
 
 
 NOT_IMPLEMENTED = "not_implemented"
@@ -17,46 +21,28 @@ UNSUPPORTED_PLATFORM = "unsupported_platform"
 
 
 @dataclass(frozen=True, slots=True)
-class ServiceAvailability:
-    """Describe whether a platform service can currently perform operations."""
+class ApplicationPaths:
+    config_dir: Path
+    data_dir: Path
+    cache_dir: Path
+    log_dir: Path
+    temp_dir: Path
+    download_dir: Path
+    settings_file: Path
+    database_file: Path
 
-    available: bool
-    code: str | None = None
-    message: str | None = None
+    def ensure_directories(self) -> None:
+        """Create only application-owned directories."""
 
-    @classmethod
-    def unavailable(cls, code: str, message: str) -> ServiceAvailability:
-        return cls(available=False, code=code, message=message)
-
-
-@dataclass(frozen=True, slots=True)
-class OperationResult:
-    """Result for a platform operation that does not return a value."""
-
-    succeeded: bool
-    code: str | None = None
-    message: str | None = None
-
-    @classmethod
-    def unavailable(cls, code: str, message: str) -> OperationResult:
-        return cls(succeeded=False, code=code, message=message)
-
-
-ResultValue = TypeVar("ResultValue")
-
-
-@dataclass(frozen=True, slots=True)
-class ValueResult(Generic[ResultValue]):
-    """Result for a platform operation that may return a typed value."""
-
-    succeeded: bool
-    value: ResultValue | None = None
-    code: str | None = None
-    message: str | None = None
-
-    @classmethod
-    def unavailable(cls, code: str, message: str) -> ValueResult[ResultValue]:
-        return cls(succeeded=False, code=code, message=message)
+        for directory in (
+            self.config_dir,
+            self.data_dir,
+            self.cache_dir,
+            self.log_dir,
+            self.temp_dir,
+            self.download_dir,
+        ):
+            directory.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass(frozen=True, slots=True)

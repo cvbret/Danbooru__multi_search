@@ -64,6 +64,7 @@ hidden_imports = [
     "danbooru_multi_search.ui.pool_downloads",
     "danbooru_multi_search.integrations.eagle.qt_transport",
     "danbooru_multi_search.app.eagle_service",
+    "danbooru_multi_search.core.results",
     "danbooru_multi_search.app.eagle_runtime",
     "danbooru_multi_search.ui.eagle_messages",
     "danbooru_multi_search.ui.eagle",

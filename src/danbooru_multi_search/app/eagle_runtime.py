@@ -13,7 +13,7 @@ from danbooru_multi_search.app.eagle_service import (
     EagleResult,
     execute_eagle_request,
 )
-from danbooru_multi_search.platform.contracts import ServiceAvailability
+from danbooru_multi_search.core.results import ServiceAvailability
 from danbooru_multi_search.tasks.model import (
     TaskAttemptResult,
     TaskFinalResult,

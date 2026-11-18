@@ -4,7 +4,7 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第二轮结构整改
 - 当前里程碑：`第二轮结构整改完成`
-- 当前主要任务：`R7-001 HTTP 应答诊断收敛`
+- 当前主要任务：`R6-001 通用结果与路径契约`
 - 当前状态：待提交
 - 执行状态：用户于 2026-11-18 明确要求继续；按第 45 节推进第二轮结构整改，沿用已通过结果，只执行当前修改的直接相关检查。
 - 最后更新：2026-11-18
@@ -3014,7 +3014,7 @@ M2 里程碑回归检查与提交。
 
 ### 45.8 当前任务 R7-001
 
-- 状态：待提交；起点 `d80bb8a718a52ce65db6d50435eacd802e81896e`，从干净工作树开始。目标是删除四处重复的 HTTP 诊断读取/分类实现，共用一个明确的只读诊断函数，保留各请求实际处理。
+- 状态：已完成；起点 `d80bb8a718a52ce65db6d50435eacd802e81896e`，从干净工作树开始。目标是删除四处重复的 HTTP 诊断读取/分类实现，共用一个明确的只读诊断函数，保留各请求实际处理。
 - 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
 - 准确生产/打包范围 7 个路径：新增 `src/danbooru_multi_search/danbooru/http_diagnostics.py`；修改 `danbooru/client.py`、`danbooru/tags.py`、`danbooru/pools.py`、`danbooru/download.py`、`danbooru/query_controller.py`、`packaging/windows/DanbooruMultiSearch.spec`。query_controller 仅修正首行仍声称有 M1 gallery controller 的失效说明；不改变其行为。包内短路径沿用 src 前缀，不新增包级诊断导出。
 - 准确测试范围 6 个路径：新增 `tests/test_http_diagnostics.py`；修改 `tests/test_danbooru_client.py`、`tests/test_danbooru_tags.py`、`tests/test_danbooru_download.py`、`tests/test_pool_requests.py`、`tests/test_windows_packaging.py`。其他间接消费者/重试/限额/关闭场景只选择必要原节点，不预先修改文件。
@@ -3025,3 +3025,19 @@ M2 里程碑回归检查与提交。
 - 开发已冻结准确 7 个生产/打包及 6 个测试路径，另含本记录。四处重复诊断读取/分类已删除，类型明确为三种失败值或 None；13 个文件语法、空白和 spec 唯一/完整检查通过。独立静态审查确认各自正文、限额、释放、解析、文件提交和回调位置保持，暂未发现确定阻断，等待最终聚焦验证。
 - 本轮 46 个不同直接场景全部通过，覆盖只读元数据/严格转换/编码/HTTP 优先和 199/299 边界、三类 JSON 失败不解析、缺状态成功、媒体错误不提交或覆盖旧文件、末次读取限额优先于诊断、受控 HTTP/429 重试/限额/下载关闭、间接 pool_pages 及资源。未修改队列或 pool_pages 实现，没有全量回归、完整构建、原生界面、真实服务或 Linux。检查数据 `.tools/pytest-r7-001-*` 保留且不提交，成果窗口未操作。
 - reviewer 最终独立选择 26 项全部通过，1.04 秒。覆盖只读/不可变、状态边界与优先级、ASCII/严格转换、四消费者失败字段及文案、不解析或提交、缺状态标签成功、下载末次读取失败优先、共享 429 重试、标签限额、下载进度关闭、pool_pages 受控 HTTP 和 spec。准确 7 个生产/打包、6 个测试及本记录共 14 个路径获准提交，无剩余阻断。参数节点只读收集未作为执行场景计数；独立数据 `.tools/pytest-r7-001-reviewer*` 保留且不提交，没有全量回归或构建。
+- 本地提交：`03755f4444bb2926b635ffe64d6288599b7faa86`（`refactor(http): centralize reply diagnostics`），准确包含批准的 14 个路径。提交后工作树与暂存区干净，未推送。评级显示表仍按方案随 R6 UI 迁移合并。
+
+### 45.9 当前任务 R6-001
+
+- 状态：待提交；起点 `03755f4444bb2926b635ffe64d6288599b7faa86`，从干净工作树开始。目标是解除通用结果与平台/Eagle、路径契约与 Qt 路径实现之间的类型引用环，保留现有公开入口及实际行为。
+- 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
+- 准确生产/打包范围 8 个路径：新增 `src/danbooru_multi_search/core/results.py`；修改 `platform/contracts.py`、`platform/paths.py`、`integrations/eagle/contracts.py`、`integrations/eagle/client.py`、`integrations/eagle/stubs.py`、`app/eagle_runtime.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用同一 src 前缀。不修改平台包初始化、具体适配器、bootstrap/settings、数据库或 Eagle 请求流程。
+- 准确测试范围 3 个路径：`tests/test_platform.py`、`tests/test_eagle_architecture.py`、`tests/test_windows_packaging.py`。现有 bootstrap/Eagle 服务、CLI 或运行时检查只选必要原节点，不预先修改其他文件。
+- `ServiceAvailability`、`OperationResult`、`ValueResult` 及 `ResultValue` 整体迁入 core/results；保留字段顺序、默认值、frozen/slots、泛型及 unavailable 行为。原 platform/contracts 通过导入保留同一个对象，platform 包出口继续有效，不复制类或包装构造。Eagle contracts/client/stubs 和 app/eagle_runtime 直接引用新归属；stubs 自己的 EagleResultValue 保留。
+- Eagle contracts 正常导入通用结果，platform/contracts 正常导入 EagleBridge，删除相应未绑定的 TYPE_CHECKING 前向引用。协议函数、属性及 PlatformServices 的运行时类型提示应可解析；依赖方向保持平台契约到 Eagle 契约再到通用结果。
+- `ApplicationPaths` 的 8 个字段和 ensure_directories 整体移入现有 platform/contracts；paths 从 contracts 导入同类，原 paths 与平台包入口保持同对象。仍只创建原 6 个目录，可重复调用，不创建 settings/database 文件；Qt 解析与 resolve_application_paths 保留，解析本身不创建目录。该类型包含实际目录操作，不称其完全没有文件操作。
+- 冷导入只验证 core.results 以及 Eagle contracts/client/stubs/urllib 传输/应用服务不加载 Qt/UI/platform；原应用服务检查改用真实 ValueResult 并执行实际服务。不对平台包或 app.eagle_runtime 承诺无 Qt，不为本批改写整个平台包的初始化。
+- 验收覆盖原入口身份、默认/泛型/不可变值、真实 get_type_hints、六目录及两文件边界、只解析不写盘、无 Qt 的 Eagle 实际业务、必要旧 Eagle/bootstrap 行为与 spec。仅执行直接相关检查，完整回归和构建继续留在结构整改里程碑；提交编号待完成记录。
+- 开发已冻结准确 8 个生产/打包及 3 个测试路径，另含本记录。结果类、TypeVar 和路径类各只有一份定义，旧出口保持同对象，Eagle 直接消费者不再引用平台结果；11 个文件语法/空白及 spec 完整无重复检查通过。独立静态审查暂无确定阻断，等待最终聚焦验证。
+- 本轮 16 个不同直接场景通过：类型/路径/运行时提示及真实冷导入 6 项，必要旧平台/Eagle/bootstrap/运行时关闭/spec 10 项。冷检查实际执行真实 ValueResult、client、注入内存 opener 的 urllib、stub 与应用服务，并阻止 Qt/UI/platform。新测试先后修正缺少 app/info 原必填字段，以及遗漏测试自身显式连接请求的计数断言；按原服务 5 次加显式 1 次共 6 次复查该单项通过，生产校验及请求流程未改，已通过 5 项未重跑。检查数据 `.tools/pytest-r6-001-*` 保留且不提交，没有全量回归、完整构建、原生界面、真实 Eagle 或 Linux，成果窗口未操作。
+- reviewer 最终独立选择 9 项全部通过，0.70 秒。覆盖三结果类/TypeVar 的同对象、默认/泛型/不可变行为、路径三旧出口同类、协议方法与属性的真实类型提示、六目录重复创建及两文件边界、只解析不写盘、真实 Eagle 冷链、bootstrap 实际创建、Eagle 等待响应头关闭及 spec。准确 8 个生产/打包、3 个测试及本记录共 12 个路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r6-001-reviewer*` 保留且不提交，没有全量回归或构建。

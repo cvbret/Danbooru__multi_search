@@ -7,32 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths
 
-from danbooru_multi_search.platform.contracts import PlatformPaths
-
-
-@dataclass(frozen=True, slots=True)
-class ApplicationPaths:
-    config_dir: Path
-    data_dir: Path
-    cache_dir: Path
-    log_dir: Path
-    temp_dir: Path
-    download_dir: Path
-    settings_file: Path
-    database_file: Path
-
-    def ensure_directories(self) -> None:
-        """Create only application-owned directories."""
-
-        for directory in (
-            self.config_dir,
-            self.data_dir,
-            self.cache_dir,
-            self.log_dir,
-            self.temp_dir,
-            self.download_dir,
-        ):
-            directory.mkdir(parents=True, exist_ok=True)
+from danbooru_multi_search.platform.contracts import ApplicationPaths, PlatformPaths
 
 
 def _standard_location(location: QStandardPaths.StandardLocation) -> Path:
