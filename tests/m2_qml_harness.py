@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QEvent
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.ui.launcher import create_qml_engine
 from danbooru_multi_search.ui.window_state import ScreenGeometry, WindowGeometry
 

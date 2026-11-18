@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF
 from PySide6.QtTest import QTest
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.core.saved_queries import SavedQueryDraft
 from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
 from tests.m2_qml_harness import create_m2_qml_test_engine, close_m2_qml_test_engine

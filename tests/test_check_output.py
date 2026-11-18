@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from danbooru_multi_search.core.check_output import (
+from danbooru_multi_search.storage.check_output import (
     CheckOutputError,
     CheckOutputExistsError,
     write_check_output,

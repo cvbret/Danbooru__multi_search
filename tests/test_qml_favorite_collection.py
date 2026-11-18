@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject, QPointF, QUrl
 from PySide6.QtNetwork import QNetworkRequest
 from PySide6.QtTest import QTest
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.core.favorites import FavoriteCandidate, FavoriteTagCategory
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.image_cache import ImageNetworkAccessManager

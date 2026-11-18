@@ -11,7 +11,8 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 
 from danbooru_multi_search.core.downloads import MAX_DOWNLOAD_BATCH_ITEMS, DOWNLOAD_TERMINAL_STATES, DownloadError, DownloadRequest, DownloadTaskState
-from danbooru_multi_search.core.settings import SettingsController, SettingsError
+from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.core.settings import SettingsError
 from danbooru_multi_search.app.download_manager import PersistentDownloadManager
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib
 import importlib.abc
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -17,6 +18,10 @@ PACKAGES = (
     "danbooru_multi_search.tasks",
 )
 PURE_MODULES = (
+    "danbooru_multi_search.core.settings",
+    "danbooru_multi_search.storage.settings",
+    "danbooru_multi_search.storage.check_output",
+    "danbooru_multi_search.app.settings",
     "danbooru_multi_search.core.downloads",
     "danbooru_multi_search.storage.downloads",
     "danbooru_multi_search.storage.download_files",
@@ -119,6 +124,60 @@ def _probe_pure_imports(data_root: Path) -> None:
     assert not any(name.startswith("PySide6") for name in sys.modules)
 
 
+def _probe_settings_and_check_output(data_root: Path) -> None:
+    blocked = ("PySide6", "danbooru_multi_search.ui", "danbooru_multi_search.platform")
+
+    class RejectQtUiAndPlatform(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path, target=None):
+            if any(fullname == prefix or fullname.startswith(prefix + ".") for prefix in blocked):
+                raise AssertionError(f"Settings imported {fullname}")
+            return None
+
+    sys.meta_path.insert(0, RejectQtUiAndPlatform())
+    from danbooru_multi_search.core.settings import AppSettings, create_default_settings
+
+    assert not any(
+        name.startswith(("danbooru_multi_search.storage", "danbooru_multi_search.app"))
+        for name in sys.modules
+    )
+    from danbooru_multi_search.app.settings import SettingsController
+    from danbooru_multi_search.storage.check_output import (
+        CheckOutputError,
+        CheckOutputExistsError,
+        write_check_output,
+    )
+    from danbooru_multi_search.storage.settings import SettingsStore
+
+    store = SettingsStore(data_root / "config" / "settings.json")
+    defaults = create_default_settings(data_root / "downloads")
+    assert store.load_or_default(defaults) is defaults and not store.path.exists()
+    controller = SettingsController(store, defaults)
+    controller.update(theme="dark", button_background_transparency=0.45)
+    saved = controller.set_download_directory(data_root / "selected downloads")
+    assert saved.theme == "dark" and saved.button_background_transparency == 0.45
+    assert store.load_or_default(AppSettings()) == saved
+    assert not (data_root / "selected downloads").exists()
+
+    target = data_root / "result.json"
+    payload = {"status": "ok", "message": "设置已保存"}
+    assert write_check_output(target, payload) == target
+    original = target.read_bytes()
+    try:
+        write_check_output(target, {"status": "replacement"})
+    except CheckOutputExistsError as exc:
+        assert isinstance(exc, CheckOutputError)
+    else:
+        raise AssertionError("Existing output was overwritten")
+    assert target.read_bytes() == original
+    assert not list(data_root.glob(".result.json.*.tmp"))
+    for old_module in ("core.bootstrap", "core.check_output"):
+        assert importlib.util.find_spec("danbooru_multi_search." + old_module) is None
+    assert not any(
+        name == prefix or name.startswith(prefix + ".")
+        for name in sys.modules for prefix in blocked
+    )
+
+
 def _probe_qt_scheduling() -> None:
     from PySide6.QtCore import QCoreApplication
     from danbooru_multi_search.tasks import QtScheduler
@@ -192,6 +251,10 @@ def test_query_forms_work_without_the_bridge_or_executor(tmp_path):
     _run_probe("forms", tmp_path)
 
 
+def test_settings_and_check_output_work_without_qt_ui_or_platform(tmp_path):
+    _run_probe("settings", tmp_path)
+
+
 def test_legacy_qt_scheduler_imports_and_timer_cancellation(tmp_path):
     _run_probe("qt", tmp_path)
 
@@ -232,6 +295,8 @@ if __name__ == "__main__":
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
     if sys.argv[1] == "pure":
         _probe_pure_imports(Path(sys.argv[2]))
+    elif sys.argv[1] == "settings":
+        _probe_settings_and_check_output(Path(sys.argv[2]))
     elif sys.argv[1] == "qt":
         _probe_qt_scheduling()
     elif sys.argv[1] == "forms":

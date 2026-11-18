@@ -28,11 +28,11 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
+from danbooru_multi_search.app.settings import SettingsController
 from danbooru_multi_search.core.settings import (
     AppSettings,
-    SettingsController,
-    SettingsStore,
 )
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.danbooru import (
     DanbooruDetailController,
     DanbooruM2QueryController,

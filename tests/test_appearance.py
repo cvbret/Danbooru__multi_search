@@ -5,12 +5,12 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QUrl, Qt, Signal
 
+from danbooru_multi_search.app.settings import SettingsController
 from danbooru_multi_search.core.settings import (
     AppSettings,
-    SettingsController,
     SettingsError,
-    SettingsStore,
 )
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.ui.appearance import AppearanceController
 
 

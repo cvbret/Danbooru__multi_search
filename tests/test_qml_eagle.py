@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject, QPointF
 from PySide6.QtTest import QTest
 
 from danbooru_multi_search.integrations.eagle import EagleWebApiBridge
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.platform import PlatformAdapter
 from tests.test_eagle_client import eagle_server, ServerResponse, app_info, jsend
 from tests.test_eagle_ui import responses

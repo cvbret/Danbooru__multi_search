@@ -6,9 +6,10 @@ import pytest
 from PySide6.QtCore import QObject, QPoint, QPointF, QUrl, Qt, QMetaObject, Q_ARG
 from PySide6.QtTest import QTest
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.core.downloads import DownloadTaskState
-from danbooru_multi_search.core.settings import AppSettings, SettingsStore
+from danbooru_multi_search.core.settings import AppSettings
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.storage.downloads import DownloadRepository
 from tests.m2_qml_harness import create_m2_qml_test_engine, close_m2_qml_test_engine
 from tests.test_download_manager import Network, works

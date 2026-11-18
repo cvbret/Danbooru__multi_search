@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, QMetaObject, QPoint, QPointF, Qt
 from PySide6.QtTest import QTest
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.core.favorites import FavoriteError, FavoriteIdentity, FavoriteObjectType
 from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.ui.favorites import post_identity

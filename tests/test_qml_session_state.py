@@ -17,7 +17,7 @@ from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 from PySide6.QtTest import QTest
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.danbooru import DanbooruPost
 from danbooru_multi_search.storage import GalleryPosition, HistoryRepository
 from danbooru_multi_search.ui.window_state import (

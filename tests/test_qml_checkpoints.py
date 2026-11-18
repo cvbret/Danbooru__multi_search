@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from PySide6.QtTest import QTest
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.danbooru.query_definition import GalleryQueryDefinition, QueryMode
 from danbooru_multi_search.danbooru.query_planning import QueryRating
 from danbooru_multi_search.danbooru.query_types import QueryExecutionLimits, QueryExecutionState

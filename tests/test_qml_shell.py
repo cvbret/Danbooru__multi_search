@@ -24,7 +24,7 @@ from danbooru_multi_search.danbooru import (
     DanbooruPost,
     QueryExecutionState,
 )
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.storage import HistoryError, HistoryRepository
 from danbooru_multi_search.ui.launcher import (
     create_qml_engine,

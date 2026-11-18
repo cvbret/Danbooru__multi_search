@@ -7,7 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Property, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QGuiApplication, QStyleHints
 
-from danbooru_multi_search.core.settings import SettingsController, SettingsError
+from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.core.settings import SettingsError
 
 
 class AppearanceController(QObject):

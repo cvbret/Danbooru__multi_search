@@ -4,7 +4,9 @@ import pytest
 from PySide6.QtCore import QObject, QUrl, Signal
 
 from danbooru_multi_search.core.downloads import DownloadError
-from danbooru_multi_search.core.settings import AppSettings, SettingsController, SettingsError, SettingsStore
+from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.core.settings import AppSettings, SettingsError
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from tests.test_pool_download_manager import harness

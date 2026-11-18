@@ -1,4 +1,4 @@
-"""Platform-neutral application initialization."""
+"""Assemble platform services, settings and the application database."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from pathlib import Path
 
 from danbooru_multi_search.core.settings import (
     AppSettings,
-    SettingsStore,
     create_default_settings,
 )
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.platform import (
     ApplicationPaths,
     PlatformAdapter,
@@ -55,4 +55,3 @@ def initialize_runtime(data_root: Path | None = None) -> RuntimeContext:
         database=database,
         database_version=database_version,
     )
-

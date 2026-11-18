@@ -1,12 +1,8 @@
-"""Versioned JSON settings with atomic persistence."""
+"""Immutable application settings and versioned value validation."""
 
 from __future__ import annotations
 
-import json
 import math
-import os
-import tempfile
-import threading
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Mapping
@@ -123,112 +119,4 @@ def create_default_settings(download_dir: Path) -> AppSettings:
     """Create platform-derived default settings."""
 
     return AppSettings(download_directory=str(download_dir))
-
-
-class SettingsStore:
-    """Read and atomically replace a JSON settings file."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-
-    def exists(self) -> bool:
-        return self.path.is_file()
-
-    def load_or_default(self, default: AppSettings) -> AppSettings:
-        if not self.exists():
-            return default
-
-        try:
-            with self.path.open("r", encoding="utf-8") as stream:
-                raw = json.load(stream)
-        except (OSError, json.JSONDecodeError) as exc:
-            raise SettingsError(f"Unable to read settings at {self.path}: {exc}") from exc
-
-        if not isinstance(raw, dict):
-            raise SettingsError("Settings root must be a JSON object")
-        return AppSettings.from_mapping(raw)
-
-    def save(self, settings: AppSettings) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path: Path | None = None
-
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                newline="\n",
-                prefix=f".{self.path.name}.",
-                suffix=".tmp",
-                dir=self.path.parent,
-                delete=False,
-            ) as stream:
-                temporary_path = Path(stream.name)
-                json.dump(
-                    settings.to_mapping(),
-                    stream,
-                    ensure_ascii=False,
-                    indent=2,
-                    sort_keys=True,
-                )
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-
-            os.replace(temporary_path, self.path)
-        except OSError as exc:
-            raise SettingsError(f"Unable to save settings at {self.path}: {exc}") from exc
-        finally:
-            if temporary_path is not None and temporary_path.exists():
-                temporary_path.unlink(missing_ok=True)
-
-
-class SettingsController:
-    """Serialize merged settings updates around one in-memory snapshot."""
-
-    def __init__(
-        self,
-        store: SettingsStore,
-        settings: AppSettings,
-    ) -> None:
-        self._store = store
-        self._settings = settings
-        self._lock = threading.RLock()
-
-    @property
-    def settings(self) -> AppSettings:
-        """Return the latest successfully persisted immutable settings."""
-
-        with self._lock:
-            return self._settings
-
-    def update(self, **changes: Any) -> AppSettings:
-        """Merge, validate, and atomically persist fields as one serialized update."""
-
-        with self._lock:
-            merged = self._settings.to_mapping()
-            merged.update(changes)
-            updated = AppSettings.from_mapping(merged)
-            self._store.save(updated)
-            self._settings = updated
-            return updated
-
-    def set_tag_csv_path(self, path: Path) -> AppSettings:
-        """Persist the absolute path of the last successful CSV import."""
-
-        local_path = Path(path)
-        if not local_path.is_absolute():
-            raise SettingsError("tag CSV path must be absolute")
-        return self.update(tag_csv_path=str(local_path))
-
-    def set_image_cache_limit_bytes(self, value: int) -> AppSettings:
-        """Persist the image disk-cache capacity after shared validation."""
-
-        return self.update(image_cache_limit_bytes=value)
-
-    def set_download_directory(self, path: Path) -> AppSettings:
-        """Keep the previous snapshot unless the merged directory setting saves."""
-        local_path = Path(path)
-        if not local_path.is_absolute():
-            raise SettingsError("下载目录必须使用绝对路径。")
-        return self.update(download_directory=str(local_path))
 

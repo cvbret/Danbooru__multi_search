@@ -4,7 +4,7 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第二轮结构整改
 - 当前里程碑：`第二轮结构整改完成`
-- 当前主要任务：`R6-001 通用结果与路径契约`
+- 当前主要任务：`R6-002 设置、结果输出与启动装配分离`
 - 当前状态：待提交
 - 执行状态：用户于 2026-11-18 明确要求继续；按第 45 节推进第二轮结构整改，沿用已通过结果，只执行当前修改的直接相关检查。
 - 最后更新：2026-11-18
@@ -3029,7 +3029,7 @@ M2 里程碑回归检查与提交。
 
 ### 45.9 当前任务 R6-001
 
-- 状态：待提交；起点 `03755f4444bb2926b635ffe64d6288599b7faa86`，从干净工作树开始。目标是解除通用结果与平台/Eagle、路径契约与 Qt 路径实现之间的类型引用环，保留现有公开入口及实际行为。
+- 状态：已完成；起点 `03755f4444bb2926b635ffe64d6288599b7faa86`，从干净工作树开始。目标是解除通用结果与平台/Eagle、路径契约与 Qt 路径实现之间的类型引用环，保留现有公开入口及实际行为。
 - 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
 - 准确生产/打包范围 8 个路径：新增 `src/danbooru_multi_search/core/results.py`；修改 `platform/contracts.py`、`platform/paths.py`、`integrations/eagle/contracts.py`、`integrations/eagle/client.py`、`integrations/eagle/stubs.py`、`app/eagle_runtime.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用同一 src 前缀。不修改平台包初始化、具体适配器、bootstrap/settings、数据库或 Eagle 请求流程。
 - 准确测试范围 3 个路径：`tests/test_platform.py`、`tests/test_eagle_architecture.py`、`tests/test_windows_packaging.py`。现有 bootstrap/Eagle 服务、CLI 或运行时检查只选必要原节点，不预先修改其他文件。
@@ -3041,3 +3041,21 @@ M2 里程碑回归检查与提交。
 - 开发已冻结准确 8 个生产/打包及 3 个测试路径，另含本记录。结果类、TypeVar 和路径类各只有一份定义，旧出口保持同对象，Eagle 直接消费者不再引用平台结果；11 个文件语法/空白及 spec 完整无重复检查通过。独立静态审查暂无确定阻断，等待最终聚焦验证。
 - 本轮 16 个不同直接场景通过：类型/路径/运行时提示及真实冷导入 6 项，必要旧平台/Eagle/bootstrap/运行时关闭/spec 10 项。冷检查实际执行真实 ValueResult、client、注入内存 opener 的 urllib、stub 与应用服务，并阻止 Qt/UI/platform。新测试先后修正缺少 app/info 原必填字段，以及遗漏测试自身显式连接请求的计数断言；按原服务 5 次加显式 1 次共 6 次复查该单项通过，生产校验及请求流程未改，已通过 5 项未重跑。检查数据 `.tools/pytest-r6-001-*` 保留且不提交，没有全量回归、完整构建、原生界面、真实 Eagle 或 Linux，成果窗口未操作。
 - reviewer 最终独立选择 9 项全部通过，0.70 秒。覆盖三结果类/TypeVar 的同对象、默认/泛型/不可变行为、路径三旧出口同类、协议方法与属性的真实类型提示、六目录重复创建及两文件边界、只解析不写盘、真实 Eagle 冷链、bootstrap 实际创建、Eagle 等待响应头关闭及 spec。准确 8 个生产/打包、3 个测试及本记录共 12 个路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r6-001-reviewer*` 保留且不提交，没有全量回归或构建。
+- 本地提交：`2d7072dd33fc47c6e92e880827bdc77b5b8bef5d`（`refactor(core): separate shared results and path contracts`），准确包含批准的 12 个路径。提交后工作树与暂存区干净，未推送。
+
+### 45.10 当前任务 R6-002
+
+- 状态：待提交；起点 `2d7072dd33fc47c6e92e880827bdc77b5b8bef5d`，从干净工作树开始。目标是将设置值、文件存储、更新协调、检查结果输出及启动装配放入各自实际负责的模块，删除已迁出的内部实现。
+- 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
+- 准确生产/打包范围 13 个物理路径：新增 `src/danbooru_multi_search/app/bootstrap.py`、`app/settings.py`、`storage/settings.py`；删除 `core/bootstrap.py`；修改 `core/settings.py`、`core/__init__.py`、`__main__.py`、`ui/launcher.py`、`app/download_submission.py`、`ui/appearance.py`、`ui/downloads.py`、`ui/pool_downloads.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用同一 src 前缀，不修改 CLI 行为、脚本、pyproject、schema、QML 或既有设置格式。
+- 准确测试范围 22 个路径：`tests/test_settings.py`、`test_appearance.py`、`test_download_submission.py`、`test_download_ui.py`、`test_pool_download_ui.py`、`test_m2_qml.py`、`test_qml_appearance.py`、`test_qml_downloads.py`、`test_bootstrap.py`、`m2_qml_harness.py`、`test_qml_checkpoints.py`、`test_qml_artist_combinations.py`、`test_qml_favorites.py`、`test_qml_eagle.py`、`test_qml_favorite_collection.py`、`test_qml_favorite_transfer.py`、`test_qml_pool_reader.py`、`test_qml_saved_queries.py`、`test_qml_shell.py`、`test_qml_session_state.py`、`test_import_boundaries.py`、`test_windows_packaging.py`。测试短路径均沿用 tests 前缀；多数仅更新导入，包含 download_submission 的进程代码字符串及 qml_pool_reader 的两处函数内导入。不据文件清单重跑全部测试。
+- core/settings 保留 AppSettings 的现有 13 个字段、version 1、SettingsError、三个缓存常量、默认值及全部原校验。读取忽略未知字段并补齐缺失字段；download_directory 读取时仅要求字符串，绝对路径要求仍在 setter。直接构造 AppSettings 和 SettingsStore.save 不增加自动校验。
+- SettingsStore 完整迁入 storage/settings，保留 UTF-8 中文 JSON、缩进/排序/末尾换行，以及同目录临时文件、flush、fsync、关闭文件后 replace、finally 清理的顺序。父目录 mkdir 继续位于原 try 外，清理错误也不扩大包装范围。SettingsController 完整迁入 app/settings，同一 RLock 覆盖快照读取、合并、校验、保存，保存成功后才更新内存对象，失败保留旧对象。
+- RuntimeContext 和 initialize_runtime 迁入 app/bootstrap。平台装配、解析/创建目录、读取配置、仅首次保存默认配置、初始化数据库顺序保持；已有合法配置补默认值后不自动重写，损坏配置不被默认值覆盖。launcher 的正式 runtime 与临时目录分支继续创建一个共享设置控制器，外观、缓存、下载/整池及 CSV 保存仍使用该对象。
+- 已核对旧 core.bootstrap、core.settings.SettingsStore/SettingsController 没有需保留的包级公开承诺；消费者迁移后删除旧内部实现，不保留空转发或重复类。core 包说明同步到实际职责，app.bootstrap 仍承担平台装配，不承诺无 Qt。
+- 验收使用原设置读写/并发合并/保存失败/重启、必要首次与已有/损坏配置初始化、实际替换失败保留旧文件和快照、关闭及正式装配/CLI/spec。独立进程实际执行 core 值、storage 读写和 app 更新，阻止 Qt/UI/platform；不对 app.bootstrap 作同一限制。只执行修改及直接消费者的聚焦检查，完整回归与构建继续留在结构整改里程碑；提交编号待完成记录。
+- 实际消费者补查确认同一 core 读写职责还有 check_output：本批追加删除 `src/danbooru_multi_search/core/check_output.py`、新增 `storage/check_output.py`、修改 `tests/test_check_output.py`，最终准确范围为 15 个生产/打包及 23 个测试路径，另含本记录共 39 个物理路径。其唯一生产消费者 __main__、spec 和导入/资源检查已在原范围；没有旧路径的公开承诺，不保留转发，不修改脚本。
+- check_output 的函数及两个异常类整体迁移。保留缺少父目录拒绝且不创建、lexists 拒绝已有路径、同目录临时文件写入/flush/fsync/关闭后 os.link 原子发布，不能改为 replace；竞争失败不能覆盖胜出文件。错误继承关系/包装文字、descriptor 和临时文件清理及其 OSError 忽略范围原样保留；JSON 的中文原文、禁止 NaN、排序、无额外缩进及末尾换行不变。直接复用原竞争/序列化/fsync/清理检查，冷进程实际写入并验证重复发布拒绝，CLI 输出契约保持。
+- 开发已冻结准确 15 个生产/打包及 23 个测试物理路径，另含本记录。36 个现存代码文件语法/空白通过，两个旧 core 文件已删除，spec 四个新模块完整无重复。静态逐项比较确认 AppSettings 校验、Store/Controller、RuntimeContext 和初始化正文保持，check_output 整份文件逐字一致；原子替换与硬链接不覆盖各自保持，未留下旧内部转发。独立生产静态审查暂无确定阻断，等待最终聚焦验证。
+- 本轮 31 个不同直接场景全部通过：值/存储/启动/输出/真实冷进程 19 项，0.83 秒；必要消费者/装配/CLI/资源 12 项，5.84 秒。覆盖真实 replace 失败保留旧文件字节和内存对象并清理临时文件、并发字段合并、旧配置默认/不重写及损坏配置阻止数据库初始化、检查结果竞争/序列化/fsync/清理、阻断 Qt/UI/platform 的实际读写和更新、唯一设置实例的两装配分支、外观/普通与整池下载保存失败、透明度实际鼠标键盘保存失败、M2 和 CLI 原子结果/已有结果拒绝/spec。未按 23 个测试文件重跑整组；数据 `.tools/pytest-r6-002-{values,compat}` 保留且不提交，没有全量回归、完整构建、原生界面、真实服务或 Linux，成果窗口未操作。
+- reviewer 最终独立选择 20 项全部通过，4.73 秒。覆盖原校验位置/旧默认、真实 replace 失败保留旧字节和同一快照、并发合并、合法/损坏配置启动边界、输出竞争/fsync/无父目录/序列化失败、实际无 Qt/UI/platform 的设置及输出、外观和普通/池下载设置失败、两装配分支启动关闭、CLI 原子结果及启动前拒绝已有输出/spec；唯一控制器注入同时经生产静态确认。准确 15 个生产/打包、23 个测试及本记录共 39 个物理路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r6-002-reviewer*` 保留且不提交，没有全量回归或构建。

@@ -13,7 +13,7 @@ from danbooru_multi_search.core.downloads import (
 )
 from danbooru_multi_search.core.pool_downloads import PoolDownloadPlan
 from danbooru_multi_search.core.pools import DanbooruPool
-from danbooru_multi_search.core.settings import SettingsController
+from danbooru_multi_search.app.settings import SettingsController
 from danbooru_multi_search.danbooru.models import DanbooruPost
 
 

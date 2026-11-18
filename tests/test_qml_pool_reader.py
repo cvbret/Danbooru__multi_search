@@ -18,7 +18,7 @@ def start_reader(*, narrow=False, variants=None, omitted=(), data_root=None, ide
     if data_root is None:
         engine, root, bridge, session, network = window()
     else:
-        from danbooru_multi_search.core.bootstrap import initialize_runtime
+        from danbooru_multi_search.app.bootstrap import initialize_runtime
         from tests.m2_qml_harness import create_m2_qml_test_engine
         from tests.test_pool_requests import FakeManager
         network = FakeManager()
@@ -220,7 +220,7 @@ def test_persistent_reader_reopens_by_post_and_actual_offset_then_restarts_and_r
 
 
 def test_reader_progress_read_error_can_be_retried_by_real_minimum_window_button(tmp_path, monkeypatch):
-    from danbooru_multi_search.core.bootstrap import initialize_runtime
+    from danbooru_multi_search.app.bootstrap import initialize_runtime
     from danbooru_multi_search.core.pool_progress import PoolProgressError
     from danbooru_multi_search.storage.pool_progress import PoolProgressRepository
     from tests.test_pool_progress import progress

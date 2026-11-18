@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 
 import pytest
 
+from danbooru_multi_search.app.settings import SettingsController
 from danbooru_multi_search.core.settings import (
     DEFAULT_IMAGE_CACHE_LIMIT_BYTES,
     MAX_IMAGE_CACHE_LIMIT_BYTES,
     MIN_IMAGE_CACHE_LIMIT_BYTES,
     AppSettings,
-    SettingsController,
     SettingsError,
-    SettingsStore,
 )
+from danbooru_multi_search.storage.settings import SettingsStore
 
 
 def test_missing_settings_returns_default_without_writing(tmp_path):
@@ -204,3 +205,49 @@ def test_default_download_directory_failure_retains_previous_value(tmp_path, mon
     with pytest.raises(SettingsError):
         controller.set_download_directory(tmp_path / "new")
     assert controller.settings is previous and store.load_or_default(AppSettings()) == previous
+
+
+def test_direct_values_and_store_save_keep_validation_explicit(tmp_path):
+    settings = AppSettings.from_mapping(
+        {"download_directory": "relative downloads", "future_option": True}
+    )
+    assert settings.download_directory == "relative downloads"
+    assert not hasattr(settings, "future_option")
+
+    unvalidated = AppSettings(schema_version=9, theme="future-theme")
+    store = SettingsStore(tmp_path / "settings.json")
+    store.save(unvalidated)
+    assert json.loads(store.path.read_text(encoding="utf-8")) == unvalidated.to_mapping()
+    with pytest.raises(SettingsError, match="Unsupported settings schema version: 9"):
+        store.load_or_default(AppSettings())
+
+
+def test_replace_failure_keeps_disk_and_confirmed_snapshot_and_cleans_temp(
+    tmp_path, monkeypatch
+):
+    from danbooru_multi_search.storage import settings as settings_storage
+
+    store = SettingsStore(tmp_path / "config" / "settings.json")
+    initial = AppSettings(theme="light", download_directory="relative downloads")
+    store.save(initial)
+    previous_bytes = store.path.read_bytes()
+    controller = SettingsController(store, initial)
+    attempted = []
+
+    def fail_replace(source, destination):
+        source = Path(source)
+        attempted.append((source, destination))
+        pending = json.loads(source.read_text(encoding="utf-8"))
+        assert pending["theme"] == "dark"
+        assert pending["download_directory"] == initial.download_directory
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(settings_storage.os, "replace", fail_replace)
+    with pytest.raises(SettingsError, match="Unable to save settings.*simulated replace failure"):
+        controller.update(theme="dark")
+
+    assert len(attempted) == 1 and attempted[0][1] == store.path
+    assert controller.settings is initial
+    assert store.path.read_bytes() == previous_bytes
+    assert store.load_or_default(AppSettings()) == initial
+    assert list(store.path.parent.glob(".settings.json.*.tmp")) == []

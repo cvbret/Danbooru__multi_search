@@ -4,7 +4,7 @@ import pytest
 from PySide6.QtCore import QPointF
 from PySide6.QtTest import QTest
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.core.artist_combinations import ArtistCombinationDraft, ArtistCombinationMode
 from danbooru_multi_search.core.favorites import FavoriteCandidate, FavoriteTagCategory
 from danbooru_multi_search.storage.artist_combinations import ArtistCombinationRepository

@@ -7,7 +7,9 @@ import pytest
 from PySide6.QtCore import QUrl
 
 from danbooru_multi_search.core.downloads import DownloadError, DownloadTaskState
-from danbooru_multi_search.core.settings import AppSettings, SettingsController, SettingsError, SettingsStore
+from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.core.settings import AppSettings, SettingsError
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.danbooru.details import DanbooruDetailController
 from danbooru_multi_search.danbooru.gallery import DanbooruPostListModel
 from danbooru_multi_search.danbooru.tag_translation import TagTranslationStore

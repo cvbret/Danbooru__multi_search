@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from PySide6.QtCore import QUrl, QPointF
 
 import danbooru_multi_search.app.favorite_transfer as transfer_app
-from danbooru_multi_search.core.bootstrap import initialize_runtime
+from danbooru_multi_search.app.bootstrap import initialize_runtime
 from danbooru_multi_search.core.favorites import FavoriteCandidate
 from danbooru_multi_search.storage.database import Database
 from danbooru_multi_search.storage.favorites import FavoriteRepository

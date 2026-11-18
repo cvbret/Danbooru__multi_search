@@ -12,8 +12,9 @@ from PySide6.QtTest import QTest
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtQml import QQmlExpression
 
-from danbooru_multi_search.core.bootstrap import initialize_runtime
-from danbooru_multi_search.core.settings import AppSettings, SettingsError, SettingsStore
+from danbooru_multi_search.app.bootstrap import initialize_runtime
+from danbooru_multi_search.core.settings import AppSettings, SettingsError
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.ui.launcher import create_qml_engine
 from danbooru_multi_search.ui.window_state import ScreenGeometry, WindowGeometry

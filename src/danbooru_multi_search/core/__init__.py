@@ -1,2 +1,2 @@
-"""Application bootstrap, settings, and platform-neutral domain services."""
+"""Platform-neutral domain values, validation and reusable rules."""
 

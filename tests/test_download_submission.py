@@ -8,12 +8,12 @@ import pytest
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.core.downloads import DownloadConflictPolicy, DownloadError
 from danbooru_multi_search.core.pools import DanbooruPool, PoolCategory
+from danbooru_multi_search.app.settings import SettingsController
 from danbooru_multi_search.core.settings import (
     AppSettings,
-    SettingsController,
     SettingsError,
-    SettingsStore,
 )
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.danbooru.models import DanbooruPost
 
 
@@ -165,7 +165,9 @@ sys.meta_path.insert(0, RejectQtAndUi())
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.core.downloads import DownloadRequest
 from danbooru_multi_search.core.pools import DanbooruPool, PoolCategory
-from danbooru_multi_search.core.settings import AppSettings, SettingsController, SettingsStore
+from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.core.settings import AppSettings
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.storage.database import Database
 from danbooru_multi_search.storage.downloads import DownloadRepository

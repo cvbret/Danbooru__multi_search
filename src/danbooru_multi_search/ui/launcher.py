@@ -14,11 +14,11 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtNetwork import QNetworkAccessManager, QSslSocket
 
+from danbooru_multi_search.app.settings import SettingsController
 from danbooru_multi_search.core.settings import (
     AppSettings,
-    SettingsController,
-    SettingsStore,
 )
+from danbooru_multi_search.storage.settings import SettingsStore
 from danbooru_multi_search.danbooru import (
     DanbooruDetailController,
     DanbooruM2QueryController,
@@ -84,7 +84,7 @@ from danbooru_multi_search.ui.session_state import BrowserSessionController
 from danbooru_multi_search.ui.window_state import ScreenGeometry, WindowGeometry
 
 if TYPE_CHECKING:
-    from danbooru_multi_search.core.bootstrap import RuntimeContext
+    from danbooru_multi_search.app.bootstrap import RuntimeContext
 
 
 def main_qml_path() -> Path:

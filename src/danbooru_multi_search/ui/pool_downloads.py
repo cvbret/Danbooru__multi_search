@@ -10,7 +10,8 @@ from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 from danbooru_multi_search.core.downloads import DownloadError
 from danbooru_multi_search.core.pool_downloads import PoolDownloadPlan
 from danbooru_multi_search.core.pools import DanbooruPool, PoolCategory
-from danbooru_multi_search.core.settings import SettingsController, SettingsError
+from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.core.settings import SettingsError
 from danbooru_multi_search.app.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
 from danbooru_multi_search.ui.download_models import PoolDownloadListModel, PoolDownloadPageListModel

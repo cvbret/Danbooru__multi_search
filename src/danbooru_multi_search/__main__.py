@@ -13,8 +13,8 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QGuiApplication
 
 from danbooru_multi_search import __version__
-from danbooru_multi_search.core.bootstrap import initialize_runtime
-from danbooru_multi_search.core.check_output import (
+from danbooru_multi_search.app.bootstrap import initialize_runtime
+from danbooru_multi_search.storage.check_output import (
     CheckOutputError,
     write_check_output,
 )
@@ -28,7 +28,7 @@ from danbooru_multi_search.platform import PlatformAdapter, create_platform_adap
 from danbooru_multi_search.ui.launcher import launch_gui, run_gui_smoke_check
 
 if TYPE_CHECKING:
-    from danbooru_multi_search.core.bootstrap import RuntimeContext
+    from danbooru_multi_search.app.bootstrap import RuntimeContext
 
 
 ORGANIZATION_NAME = "DanbooruMultiSearch"
