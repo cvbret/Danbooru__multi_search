@@ -59,6 +59,7 @@ from danbooru_multi_search.ui.artist_combinations import ArtistCombinationContro
 from danbooru_multi_search.storage.saved_queries import SavedQueryRepository
 from danbooru_multi_search.ui.saved_queries import SavedQueryController
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
+from danbooru_multi_search.app.query_checkpoints import QueryCheckpointService
 from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
 from danbooru_multi_search.storage.cache_protection import CacheProtectionRepository
 from danbooru_multi_search.ui.cache_protection import CacheProtectionController
@@ -342,7 +343,11 @@ def _create_window(tmp_path):
         access=write_access, favorite_repository=favorite_repository)
     saved_queries = SavedQueryController(SavedQueryRepository(database), bridge, write_access)
     checkpoint_repository = QueryCheckpointRepository(database)
-    checkpoints = QueryCheckpointController(checkpoint_repository, session._repository, core, bridge, write_access)
+    checkpoint_service = QueryCheckpointService(checkpoint_repository, session._repository, core, write_access)
+    checkpoints = QueryCheckpointController(checkpoint_repository, checkpoint_service, bridge, write_access)
+    executor.before_attempt = checkpoint_service.persist_execution
+    executor.before_abandon = checkpoint_service.persist_execution
+    executor.before_publish = checkpoint_service.persist_execution
     settings_controller = SettingsController(
         SettingsStore(tmp_path / "settings.json"), AppSettings()
     )
@@ -370,7 +375,7 @@ def _create_window(tmp_path):
     collection.poolRequested.connect(pool_navigation.openFavoritePool)
     images = ImageCacheController(tmp_path / "image-cache")
     protection = CacheProtectionController(CacheProtectionRepository(database), favorites, images, access=write_access)
-    cleanup = CacheCleanupController(session._repository, checkpoint_repository, checkpoints, session, write_access, images)
+    cleanup = CacheCleanupController(session._repository, checkpoint_repository, checkpoint_service, session, write_access, images)
     factory = ImageNetworkAccessManagerFactory(images)
     configure_controls_style()
     engine = QQmlApplicationEngine()
@@ -424,6 +429,7 @@ def _create_window(tmp_path):
         "combinations": combinations,
         "saved_queries": saved_queries,
         "checkpoints": checkpoints,
+        "checkpoint_service": checkpoint_service,
         "cache_protection": protection,
         "cache_cleanup": cleanup,
         "selection": selection,
@@ -450,6 +456,8 @@ def _close_window(values) -> None:
     values["pool_navigation"].shutdown()
     values["pool_browser"].shutdown()
     values["cache_cleanup"].shutdown()
+    values["checkpoints"].begin_shutdown()
+    values["checkpoint_service"].begin_shutdown()
     values["download_ui"].shutdown()
     values["download_manager"].shutdown()
     values["transfer"].begin_shutdown()
@@ -465,8 +473,7 @@ def _close_window(values) -> None:
     values["detail_favorites"].shutdown()
     values["bridge"].beginClosing()
     values["core"].shutdown()
-    values["checkpoints"].begin_shutdown()
-    values["checkpoints"].finish_shutdown()
+    values["checkpoint_service"].finish_shutdown()
     values["session"].begin_shutdown()
     values["detail_navigation"].shutdown()
     values["appearance"].shutdown()

@@ -12,6 +12,7 @@ from danbooru_multi_search.storage.favorites import FavoriteRepository
 from danbooru_multi_search.storage.history import HistoryRepository
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
 from danbooru_multi_search.tasks import TaskAttemptResult
+from danbooru_multi_search.app.query_checkpoints import QueryCheckpointService
 from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
 from danbooru_multi_search.ui.query_state import M2QueryBridgeController
 from danbooru_multi_search.ui.session_state import BrowserSessionController
@@ -28,9 +29,13 @@ def build(tmp_path, *, scheduler_type=None):
     shared = controller_for(FavoriteRepository(database))
     bridge = M2QueryBridgeController(harness.controller)
     repository = QueryCheckpointRepository(database)
-    checkpoints = QueryCheckpointController(repository, history, harness.controller, bridge, shared._writes.access)
+    service = QueryCheckpointService(repository, history, harness.controller, shared._writes.access)
+    checkpoints = QueryCheckpointController(repository, service, bridge, shared._writes.access)
+    harness.executor.before_attempt = service.persist_execution
+    harness.executor.before_abandon = service.persist_execution
+    harness.executor.before_publish = service.persist_execution
     session = BrowserSessionController(history, (ScreenGeometry(WindowGeometry(0, 0, 1280, 820), primary=True),),
-        m2_controller=harness.controller, query_bridge=bridge, checkpoint_controller=checkpoints)
+        m2_controller=harness.controller, query_bridge=bridge, checkpoint_service=service)
     checkpoints.attach_session(session)
     return harness, database, history, shared, bridge, repository, checkpoints, session
 
@@ -38,8 +43,9 @@ def build(tmp_path, *, scheduler_type=None):
 def close(values):
     harness, database, history, shared, bridge, repository, checkpoints, session = values
     checkpoints.begin_shutdown()
+    checkpoints._service.begin_shutdown()
     shared.shutdown()
-    checkpoints.finish_shutdown()
+    checkpoints._service.finish_shutdown()
     harness.controller.shutdown()
     session.begin_shutdown()
     session.detach_events()
@@ -324,8 +330,8 @@ def test_aborted_claim_revokes_only_target_history_and_keeps_other_execution_fin
     assert harness.controller.definition.normalized_expression == "b"
     claimed = repository.get_for_history(target.history_id)
     assert claimed.owner != target.owner and not claimed.checkpoint.execution.active
-    assert all(lease.history_id != target.history_id for lease in checkpoints._leases.values())
-    assert any(lease.history_id == other.history_id for lease in checkpoints._leases.values())
+    assert all(lease.history_id != target.history_id for lease in checkpoints._service._leases.values())
+    assert any(lease.history_id == other.history_id for lease in checkpoints._service._leases.values())
     close(values)
     final = repository.get_for_history(other.history_id)
     assert final.owner == other.owner and not final.checkpoint.execution.active

@@ -40,6 +40,7 @@ from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepos
 from danbooru_multi_search.storage.cache_protection import CacheProtectionRepository
 from danbooru_multi_search.storage.downloads import DownloadRepository
 from danbooru_multi_search.app.favorites import FavoriteWriteService
+from danbooru_multi_search.app.query_checkpoints import QueryCheckpointService
 from danbooru_multi_search.app.write_access import SharedWriteAccess
 from danbooru_multi_search.app.download_manager import PersistentDownloadManager
 from danbooru_multi_search.app.download_submission import DownloadSubmissionService
@@ -300,21 +301,26 @@ class _UiSession(QObject):
         else:
             resolved_screen_geometries = tuple(screen_geometries)
         checkpoint_repository = QueryCheckpointRepository(database)
-        self.query_checkpoints = QueryCheckpointController(
-            checkpoint_repository, self.history_repository, self.query_controller,
-            self.query_bridge, self.write_access, self,
+        self.checkpoint_service = QueryCheckpointService(
+            checkpoint_repository, self.history_repository, self.query_controller, self.write_access,
         )
+        self.query_checkpoints = QueryCheckpointController(
+            checkpoint_repository, self.checkpoint_service, self.query_bridge, self.write_access, self,
+        )
+        self.query_executor.before_attempt = self.checkpoint_service.persist_execution
+        self.query_executor.before_abandon = self.checkpoint_service.persist_execution
+        self.query_executor.before_publish = self.checkpoint_service.persist_execution
         self.session_controller = BrowserSessionController(
             self.history_repository,
             resolved_screen_geometries,
             self,
             m2_controller=self.query_controller,
             query_bridge=self.query_bridge,
-            checkpoint_controller=self.query_checkpoints,
+            checkpoint_service=self.checkpoint_service,
         )
         self.query_checkpoints.attach_session(self.session_controller)
         self.cache_cleanup = CacheCleanupController(
-            self.history_repository, checkpoint_repository, self.query_checkpoints,
+            self.history_repository, checkpoint_repository, self.checkpoint_service,
             self.session_controller, self.write_access, self.image_cache_controller, self,
         )
         self._closed = False
@@ -340,6 +346,7 @@ class _UiSession(QObject):
             self.download_ui.shutdown,
             self.download_manager.begin_shutdown,
             self.query_checkpoints.begin_shutdown,
+            self.checkpoint_service.begin_shutdown,
             self.favorite_transfer.begin_shutdown,
             self.artist_combinations.shutdown,
             self.saved_queries.shutdown,
@@ -352,7 +359,7 @@ class _UiSession(QObject):
             self.eagle_runtime.shutdown,
             self.pool_download_manager.finish_shutdown,
             self.pool_progress.finish_shutdown,
-            self.query_checkpoints.finish_shutdown,
+            self.checkpoint_service.finish_shutdown,
             self.download_manager.shutdown,
             self.appearance_controller.shutdown,
             self.query_controller.shutdown,
@@ -400,6 +407,7 @@ class _UiSession(QObject):
             and self.artist_combinations._closed
             and self.saved_queries._closed
             and self.query_checkpoints._closed
+            and self.checkpoint_service.closed
             and self.cache_cleanup._closed
             and self.cache_protection._closed
             and self.favorite_collection._closed

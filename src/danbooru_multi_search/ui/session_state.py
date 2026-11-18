@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from enum import IntEnum
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Sequence
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -19,13 +19,16 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from danbooru_multi_search.danbooru.query_controller import (
-    DanbooruM2QueryController,
+from danbooru_multi_search.danbooru.query_controller import DanbooruM2QueryController
+from danbooru_multi_search.danbooru.query_events import (
     GalleryQueryAccepted,
     GalleryQueryOrigin,
     GalleryResultEvent,
     GalleryViewDefinitionChanged,
 )
+if TYPE_CHECKING:
+    from danbooru_multi_search.app.query_checkpoints import QueryCheckpointService
+
 from danbooru_multi_search.storage import (
     GalleryPosition,
     HistoryError,
@@ -265,13 +268,13 @@ class BrowserSessionController(QObject):
         *,
         m2_controller: DanbooruM2QueryController,
         query_bridge: M2QueryBridgeController,
-        checkpoint_controller=None,
+        checkpoint_service: QueryCheckpointService | None = None,
     ) -> None:
         super().__init__(parent)
         self._repository = repository
         self._m2_controller = m2_controller
         self._query_bridge = query_bridge
-        self._checkpoint_controller = checkpoint_controller
+        self._checkpoint_service = checkpoint_service
         self._posts_model = m2_controller.posts_model
         self._history_model = RecentQueryListModel(self)
         self._notice_text = ""
@@ -867,7 +870,7 @@ class BrowserSessionController(QObject):
                     view_generation=0,
                 )
         try:
-            query = self._checkpoint_controller.record_accepted(value) if self._checkpoint_controller is not None else self._repository.record_accepted_definition(
+            query = self._checkpoint_service.record_accepted(value) if self._checkpoint_service is not None else self._repository.record_accepted_definition(
                 definition=value.definition,
                 display_text=value.display_text,
                 page=1,
@@ -875,8 +878,8 @@ class BrowserSessionController(QObject):
                 used_at=value.accepted_at,
             )
         except (HistoryError, TypeError, ValueError) as exc:
-            if self._checkpoint_controller is not None:
-                self._checkpoint_controller.persistence_failed(exc)
+            if self._checkpoint_service is not None:
+                self._checkpoint_service.persistence_failed(exc)
             self._m2_remove_mapping(identity, clear_display=True)
             if value.origin == GalleryQueryOrigin.HISTORY:
                 self._discard_unbound_m2_history_restore()
@@ -1148,13 +1151,13 @@ class BrowserSessionController(QObject):
                 )
                 token_matches_target = True
         try:
-            query = self._checkpoint_controller.record_view(source.history_id, event) if self._checkpoint_controller is not None else self._repository.record_view_definition(
+            query = self._checkpoint_service.record_view(source.history_id, event) if self._checkpoint_service is not None else self._repository.record_view_definition(
                 source_query_id=source.history_id,
                 definition=event.definition,
             )
         except (HistoryError, TypeError, ValueError) as exc:
-            if self._checkpoint_controller is not None:
-                self._checkpoint_controller.persistence_failed(exc)
+            if self._checkpoint_service is not None:
+                self._checkpoint_service.persistence_failed(exc)
             self._m2_remove_mapping(
                 identity,
                 clear_display=event.applied_to_gallery,
@@ -1200,13 +1203,13 @@ class BrowserSessionController(QObject):
         if link is None:
             return
         try:
-            updated = self._checkpoint_controller.record_result(link.history_id, event) if self._checkpoint_controller is not None else self._repository.update_result_summary(
+            updated = self._checkpoint_service.record_result(link.history_id, event) if self._checkpoint_service is not None else self._repository.update_result_summary(
                 link.history_id,
                 event.summary,
             )
         except (HistoryError, TypeError, ValueError) as exc:
-            if self._checkpoint_controller is not None:
-                self._checkpoint_controller.persistence_failed(exc)
+            if self._checkpoint_service is not None:
+                self._checkpoint_service.persistence_failed(exc)
             self._m2_remove_mapping(identity, clear_display=True)
             self._set_notice(f"查询结果摘要保存失败：{exc}")
             return

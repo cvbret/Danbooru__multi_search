@@ -21,7 +21,7 @@ def setup(tmp_path):
     harness, database, history, shared, bridge, repository, checkpoints, session = values
     images = ImageCacheController(tmp_path / "images")
     protection = CacheProtectionController(CacheProtectionRepository(database), shared, images, access=shared._writes.access)
-    cleanup = CacheCleanupController(history, repository, checkpoints, session, shared._writes.access, images)
+    cleanup = CacheCleanupController(history, repository, checkpoints._service, session, shared._writes.access, images)
     harness.controller.start_standard("a", limits=QueryExecutionLimits(page_size=1))
     harness.dispatch()
     harness.succeed((_post(1, "a"),))
@@ -66,7 +66,7 @@ def test_checkpoint_clear_accepts_normal_progress_and_keeps_local_filtering_and_
         assert repository.capture_cleanup() == () and history.latest_query() is not None
         assert harness.executor.snapshot.state is QueryExecutionState.PARTIAL_CANCELLED
         assert harness.model.posts is before_posts
-        assert not checkpoints._leases
+        assert not checkpoints._service._leases
         assert harness.controller.update_view(filter_spec=ResultFilterSpec(minimum_score=0))
         assert repository.capture_cleanup() == () and "保存失败" not in checkpoints.messageText
     finally:
@@ -104,7 +104,7 @@ def test_foreign_claim_invalidates_confirmation_without_overwriting_its_owner(tm
         claimed = repository.claim(before, before.checkpoint.source)
         assert not cleanup.confirmCleanup(token)
         assert repository.get_for_history(before.history_id) == claimed
-        assert not checkpoints._leases
+        assert not checkpoints._service._leases
     finally:
         finish(data)
 
@@ -123,7 +123,7 @@ def test_deleted_records_retire_writes_before_first_history_notification(tmp_pat
             if observed or repository.get_for_history(identifier) is not None:
                 return
             observed.append(True)
-            assert not checkpoints._leases
+            assert not checkpoints._service._leases
             if action == "view":
                 assert harness.controller.update_view(filter_spec=ResultFilterSpec(minimum_score=0))
             else:
@@ -149,8 +149,8 @@ def test_delete_transaction_failure_keeps_current_lease_and_checkpoint(tmp_path)
         with database.connect() as connection:
             connection.execute("CREATE TRIGGER reject_delete BEFORE DELETE ON query_checkpoints BEGIN SELECT RAISE(ABORT, 'delete failure'); END")
         assert not cleanup.confirmCleanup(cleanup.confirmation["token"])
-        assert repository.capture_cleanup() and checkpoints.current_ownership is not None
-        assert not checkpoints._retired_executions
+        assert repository.capture_cleanup() and checkpoints._service.current_ownership is not None
+        assert not checkpoints._service._retired_executions
         with database.connect() as connection:
             connection.execute("DROP TRIGGER reject_delete")
     finally:
@@ -229,7 +229,7 @@ def test_new_query_from_cancel_notification_is_not_deleted_by_old_confirmation(t
         assert started == [True]
         current = repository.get_for_history(identifier)
         assert current is not None and current.checkpoint.execution.active
-        assert checkpoints.current_ownership.owner == current.owner
+        assert checkpoints._service.current_ownership.owner == current.owner
         assert harness.executor.is_execution_active(harness.executor.current_execution_id)
     finally:
         finish(data)
@@ -255,7 +255,7 @@ def test_new_query_from_own_reservation_notification_keeps_its_checkpoint_and_ne
         current = repository.get_for_history(history.latest_query().id)
         assert started == [True] and current.checkpoint.execution.active
         assert harness.executor.is_execution_active(harness.executor.current_execution_id)
-        assert checkpoints.current_ownership.owner == current.owner
+        assert checkpoints._service.current_ownership.owner == current.owner
         assert "保存失败" not in bridge.errorText
     finally:
         finish(data)

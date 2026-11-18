@@ -118,6 +118,8 @@ _EXPORT_GROUPS = {
     ),
     "danbooru_multi_search.danbooru.query_controller": (
         "DanbooruM2QueryController",
+    ),
+    "danbooru_multi_search.danbooru.query_events": (
         "GalleryQueryAccepted",
         "GalleryQueryOrigin",
         "GalleryResultEvent",

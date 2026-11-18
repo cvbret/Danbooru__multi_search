@@ -9,7 +9,7 @@ from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError
 from danbooru_multi_search.storage.database import Database
 from danbooru_multi_search.storage.history import HistoryRepository
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository
-from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
+from danbooru_multi_search.app.query_checkpoints import build_checkpoint_summary
 from tests.test_query_checkpoints import checkpoint
 
 
@@ -36,7 +36,7 @@ def test_claim_is_revision_checked_and_old_owner_cannot_overwrite_new_owner(tmp_
     assert claimed.owner != record.owner and claimed.revision == record.revision + 1
     with pytest.raises(CheckpointError, match="改变"):
         saved.claim(record, "https://example.invalid")
-    summary = QueryCheckpointController._summary(record.checkpoint)
+    summary = build_checkpoint_summary(record.checkpoint)
     with pytest.raises(CheckpointError):
         history.update_result_summary(query.id, summary, transaction_hook=lambda connection, query: saved.save_in_transaction(
             connection, query.id, record.owner, 0, record.checkpoint, expected=record))
@@ -48,7 +48,7 @@ def test_summary_and_checkpoint_failure_roll_back_together(tmp_path):
     with database.connect() as connection:
         connection.execute("CREATE TRIGGER reject_checkpoint BEFORE UPDATE ON query_checkpoints BEGIN SELECT RAISE(ABORT, 'failure'); END")
     with pytest.raises(Exception, match="failure"):
-        history.update_result_summary(query.id, QueryCheckpointController._summary(record.checkpoint), transaction_hook=lambda connection, query: saved.save_in_transaction(
+        history.update_result_summary(query.id, build_checkpoint_summary(record.checkpoint), transaction_hook=lambda connection, query: saved.save_in_transaction(
             connection, query.id, record.owner, 0, record.checkpoint, expected=record))
     assert saved.get_for_history(query.id) == record and history.get_query(query.id).result_summary is None
 
@@ -60,7 +60,7 @@ def test_source_change_and_abnormal_active_checkpoint_cannot_be_claimed(tmp_path
     from danbooru_multi_search.danbooru.query_types import QueryExecutionState
     active = replace(record.checkpoint, execution=replace(record.checkpoint.execution, active=True, state=QueryExecutionState.RUNNING))
     changed = []
-    history.update_result_summary(query.id, QueryCheckpointController._summary(active), transaction_hook=lambda connection, query: changed.append(saved.save_in_transaction(connection, query.id, record.owner, 0, active, expected=record)))
+    history.update_result_summary(query.id, build_checkpoint_summary(active), transaction_hook=lambda connection, query: changed.append(saved.save_in_transaction(connection, query.id, record.owner, 0, active, expected=record)))
     with pytest.raises(CheckpointError, match="异常结束"):
         saved.claim(changed[0], "https://example.invalid")
 

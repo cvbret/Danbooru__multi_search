@@ -12,7 +12,7 @@ from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError
 from danbooru_multi_search.storage.history import HistoryError, HistoryRepository, HistoryCleanupIdentity
 from danbooru_multi_search.storage.query_checkpoints import QueryCheckpointRepository, CheckpointCleanupIdentity
 from danbooru_multi_search.ui.image_cache import ImageCacheController
-from danbooru_multi_search.ui.query_checkpoints import QueryCheckpointController
+from danbooru_multi_search.app.query_checkpoints import QueryCheckpointService
 from danbooru_multi_search.ui.session_state import BrowserSessionController
 
 
@@ -29,12 +29,12 @@ class CacheCleanupController(QObject):
     changed = Signal()
 
     def __init__(self, history: HistoryRepository, checkpoints: QueryCheckpointRepository,
-                 query_checkpoints: QueryCheckpointController, session: BrowserSessionController,
+                 checkpoint_service: QueryCheckpointService, session: BrowserSessionController,
                  access: SharedWriteAccess, images: ImageCacheController,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._history, self._checkpoints = history, checkpoints
-        self._query_checkpoints, self._session = query_checkpoints, session
+        self._checkpoint_service, self._session = checkpoint_service, session
         self._access, self._images = access, images
         self._pending: _Cleanup | None = None
         self._closed = False
@@ -119,21 +119,19 @@ class CacheCleanupController(QObject):
                 if self._closed or self._pending is not pending:
                     return False
                 if current != pending.identities:
-                    self._query_checkpoints.reconcile_ownership()
+                    self._checkpoint_service.reconcile_ownership()
                     raise ValueError("记录归属已改变，请重新打开清理确认。")
                 owners = self._owners(pending)
-                active = self._query_checkpoints.current_ownership
-                if active is not None and (active.history_id, active.owner) in owners:
-                    self._query_checkpoints._controller.cancel()
+                self._checkpoint_service.cancel_if_owned(owners)
                 if self._closed or self._pending is not pending:
                     return False
                 if pending.kind == "history":
                     if not self._session.clearHistory(expected=pending.identities,
-                        on_cleared=lambda: self._query_checkpoints.retire_checkpoints(owners)):
+                        on_cleared=lambda: self._checkpoint_service.retire_checkpoints(owners)):
                         raise HistoryError(self._session.noticeText or "历史清理未完成。")
                 else:
                     self._checkpoints.clear_checkpoints(expected=pending.identities)
-                    self._query_checkpoints.retire_checkpoints(owners)
+                    self._checkpoint_service.retire_checkpoints(owners)
                     self._session._refresh_history()
                 notice = f"已清理 {pending.count} 条" + ("查询历史及对应检查点。" if pending.kind == "history" else "执行检查点；历史条件和当前画廊已保留。")
             else:
