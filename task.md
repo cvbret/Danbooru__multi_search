@@ -4,9 +4,9 @@
 - 工作目录：`E:\AIProjects\Danbooru__multi_search`
 - 当前阶段：第二轮结构整改
 - 当前里程碑：`第二轮结构整改完成`
-- 当前主要任务：`R6-004 标签补全规则、运行协调与界面分离`
-- 当前状态：待提交
-- 执行状态：用户于 2026-11-18 明确要求继续；按第 45 节推进第二轮结构整改，沿用已通过结果，只执行当前修改的直接相关检查。
+- 当前主要任务：`R6-005 结构整改里程碑统一验证`
+- 当前状态：已完成
+- 执行状态：第二轮结构整改与统一里程碑验证均已完成；后续 M5 采集功能尚未开始。
 - 最后更新：2026-11-18
 
 ## 1. 阶段进度
@@ -3080,7 +3080,7 @@ M2 里程碑回归检查与提交。
 
 ### 45.12 当前任务 R6-004
 
-- 状态：待提交；起点 `fef7638a9f62f1a6ee651ade34b923c900516c03`，从干净工作树开始。目标是把标签补全的纯规则、实际运行协调和界面模型分开，删除旧混合模块中已迁出的实现及仅为测试保留的私有转发。
+- 状态：已完成；起点 `fef7638a9f62f1a6ee651ade34b923c900516c03`，从干净工作树开始。目标是把标签补全的纯规则、实际运行协调和界面模型分开，删除旧混合模块中已迁出的实现及仅为测试保留的私有转发。
 - 负责人：developer 编码及直接检查；reviewer 独立审查/聚焦验证；intergrator 获准后精确本地提交；主 Agent 维护范围与状态。
 - 准确生产/打包范围 10 个路径：新增 `src/danbooru_multi_search/danbooru/tag_types.py`、`app/tag_suggestions.py`、`ui/autocomplete.py`；修改 `danbooru/autocomplete.py`、`danbooru/tags.py`、`danbooru/tag_syntax.py`、`danbooru/tag_index.py`、`danbooru/__init__.py`、`ui/launcher.py`、`packaging/windows/DanbooruMultiSearch.spec`。包内短路径沿用 src 前缀，不修改 QML、tag_translation 共享快照实现、实际 HTTP/队列实现或设置格式。
 - 准确测试范围 7 个路径：新增 `tests/test_tag_suggestions.py`；修改 `test_tag_autocomplete.py`、`test_query_autocomplete.py`、`test_m2_qml.py`、`test_qml_tag_autocomplete.py`、`test_import_boundaries.py`、`test_windows_packaging.py`，短路径沿用 tests 前缀。原标签索引/翻译/网络和其他装配检查只选择必要节点，不预先修改额外文件。
@@ -3104,3 +3104,27 @@ M2 里程碑回归检查与提交。
 - 本轮 48 个不同直接场景全部通过：取消/关闭 6、服务/CSV/两种冷进程 20、实际 QML 键鼠/输入法/原两标签规则/网络与索引/资源 18、正式共享关闭 1、活动 CSV 取消/关闭 2、故障重入最终关闭 1。最后故障关闭完整执行通过，两个历史监控对象均匹配实际装配，原事件名称/完整顺序、保存失败重入和最终状态断言未降低。实际证明 worker 在后台读取后回服务所属线程，按 snapshot/save/state/complete 发布；队列关闭仍允许本地/CSV及最后重算。
 - 取消期间新输入保护属于真实行为修复，不能只记为代码移动；初稿的旧 shutdown 方法名和缺少语法导入也已修正并实际检查。失败项仅单独复查，未重复已通过集合。数据 `.tools/pytest-r6-004-*` 保留且不提交，没有全量回归、完整构建、原生界面、真实服务或 Linux，成果窗口未操作。
 - reviewer 最终独立选择 28 项全部通过，9.22 秒。覆盖应用服务全部 5 项、两类真实冷进程、两种取消期间新输入回归、worker 归属/活动等待/迟到结果、共享队列关闭后本地与 CSV、原 snapshot/save/state/complete 及路径保存失败、开始/完成/无效 URL 的关闭和替换、各模型/远程通知时点、40 候选、实际键鼠/输入法、M2/正式共享装配及完整保存失败重入关闭/spec。两个历史监控对象和真实最终服务状态的原断言均已执行。准确 10 个生产/打包、8 个测试及本记录共 19 个路径获准提交，无剩余阻断。独立数据 `.tools/pytest-r6-004-reviewer*` 保留且不提交，没有全量回归或构建。
+- 本地提交：`76e9a53264061f4e8d7b74a9b002ee7e4e98aa2a`（`refactor(autocomplete): separate suggestion service and ui`），准确包含批准的 19 个路径。提交后工作树与暂存区干净，未推送。R4/R5/R7/R6 的已登记结构开发均完成，进入统一里程碑验证，不继续开发 M5 采集功能。
+
+### 45.13 当前任务 R6-005
+
+- 状态：已完成；验证代码基线 `76e9a53264061f4e8d7b74a9b002ee7e4e98aa2a`，从干净工作树开始，本项仅修改完成记录。目标是统一验证第二轮结构整改后的完整行为与 Windows 发布产物；本轮之前未执行全量回归或完整构建。
+- 负责人：reviewer 执行原 Python 完整验证流程并记录实际结果；developer 在其成功后执行原 Windows 构建流程；reviewer 核对最终产物和结果；intergrator 获准后精确提交本记录或实际必要修正；主 Agent 处理实际失败、范围及里程碑结论。
+- 默认不修改生产、测试或构建脚本，不新增报告/说明/副本。实际失败需要修正时再登记具体路径和必要复查，不从头重复已通过集合。TEMP/TMP 和指定测试/Windows 工作目录位于项目 .tools；原 Python 验证脚本还会在项目根创建并自动清理 `.build-validation-*` 临时目录，保留其既有行为。产物统一放 `dist/structure-002`；原 `dist/m4-006`、用户数据和 M4 展示窗口不操作。
+- Python 流程仅启动一次：`.venv/Scripts/python.exe scripts/verify_build.py --artifact-dir dist/structure-002/packages`。使用原流程的 compileall、唯一完整 pytest、源码 headless、额外离屏 test_qml_shell 子集、wheel/sdist、从 sdist 重建 wheel、临时虚拟环境安装、双 CLI 入口及实际 QML/关闭检查。该入口本身已包含完整 pytest，不在其之前另跑全量，也不预建跳过测试的辅助脚本；中途失败时保留实际完成部分，必要续跑只执行未完成阶段。
+- 将 TEMP/TMP 指向项目内 `.tools/structure-002-temp`，沿用 QT_QPA_PLATFORM=offscreen、QT_QUICK_BACKEND=software、LIBGL_ALWAYS_SOFTWARE=1、QML_DISABLE_DISK_CACHE=1。完整 pytest 的原临时数据由该目录承接；后续独立 QML 子集保留。wheel 和 sdist 文件分别预期为 `danbooru_multi_search-0.1.0-py3-none-any.whl`、`danbooru_multi_search-0.1.0.tar.gz`。原流程重建 wheel 后检查资源，实际临时环境安装的是最初构建的 wheel，不能把这两步混称为重建 wheel 安装验证。
+- Python 流程成功后执行 `.venv/Scripts/python.exe scripts/build_windows_installer.py --makensis .tools/nsis-3.13/nsis-3.13/makensis.exe --output-dir dist/structure-002 --build-parent .tools/structure-002-build --timeout-seconds 900`。保留原环境/工具检查、PyInstaller onedir、PE/资源、便携程序自动检查、NSIS 编译、安装包版本及 SHA256；该脚本不执行 pytest，也不运行生成的安装包。
+- Windows 构建原流程包含 headless、Windows 原生 GUI、offscreen 三种自动启动和关闭检查，Windows 项会清除外部 offscreen 覆盖；如实记录该自动 GUI 启动，不进行人工界面验收。不调用实际系统安装/卸载脚本，不执行真实 Danbooru/Eagle、Linux/WSL/Docker。构建依赖安装沿用原流程，不能声称完全离线。
+- 里程碑完成条件：完整回归实际结果可确认、源码与包验证通过、Windows 便携程序及 NSIS 安装包生成并通过原自动检查、产物路径与 SHA256 明确、全部真实修正通过独立复查、工作树状态和未验证范围记录清楚。尚未满足时不记录为已完成；提交编号和具体结果待执行后记录。
+- 最终独立源码核对未发现已批准范围的依赖/旧归属遗留：app 无 UI 导入，core 的设置存储/更新、初始化和结果输出均已迁出，8 个旧内部模块删除；必要公开别名指向唯一实际实现，纯结果/Eagle/标签依赖方向保持，包映射和 spec 无已删除目标，HTTP 与评级显示各保留唯一实现。此结论来自静态核对，不替代运行结果。
+- reviewer 唯一一次原 verify_build 流程成功退出 0。完整 pytest 为 **2251 passed，360.92 秒**，无失败或跳过；源码 headless（数据库 schema 12）通过，原流程额外 QML 子集 **19 passed，7.36 秒**。已完成 wheel/sdist 构建、sdist 重建 wheel 的资源核对、临时环境安装最初 wheel、console 与 python -m 双入口 headless、真实隔离来源及 QML 装配/关闭，均成功。没有修改代码、修正失败或重跑完整 pytest，也未创建续跑辅助脚本。原临时工作区实际为项目根 `.build-validation-3xobl_xn`，最终包路径及自动清理结果继续只读核对。
+- Python 流程已完成，现授权 developer 按本节原命令开始 Windows 构建；保持原三种自动启动/关闭检查及 M4 产物不变，不执行系统安装或再运行完整 pytest。
+- Python 发布包已只读确认：`dist/structure-002/packages/danbooru_multi_search-0.1.0-py3-none-any.whl` 为 425892 字节，SHA256 `9219bdc7c93d527beae165275e3c93a98157a24678fc712e254ee70fee080165`；同目录 `danbooru_multi_search-0.1.0.tar.gz` 为 613972 字节，SHA256 `21708cfd6b71e041d7422900e55e37afbb8ee4e52ceae3095e1e1faa5c09400e`。原 `.build-validation-3xobl_xn` 已由脚本自动清理，`.tools/structure-002-temp` 的测试数据保留。
+- reviewer 独立读取 wheel/sdist 成员清单：26 个选定新归属模块全部存在且非空，8 个删除旧模块在两个包均不存在，7 个保留兼容模块仍为非空真实模块且两包字节数一致。未解压写入副本或重复启动程序。
+- developer 原 Windows 构建成功退出 0。`dist/structure-002/DanbooruMultiSearch/DanbooruMultiSearch.exe` 为 2887257 字节；`dist/structure-002/DanbooruMultiSearch-0.1.0-win64-setup.exe` 为 45003420 字节，SHA256 `88e19a89d01646242f6e3fb50892a6d6e582a914736c71aac15ef16b765060cf`，脚本结果与最终文件计算一致。PyInstaller onedir、PE/资源、NSIS 及版本核对均通过。
+- Windows 原自动检查实际完成 headless、windows、offscreen 三项；两项 GUI 的 qml_loaded、shutdown_completed 均通过，Windows/schema 12/新配置、TLS、图片格式、版本和中文数据目录也按原 JSON 条件核对通过。包含自动原生 Windows 窗口启动与关闭，未进行人工界面验收、真实服务或系统安装。
+- Windows 受管工作区已自动清理：`.tools/structure-002-build` 子项为 0，本轮 `danbooru-m1005-check-*` 临时目录为 0；此前测试数据保留。无本轮活动测试或构建会话，未创建续跑 helper/额外报告，未再次运行完整 pytest。原 M4 产物、窗口和用户数据未操作。现在等待 reviewer 对最终 Windows 产物的独立只读核对及里程碑结论；代码基线仍为上述提交。
+- reviewer 最终独立只读核对通过，允许本里程碑完成并仅提交本记录。便携程序为 AMD64/PE32+，文件和产品版本均 0.1.0.0，资源有效，SHA256 `0d1a00badffa6c3ef7c2d21b86c9ad0ebc846b441edd0067a8d50bb7a51d76cb`。安装包的 NSIS 外壳为 x86/PE32，内部应用为 AMD64；版本/资源有效，最终 SHA256 与开发结果精确一致。嵌入 PYZ 中选定 26 个新归属模块、7 个兼容模块齐全，8 个删除旧模块均不存在。核对未再次启动程序/安装器或解压写入副本。
+- 里程碑结论：R4 Eagle 应用流程与线程职责、R5 五项应用流程、R7 诊断/显示重复实现、R6 通用类型/核心读写/实际视图模型/标签补全分离均已完成并通过统一验证。必要公开兼容、现有设置格式、schema 12、M0–M4 功能和旧产物保持；取消期间新输入保护及此前关闭/缓存资源边界修正已分别记录和验证。
+- 本项没有生产、测试或构建脚本改动，实际验证的代码提交为 `76e9a53264061f4e8d7b74a9b002ee7e4e98aa2a`，仅需提交本完成记录。完整 pytest 仅执行一次，2251 项全部通过；原流程额外 19 项 QML 检查及两条发布验证流程全部成功，没有剩余阻断。
+- 仍未验证真实 Danbooru/Eagle、人工原生界面验收、系统安装/卸载及 Linux；不据本次构建宣布这些项目通过。M5 的后续采集/素材导入、去重/元数据和批量任务功能没有在本轮扩展。`.tools/pytest-r*` 与 `.tools/structure-002-temp` 验证数据保留；两个原流程自己的临时工作区已清理，M4 目录与窗口保留。没有本轮活动会话，不执行下一阶段开发。
