@@ -204,6 +204,30 @@ def test_controller_reports_empty_results(local_http_server):
     assert controller.imageUrl == ""
 
 
+def test_default_posts_attempt_skips_unavailable_rows_instead_of_failing_the_page():
+    first = _post_mapping()
+    second = {**first, "id": 123}
+    reply = FakeReply(json.dumps([{"id": 9}, first, second]).encode())
+    manager = FakeNetworkManager([reply])
+    results = []
+    attempt = QtPostsRequestAttempt(
+        manager, build_posts_request("https://example.invalid", "cat", limit=3), results.append, APPLICATION,
+    )
+    reply.finish()
+    assert len(results) == 1 and results[0].succeeded
+    assert [post.id for post in results[0].value] == [321, 123]
+
+
+def test_one_result_controller_reports_no_displayable_post_without_invalid_response(local_http_server):
+    server = local_http_server(b'[{"id":9}]')
+    controller = DanbooruSearchController(server.base_url, timeout_ms=1000)
+    try:
+        outcome = _wait_for_outcome(controller)
+        assert outcome.state == RequestState.EMPTY and outcome.error_kind is None
+    finally:
+        controller.shutdown()
+
+
 def test_controller_reports_http_errors(local_http_server):
     server = local_http_server(b'{"error":"unavailable"}', status=503)
     controller = DanbooruSearchController(server.base_url, timeout_ms=1_000)

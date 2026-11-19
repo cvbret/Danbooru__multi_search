@@ -19,7 +19,7 @@ from danbooru_multi_search.danbooru.client import (
 )
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.danbooru.query_checkpoint import CheckpointError, ExecutionCheckpoint
-from danbooru_multi_search.danbooru.parsing import parse_complete_posts_response
+from danbooru_multi_search.danbooru.parsing import ParsedPostsPage, parse_complete_search_page
 from danbooru_multi_search.danbooru.query_evaluator import evaluate_post_query
 from danbooru_multi_search.danbooru.query_planning import (
     QueryPlan,
@@ -411,7 +411,7 @@ class DanbooruMultiBranchExecutor(QObject):
             request,
             completion,
             self,
-            parser=parse_complete_posts_response,
+            parser=parse_complete_search_page,
         )
 
     @staticmethod
@@ -727,7 +727,8 @@ class DanbooruMultiBranchExecutor(QObject):
             )
             return
 
-        posts = result.value
+        page = result.value
+        posts = page.posts if isinstance(page, ParsedPostsPage) else page
         if not isinstance(posts, tuple) or not all(
             isinstance(post, DanbooruPost) for post in posts
         ):
@@ -739,7 +740,8 @@ class DanbooruMultiBranchExecutor(QObject):
                 http_status=result.http_status,
             )
             return
-        if len(posts) > session.limits.page_size:
+        remote_rows = page.remote_rows if isinstance(page, ParsedPostsPage) else len(posts)
+        if remote_rows > session.limits.page_size:
             self._record_failure(
                 session,
                 identity.position,
@@ -748,13 +750,15 @@ class DanbooruMultiBranchExecutor(QObject):
                 http_status=result.http_status,
             )
             return
-        self._accept_page(session, identity.position, posts)
+        self._accept_page(session, identity.position, posts, remote_rows=remote_rows)
 
     def _accept_page(
         self,
         session: _ExecutionSession,
         position: QueryBranchPosition,
         posts: tuple[DanbooruPost, ...],
+        *,
+        remote_rows: int,
     ) -> None:
         if not self._is_active_session(session):
             return
@@ -791,7 +795,7 @@ class DanbooruMultiBranchExecutor(QObject):
 
         branch = session.branches[position.branch_index]
         successful_pages = branch.successful_pages + 1
-        short_page = len(posts) < session.limits.page_size
+        short_page = remote_rows < session.limits.page_size
         next_page: int | None
         natural_end = False
         page_limited = False
@@ -807,7 +811,7 @@ class DanbooruMultiBranchExecutor(QObject):
         session.candidates = candidates
         session.matches = matches
         session.counts = QueryExecutionCounts(
-            remote_rows=session.counts.remote_rows + len(posts),
+            remote_rows=session.counts.remote_rows + remote_rows,
             unique_candidates=session.counts.unique_candidates + new_candidates,
             local_matches=session.counts.local_matches + new_matches,
         )

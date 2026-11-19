@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +15,22 @@ from danbooru_multi_search.danbooru.tag_syntax import normalize_tag_name
 
 class DanbooruParseError(ValueError):
     """Raised when Danbooru returns JSON that cannot form the required model."""
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedPostsPage:
+    """Usable search rows plus the unfiltered server row count for pagination."""
+
+    posts: tuple[DanbooruPost, ...]
+    remote_rows: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.posts, tuple) or any(
+            not isinstance(post, DanbooruPost) for post in self.posts
+        ):
+            raise DanbooruParseError("A parsed page must contain a tuple of posts.")
+        if type(self.remote_rows) is not int or self.remote_rows < len(self.posts):
+            raise DanbooruParseError("A parsed page has an invalid remote row count.")
 
 
 _CREATED_AT_PATTERN = re.compile(
@@ -34,21 +51,48 @@ _TAG_FIELDS = (
 def parse_posts_response(payload: bytes) -> tuple[DanbooruPost, ...]:
     """Parse a Danbooru page while retaining the M1 optional-tag behavior."""
 
-    return _parse_posts_response(payload, require_complete_tags=False)
+    return _parse_posts_page(payload, require_complete_tags=False).posts
 
 
 def parse_complete_posts_response(payload: bytes) -> tuple[DanbooruPost, ...]:
     """Parse an M2 page whose five complete tag fields are all present."""
 
-    return _parse_posts_response(payload, require_complete_tags=True)
+    return _parse_posts_page(payload, require_complete_tags=True).posts
 
 
-def _parse_posts_response(
+def parse_search_posts_response(payload: bytes) -> tuple[DanbooruPost, ...]:
+    """Skip identified unavailable rows for the one-result search entry point."""
+    return _parse_posts_page(
+        payload, require_complete_tags=False, skip_unavailable=True,
+    ).posts
+
+
+def parse_complete_search_page(payload: bytes) -> ParsedPostsPage:
+    """Preserve M2 raw pagination while skipping rows with no media addresses."""
+    return _parse_posts_page(payload, require_complete_tags=True, skip_unavailable=True)
+
+
+def _parse_posts_page(
     payload: bytes,
     *,
     require_complete_tags: bool,
-) -> tuple[DanbooruPost, ...]:
+    skip_unavailable: bool = False,
+) -> ParsedPostsPage:
+    raw = _load_posts_array(payload)
+    posts: list[DanbooruPost] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            raise DanbooruParseError(f"Post at index {index} must be a JSON object.")
+        post = _parse_post(
+            item, index, require_complete_tags=require_complete_tags,
+            skip_unavailable=skip_unavailable,
+        )
+        if post is not None:
+            posts.append(post)
+    return ParsedPostsPage(tuple(posts), len(raw))
 
+
+def _load_posts_array(payload: bytes) -> list[object]:
     try:
         raw = json.loads(payload, parse_constant=_reject_json_constant)
     except (
@@ -62,18 +106,7 @@ def _parse_posts_response(
     if not isinstance(raw, list):
         raise DanbooruParseError("Danbooru response root must be a JSON array.")
 
-    posts: list[DanbooruPost] = []
-    for index, item in enumerate(raw):
-        if not isinstance(item, Mapping):
-            raise DanbooruParseError(f"Post at index {index} must be a JSON object.")
-        posts.append(
-            _parse_post(
-                item,
-                index,
-                require_complete_tags=require_complete_tags,
-            )
-        )
-    return tuple(posts)
+    return raw
 
 
 def _parse_post(
@@ -81,11 +114,17 @@ def _parse_post(
     index: int,
     *,
     require_complete_tags: bool,
-) -> DanbooruPost:
+    skip_unavailable: bool,
+) -> DanbooruPost | None:
     preview_url = _optional_string(raw, "preview_file_url", index)
     large_file_url = _optional_string(raw, "large_file_url", index)
     file_url = _optional_string(raw, "file_url", index)
     if not any((preview_url, large_file_url, file_url)):
+        if skip_unavailable:
+            # A restricted post may contain only its ID. Bad identities and
+            # non-string URL fields still fail rather than becoming skipped rows.
+            _required_integer(raw, "id", index, minimum=1)
+            return None
         raise DanbooruParseError(
             f"Post at index {index} has no usable preview, large, or file URL."
         )

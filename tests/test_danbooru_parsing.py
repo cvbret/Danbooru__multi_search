@@ -9,6 +9,7 @@ from danbooru_multi_search.danbooru import (
     parse_posts_response,
 )
 from danbooru_multi_search.danbooru.parsing import parse_complete_posts_response
+from danbooru_multi_search.danbooru.parsing import parse_complete_search_page, parse_search_posts_response
 
 
 def _post_mapping() -> dict[str, object]:
@@ -396,3 +397,35 @@ def test_parse_rejects_invalid_fields(field_name, invalid_value):
 
     with pytest.raises(DanbooruParseError, match=field_name):
         parse_posts_response(json.dumps([raw]).encode("utf-8"))
+
+
+def test_search_page_skips_only_identified_unavailable_rows_and_preserves_order():
+    first, second = _post_mapping(), _post_mapping()
+    first["id"], second["id"] = 8, 3
+    for raw in (first, second):
+        raw.update({field: "" for field in (
+            "tag_string_artist", "tag_string_character", "tag_string_copyright", "tag_string_general", "tag_string_meta",
+        )})
+    missing = {"id": 11}
+    blank = {"id": 12, "preview_file_url": "  ", "large_file_url": None, "file_url": ""}
+    payload = json.dumps([missing, first, blank, second]).encode()
+    page = parse_complete_search_page(payload)
+    assert [post.id for post in page.posts] == [8, 3] and page.remote_rows == 4
+    assert [post.id for post in parse_search_posts_response(payload)] == [8, 3]
+    for parser in (parse_posts_response, parse_complete_posts_response):
+        with pytest.raises(DanbooruParseError, match="no usable"):
+            parser(payload)
+
+
+@pytest.mark.parametrize("row", [{}, {"id": 0}, {"id": True}, {"id": "1"}, {"id": 1, "file_url": 5}, None])
+def test_search_page_does_not_hide_invalid_identity_or_url_types(row):
+    with pytest.raises(DanbooruParseError):
+        parse_complete_search_page(json.dumps([row]).encode())
+
+
+def test_search_page_still_rejects_bad_metadata_on_a_displayable_post():
+    raw = _post_mapping()
+    raw.update(tag_string_artist="", tag_string_character="", tag_string_copyright="", tag_string_general="", tag_string_meta="")
+    raw["image_width"] = 0
+    with pytest.raises(DanbooruParseError, match="image_width"):
+        parse_complete_search_page(json.dumps([{"id": 1}, raw]).encode())

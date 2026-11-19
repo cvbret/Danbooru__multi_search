@@ -496,6 +496,132 @@ def test_default_qt_attempt_uses_complete_tag_parser_for_m2_pages():
     assert snapshot.counts.remote_rows == 0
 
 
+def _search_row(identifier):
+    return {
+        "id": identifier, "preview_file_url": f"https://example.invalid/{identifier}.jpg",
+        "file_url": None, "large_file_url": None, "rating": "g",
+        "image_width": 10, "image_height": 10, "file_ext": "jpg",
+        "tag_string_artist": "", "tag_string_character": "", "tag_string_copyright": "",
+        "tag_string_general": "cat", "tag_string_meta": "",
+    }
+
+
+def _latest_json_query(pages, *, branch_page_limit=10):
+    from danbooru_multi_search.ui.query_controller import DanbooruM2QueryController
+    from danbooru_multi_search.ui.query_state import M2QueryBridgeController
+
+    replies = [FakeReply(json.dumps(rows).encode()) for rows in pages]
+
+    class Manager:
+        def __init__(self):
+            self.requests = []
+
+        def get(self, request):
+            self.requests.append(request)
+            return replies[len(self.requests) - 1]
+
+    manager, clock = Manager(), ManualClock()
+    scheduler = ManualScheduler(clock)
+    queue = BoundedTaskQueue(TaskQueueConfig(minimum_interval_seconds=0, max_retries=0), clock=clock, scheduler=scheduler)
+    executor = DanbooruMultiBranchExecutor(
+        "https://example.invalid", task_queue=queue, network_manager=manager, clock=clock, scheduler=scheduler,
+    )
+    core = DanbooruM2QueryController("https://example.invalid", executor=executor)
+    bridge = M2QueryBridgeController(core)
+    form = bridge.draftFormValues
+    form.update(pageSize="2", branchPageLimit=str(branch_page_limit))
+    assert bridge.updateDraftForm(form) and bridge.executeLatest()
+    scheduler.run_ready()
+    return core, bridge, executor, queue, scheduler, manager, replies
+
+
+@pytest.mark.parametrize("first", [[{"id": 9}, _search_row(2)], [{"id": 9}, {"id": 8}]])
+def test_latest_query_skips_unavailable_posts_but_keeps_next_page_and_checkpoint_counts(first):
+    from danbooru_multi_search.storage.checkpoint_serialization import decode_checkpoint, encode_checkpoint
+
+    core, bridge, executor, queue, scheduler, manager, replies = _latest_json_query([first, [_search_row(1)]])
+    try:
+        replies[0].finished.emit()
+        assert executor.snapshot.state == QueryExecutionState.RUNNING
+        assert executor.snapshot.counts.remote_rows == 2
+        assert executor.snapshot.branch_progress[0].next_page == 2
+        assert bridge.errorCode == ""
+        assert core.cancel()
+        checkpoint = decode_checkpoint(encode_checkpoint(core.capture_checkpoint()))
+        assert checkpoint.execution.counts.remote_rows == 2
+        assert checkpoint.execution.counts.unique_candidates == sum("preview_file_url" in row for row in first)
+        core.resume_checkpoint(checkpoint)
+        scheduler.run_ready()
+        assert parse_qs(urlsplit(manager.requests[1].url().toString()).query)["page"] == ["2"]
+        replies[1].finished.emit()
+        assert executor.snapshot.state == QueryExecutionState.COMPLETE
+        assert bridge.remoteRows == 3 and bridge.errorCode == ""
+        expected = [row["id"] for row in first if "preview_file_url" in row] + [1]
+        assert [post.id for post in core.posts_model.posts] == expected
+    finally:
+        core.shutdown()
+        bridge.detach()
+        queue.shutdown()
+
+
+@pytest.mark.parametrize("kind", ["short", "page_limit", "too_many"])
+def test_unavailable_page_uses_raw_count_for_end_limits_and_rejection(kind):
+    pages = [[{"id": 9}]] if kind == "short" else [[{"id": 9}, {"id": 8}], [{"id": 7}, {"id": 6}]]
+    if kind == "too_many":
+        pages = [[{"id": 9}, {"id": 8}, _search_row(1)]]
+    core, bridge, executor, queue, scheduler, _manager, replies = _latest_json_query(pages, branch_page_limit=2)
+    try:
+        replies[0].finished.emit()
+        if kind == "page_limit":
+            scheduler.run_ready()
+            replies[1].finished.emit()
+            assert executor.snapshot.state == QueryExecutionState.PARTIAL_LIMITED
+            assert executor.snapshot.limit_reason == QueryLimitReason.PAGE_LIMIT
+            assert executor.snapshot.counts.remote_rows == 4
+        elif kind == "short":
+            assert executor.snapshot.state == QueryExecutionState.COMPLETE
+            assert executor.snapshot.counts.remote_rows == 1
+        else:
+            assert executor.snapshot.state == QueryExecutionState.FAILED
+            assert executor.snapshot.failure.error_code == QueryExecutionErrorCode.INVALID_RESPONSE
+            assert executor.snapshot.counts.remote_rows == 0
+        assert executor.snapshot.posts == ()
+    finally:
+        core.shutdown()
+        bridge.detach()
+        queue.shutdown()
+
+
+def test_latest_entry_retries_failed_first_page_then_keeps_visible_siblings():
+    core, bridge, executor, queue, scheduler, manager, replies = _latest_json_query(
+        [{}, [{"id": 5, "file_url": None}, _search_row(4)], []],
+    )
+    accepted_after_start = []
+    core.queryAccepted.connect(accepted_after_start.append)
+    operation_id = core.operation_id
+    try:
+        replies[0].finished.emit()
+        assert executor.snapshot.state is QueryExecutionState.FAILED
+        assert bridge.canRetry and bridge.errorText
+        assert bridge.retryFailedPage()
+        scheduler.run_ready()
+        replies[1].finished.emit()
+        assert [post.id for post in core.posts_model.posts] == [4]
+        assert bridge.visibleCount == 1 and not bridge.errorText
+
+        scheduler.run_ready()
+        replies[2].finished.emit()
+        assert executor.snapshot.state is QueryExecutionState.COMPLETE
+        assert [post.id for post in core.posts_model.posts] == [4]
+        assert bridge.visibleCount == 1 and bridge.remoteRows == 2 and not bridge.errorText
+        assert core.operation_id == operation_id and accepted_after_start == []
+        assert [parse_qs(urlsplit(request.url().toString()).query)["page"] for request in manager.requests] == [["1"], ["1"], ["2"]]
+    finally:
+        core.shutdown()
+        bridge.detach()
+        queue.shutdown()
+
+
 def test_dedup_keeps_first_metadata_and_full_ast_is_evaluated_once(monkeypatch):
     import danbooru_multi_search.danbooru.query_execution as execution_module
 

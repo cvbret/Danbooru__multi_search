@@ -17,7 +17,8 @@ from danbooru_multi_search.danbooru.http_diagnostics import read_reply_diagnosti
 from danbooru_multi_search.danbooru.models import DanbooruPost
 from danbooru_multi_search.danbooru.parsing import (
     DanbooruParseError,
-    parse_posts_response,
+    ParsedPostsPage,
+    parse_search_posts_response,
 )
 from danbooru_multi_search.tasks import (
     BoundedTaskQueue,
@@ -39,7 +40,7 @@ USER_AGENT = (
     "(https://github.com/cvbret/Danbooru__multi_search)"
 )
 DEFAULT_TIMEOUT_MS = 10_000
-PostsResponseParser = Callable[[bytes], tuple[DanbooruPost, ...]]
+PostsResponseParser = Callable[[bytes], tuple[DanbooruPost, ...] | ParsedPostsPage]
 
 
 class RequestState:
@@ -136,7 +137,7 @@ class QtPostsRequestAttempt(QObject):
         completion: Callable[[TaskAttemptResult], None],
         parent: QObject,
         *,
-        parser: PostsResponseParser = parse_posts_response,
+        parser: PostsResponseParser = parse_search_posts_response,
     ) -> None:
         super().__init__(parent)
         self._completion: Callable[[TaskAttemptResult], None] | None = completion
