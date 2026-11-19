@@ -688,7 +688,7 @@ def test_bridge_distinguishes_execution_and_view_drafts_without_network():
     assert bridge.viewConditionsChanged is False
     assert bridge.canRefresh is True
 
-    form = default_query_form_values()
+    form = bridge.draftFormValues
     form["minimumScore"] = "10"
     assert bridge.updateDraftForm(form) is True
     assert bridge.executionConditionsChanged is False

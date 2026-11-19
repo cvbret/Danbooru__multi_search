@@ -49,6 +49,7 @@ EXPECTED_QML_MEMBERS = (
     "danbooru_multi_search/ui/qml/PoolMembershipPanel.qml",
     "danbooru_multi_search/ui/qml/ImageViewer.qml",
     "danbooru_multi_search/ui/qml/QueryEditorPanel.qml",
+    "danbooru_multi_search/ui/qml/TagPickerPanel.qml",
     "danbooru_multi_search/ui/qml/QueryFilterPanel.qml",
     "danbooru_multi_search/ui/qml/QueryStatusBar.qml",
     "danbooru_multi_search/ui/qml/HistoryPanel.qml",

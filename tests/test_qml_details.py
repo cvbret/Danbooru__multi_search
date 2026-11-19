@@ -251,7 +251,7 @@ def test_escape_returns_once_and_preserves_gallery_query_controls():
     try:
         assert gallery.applyAdvancedText("blue_sky")
         values = dict(gallery.draftFormValues)
-        values.update(rating="questionable", pageSize="80")
+        values.update(rating="questionable", pageSize="35")
         assert gallery.updateDraftForm(values)
         tags_input = root.findChild(QObject, "tagsInput")
         rating_filter = root.findChild(QObject, "ratingFilter")
@@ -281,7 +281,7 @@ def test_escape_returns_once_and_preserves_gallery_query_controls():
         assert gallery.postsModel.revision == before_revision
         assert tags_input.property("text") == "blue_sky"
         assert rating_filter.property("currentValue") == "questionable"
-        assert page_size.property("text") == "80"
+        assert page_size.property("text") == "35"
         assert grid.property("currentIndex") == 4
         assert manager.requests == []
     finally:
@@ -328,6 +328,8 @@ def test_detail_tag_click_starts_exactly_one_formal_query_from_first_page():
         navigation = engine.rootContext().contextProperty("detailNavigation")
         assert navigation.gallery_snapshot is None
         assert root.findChild(QObject, "tagsInput").property("text") == "sample_artist"
+        picker = engine.rootContext().contextProperty("tagPicker")
+        assert [row["name"] for row in picker.selectedRows] == ["sample_artist"]
         assert manager.requests[0].url().query().split("page=")[1].split("&")[0] == "1"
         assert root.findChild(QObject, "galleryGrid").property("count") == 1
     finally:

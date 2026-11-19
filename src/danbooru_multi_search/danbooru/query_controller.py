@@ -31,6 +31,7 @@ from danbooru_multi_search.danbooru.query_types import (
     QueryExecutionBound,
     QueryExecutionErrorCode,
     QueryExecutionLimits,
+    GALLERY_PAGE_SIZE,
     QueryExecutionSnapshot,
     QueryExecutionState,
     QueryLimitReason,
@@ -279,6 +280,11 @@ class M2QueryCoordinator(QObject):
         self._ensure_open()
         if not isinstance(checkpoint, QueryCheckpoint) or checkpoint.source != source_identity(self._base_url):
             raise CheckpointError("source_changed", "当前 API 来源与检查点不同，不能续扫。")
+        if getattr(self._executor, "manual_paging", False) and checkpoint.execution.limits.page_size > GALLERY_PAGE_SIZE:
+            raise CheckpointError(
+                "incompatible_page_size",
+                "旧检查点每页超过 50 条，原结果和历史已保留。请使用重新执行，从头按每批最多 50 条加载。",
+            )
         if checkpoint.execution.resume_reason:
             raise CheckpointError("cannot_resume", checkpoint.execution.resume_reason)
         self._operation_counter += 1
@@ -314,6 +320,11 @@ class M2QueryCoordinator(QObject):
         if self._closed or self._closing:
             return False
         return self._executor.cancel()
+
+    def load_more(self) -> bool:
+        if self._closed or self._closing:
+            return False
+        return self._executor.load_more()
 
     def retry_failed_page(self) -> bool:
         if self._closed or self._closing:
@@ -500,6 +511,8 @@ class M2QueryCoordinator(QObject):
         resolved_limits = QueryExecutionLimits() if limits is None else limits
         if not isinstance(resolved_limits, QueryExecutionLimits):
             raise TypeError("limits must be QueryExecutionLimits")
+        if getattr(self._executor, "manual_paging", False) and resolved_limits.page_size > GALLERY_PAGE_SIZE:
+            resolved_limits = replace(resolved_limits, page_size=GALLERY_PAGE_SIZE)
         candidate_sort = ResultSortSpec() if sort_spec is None else sort_spec
         logical_definition = GalleryQueryDefinition(
             mode=mode,

@@ -387,6 +387,15 @@ class FavoriteRepository:
             _bump_collection_revision(connection)
             return len(identifiers)
 
+    def list_tag_names(self) -> tuple[tuple[str, FavoriteTagCategory], ...]:
+        """Read names and categories for all starred tags without loading other favorite metadata."""
+        with self._read_connection() as connection:
+            rows = connection.execute(
+                """SELECT object_key, tag_category FROM favorite_items WHERE object_type='tag'
+                   ORDER BY favorited_at DESC, id DESC"""
+            )
+            return tuple((row["object_key"], FavoriteTagCategory(row["tag_category"])) for row in rows)
+
     def list_favorites(
         self,
         filter_spec: FavoriteFilter | None = None,

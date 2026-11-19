@@ -156,6 +156,7 @@ class TagSuggestionService(QObject):
         self._active_task_id: str | None = None
         self._local_suggestions: tuple[TagSuggestion, ...] = ()
         self._fragment: str | None = None
+        self._category: int | None = None
         self._remote_busy = False
         self._notice_text = ""
         self._import_generation = 0
@@ -211,11 +212,12 @@ class TagSuggestionService(QObject):
         """Compare import identity without changing its lifecycle."""
         return generation == self._import_generation
 
-    def suggest(self, fragment: str | None, *, generation: int) -> None:
+    def suggest(self, fragment: str | None, *, generation: int, category: int | None = None) -> None:
         """Publish local candidates before considering any remote request."""
         if self.closed or not self.is_current_request(generation):
             return
         self._fragment = fragment
+        self._category = category
         self._notice_text = ""
         if not fragment:
             self._local_suggestions = ()
@@ -230,6 +232,8 @@ class TagSuggestionService(QObject):
             )
         else:
             local = self._translation_store.snapshot.search_chinese(fragment)
+        if category is not None:
+            local = tuple(item for item in local if item.category == category)
         self._local_suggestions = local
         self.suggestionsReplaced.emit(generation, local[:DEFAULT_TAG_SUGGESTION_LIMIT])
         self.viewChanged.emit()
@@ -332,6 +336,7 @@ class TagSuggestionService(QObject):
                 self._base_url,
                 fragment,
                 timeout_ms=self._timeout_ms,
+                category=self._category,
             )
         except ValueError as exc:
             self._notice_text = str(exc)

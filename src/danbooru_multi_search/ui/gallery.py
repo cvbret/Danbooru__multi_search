@@ -40,6 +40,7 @@ class DanbooruPostListModel(QAbstractListModel):
 
     countChanged = Signal()
     revisionChanged = Signal()
+    viewReordering = Signal()
 
     _ROLE_NAMES = {
         PostRole.POST_ID: QByteArray(b"postId"),
@@ -82,6 +83,10 @@ class DanbooruPostListModel(QAbstractListModel):
     @property
     def display_operation_id(self) -> int | None:
         return self._display_operation_id
+
+    @Property(int, notify=revisionChanged)
+    def displayOperationId(self) -> int:
+        return self._display_operation_id or 0
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._posts)
@@ -147,16 +152,30 @@ class DanbooruPostListModel(QAbstractListModel):
             isinstance(item, ProcessedPost) for item in items
         ):
             raise TypeError("items must be a tuple of ProcessedPost values")
+        old_count = len(self._processed_posts)
         if (
-            self._display_operation_id == display_operation_id
-            and len(self._processed_posts) == len(items)
+            self._display_operation_id == display_operation_id and old_count <= len(items)
             and all(
                 old.post is new.post
                 and old.session_rank == new.session_rank
-                for old, new in zip(self._processed_posts, items, strict=True)
+                for old, new in zip(self._processed_posts, items)
             )
         ):
-            return False
+            if old_count == len(items):
+                return False
+            self.beginInsertRows(QModelIndex(), old_count, len(items) - 1)
+            self._processed_posts = items
+            self._posts += tuple(item.post for item in items[old_count:])
+            self._revision += 1
+            self.endInsertRows()
+            self.countChanged.emit()
+            self.revisionChanged.emit()
+            return True
+        if self._display_operation_id == display_operation_id:
+            revision = self._revision
+            self.viewReordering.emit()
+            if self._revision != revision:
+                return False
         self._replace_posts(items, display_operation_id=display_operation_id)
         return True
 
@@ -197,6 +216,10 @@ class DanbooruPostListModel(QAbstractListModel):
     @Slot(int, result=int)
     def rowForPostId(self, post_id: int) -> int:
         return self.row_for_post_id(post_id)
+
+    @Slot(str, result=int)
+    def rowForPostKey(self, key: str) -> int:
+        return self.row_for_post_id(int(key)) if key.isascii() and key.isdecimal() and len(key) <= 19 else -1
 
     @Slot(int, result=int)
     def postIdAt(self, row: int) -> int:

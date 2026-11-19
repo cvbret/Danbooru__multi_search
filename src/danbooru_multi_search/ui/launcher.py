@@ -15,7 +15,9 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtNetwork import QNetworkAccessManager, QSslSocket
 
 from danbooru_multi_search.app.settings import SettingsController
+from danbooru_multi_search.app.tag_suggestions import TagSuggestionService
 from danbooru_multi_search.ui.autocomplete import DanbooruTagSuggestionController
+from danbooru_multi_search.ui.tag_picker import TagPickerController
 from danbooru_multi_search.ui.query_controller import DanbooruM2QueryController
 from danbooru_multi_search.ui.details import DanbooruDetailController
 from danbooru_multi_search.core.settings import (
@@ -251,6 +253,14 @@ class _UiSession(QObject):
         self.write_access = SharedWriteAccess(self)
         self.favorite_writes = FavoriteWriteService(favorite_repository, self.write_access)
         self.favorite_controller = FavoriteController(favorite_repository, self.favorite_writes, self)
+        self.tag_picker = TagPickerController(
+            favorite_repository, self.favorite_controller, self.query_controller.posts_model,
+            TagSuggestionService(
+                danbooru_base_url, task_queue=self.task_queue, network_manager=self.network_manager,
+                translation_store=self.translation_store, connect_application_quit=False, parent=self,
+            ), self,
+        )
+        self.tag_picker.bindQuery(self.query_bridge)
         self.cache_protection_service = CacheProtectionService(
             CacheProtectionRepository(database), self.write_access,
         )
@@ -396,6 +406,7 @@ class _UiSession(QObject):
             self.artist_combinations.shutdown,
             self.saved_queries.shutdown,
             self.favorite_collection.shutdown,
+            self.tag_picker.shutdown,
             self.favorite_controller.shutdown,
             self.gallery_selection.shutdown,
             self.detail_favorites.shutdown,
@@ -531,6 +542,7 @@ def _create_qml_session(
     engine.rootContext().setContextProperty("favoriteTransfer", session.favorite_transfer)
     engine.rootContext().setContextProperty("downloadUi", session.download_ui)
     engine.rootContext().setContextProperty("artistCombinations", session.artist_combinations)
+    engine.rootContext().setContextProperty("tagPicker", session.tag_picker)
     engine.rootContext().setContextProperty("savedQueries", session.saved_queries)
     engine.rootContext().setContextProperty("queryCheckpoints", session.query_checkpoints)
     engine.rootContext().setContextProperty("cacheCleanup", session.cache_cleanup)

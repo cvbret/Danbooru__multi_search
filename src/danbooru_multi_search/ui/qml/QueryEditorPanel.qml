@@ -8,25 +8,11 @@ Item {
     objectName: "queryEditorPanel"
     required property var controller
     required property var tagController
-    required property var savedQueryController
-    property var selectedPath: null
-    property string selectedKind: ""
-    property var confirmedArtists: []
-    property string suggestionTarget: ""
+    required property var picker
     property bool syncingText: false
     property bool suppressSuggestions: false
     property bool externalSuggestionSuppressed: false
-    property int observedEditorRevision: -1
     signal closeRequested()
-    signal artistCombinationsRequested(var parentPath)
-    signal savedQueriesRequested()
-
-    function parentPathForInsert() {
-        if ((selectedKind === "and" || selectedKind === "or")
-                && selectedPath !== null)
-            return selectedPath
-        return null
-    }
 
     function syncAdvancedText() {
         if (syncingText)
@@ -38,20 +24,12 @@ Item {
     }
 
     function updateAdvancedSuggestions() {
-        if (syncingText || suppressSuggestions || externalSuggestionSuppressed || !advancedInput.activeFocus)
+        if (syncingText || suppressSuggestions || externalSuggestionSuppressed || !advancedInput.activeFocus || !advancedInput.visible)
             return
-        suggestionTarget = "advanced"
         tagController.updateQueryInput(
             advancedInput.text,
             advancedInput.cursorPosition
         )
-    }
-
-    function updateSimpleSuggestions(target, field) {
-        if (suppressSuggestions || externalSuggestionSuppressed || !field.activeFocus)
-            return
-        suggestionTarget = target
-        tagController.updateInput(field.text, field.cursorPosition)
     }
 
     function selectedSuggestionIndex() {
@@ -59,67 +37,27 @@ Item {
                ? suggestionList.currentIndex : 0
     }
 
-    function applySelectedSuggestion(requestedIndex, requestedName,
-                                     requestedCategory) {
+    function applySelectedSuggestion(requestedIndex) {
         const index = requestedIndex === undefined
                       ? selectedSuggestionIndex() : requestedIndex
         if (index < 0 || suggestionList.count === 0)
             return false
-        const row = suggestionList.itemAtIndex(index)
-        const suggestionName = requestedName !== undefined
-                               ? requestedName
-                               : row ? row.tagNameValue : ""
-        const suggestionCategory = requestedCategory !== undefined
-                                   ? requestedCategory
-                                   : row ? row.categoryValue : -1
-        if (suggestionTarget === "advanced") {
-            const replacement = tagController.applyQuerySuggestion(
-                advancedInput.text,
-                advancedInput.cursorPosition,
-                index
-            )
-            if (!replacement.changed)
-                return false
-            suppressSuggestions = true
-            syncingText = true
-            advancedInput.text = replacement.text
-            advancedInput.cursorPosition = replacement.cursor
-            controller.applyAdvancedText(replacement.text)
-            advancedInput.cursorPosition = replacement.cursor
-            syncingText = false
-            suppressSuggestions = false
-            advancedInput.forceActiveFocus()
-            return true
-        }
-        const field = suggestionTarget === "artist" ? artistInput : visualTagInput
-        const replacement = tagController.applySuggestion(
-            field.text,
-            field.cursorPosition,
+        const replacement = tagController.applyQuerySuggestion(
+            advancedInput.text,
+            advancedInput.cursorPosition,
             index
         )
         if (!replacement.changed)
             return false
         suppressSuggestions = true
-        field.text = replacement.text.trim()
-        field.cursorPosition = field.text.length
-        if (suggestionTarget === "artist") {
-            if (suggestionCategory === 1) {
-                let exists = false
-                const next = confirmedArtists.slice()
-                for (let artistIndex = 0; artistIndex < next.length; ++artistIndex) {
-                    if (next[artistIndex].name === suggestionName)
-                        exists = true
-                }
-                if (!exists)
-                    next.push({ "name": suggestionName, "category": 1 })
-                confirmedArtists = next
-                artistInput.text = ""
-            } else {
-                artistNotice.text = qsTr("画师快捷条件只接受分类已经确认为画师的标签。")
-            }
-        }
+        syncingText = true
+        advancedInput.text = replacement.text
+        advancedInput.cursorPosition = replacement.cursor
+        controller.applyAdvancedText(replacement.text)
+        advancedInput.cursorPosition = replacement.cursor
+        syncingText = false
         suppressSuggestions = false
-        field.forceActiveFocus()
+        advancedInput.forceActiveFocus()
         return true
     }
 
@@ -165,50 +103,15 @@ Item {
         }
     }
 
-    function addVisualTagFromInput() {
-        const name = visualTagInput.text.trim()
-        if (!name.length)
-            return
-        if (controller.addVisualTag(parentPathForInsert(), name))
-            visualTagInput.clear()
-    }
-
-    function insertArtists() {
-        if (!confirmedArtists.length)
-            return
-        if (controller.insertArtistGroup(
-                parentPathForInsert(),
-                confirmedArtists,
-                artistMode.currentValue)) {
-            confirmedArtists = []
-            artistNotice.text = ""
-        }
-    }
-
-    Component.onCompleted: {
-        observedEditorRevision = controller.editorRevision
-        syncAdvancedText()
-    }
+    Component.onCompleted: syncAdvancedText()
     Component.onDestruction: tagController.closeSuggestions()
-
-    Connections {
-        target: panel.controller
-        function onDraftChanged() {
-            if (panel.observedEditorRevision !== panel.controller.editorRevision) {
-                panel.observedEditorRevision = panel.controller.editorRevision
-                panel.selectedPath = null
-                panel.selectedKind = ""
-            }
-            panel.syncAdvancedText()
-        }
-    }
-
+    Connections { target: panel.controller; function onDraftChanged() { panel.syncAdvancedText() } }
     Connections {
         target: panel.tagController
         function onOpenChanged() {
             if (panel.tagController.isOpen
                     && panel.tagController.suggestionsModel.count > 0
-                    && panel.suggestionTarget.length > 0) {
+                    && advancedInput.activeFocus && advancedInput.visible) {
                 suggestionPopup.updatePosition()
                 suggestionPopup.open()
             } else {
@@ -227,16 +130,9 @@ Item {
         closePolicy: Popup.CloseOnPressOutside
         height: Math.min(286, suggestionList.contentHeight + 2)
 
-        function activeField() {
-            if (panel.suggestionTarget === "artist")
-                return artistInput
-            if (panel.suggestionTarget === "visual")
-                return visualTagInput
-            return advancedInput
-        }
 
         function updatePosition() {
-            const field = activeField()
+            const field = advancedInput
             if (!field)
                 return
             const point = field.mapToItem(Overlay.overlay, 0, field.height + 2)
@@ -279,9 +175,6 @@ Item {
                 required property string chineseNameText
                 required property string categoryText
                 required property string postCountText
-                required property int category
-                readonly property string tagNameValue: tagName
-                readonly property int categoryValue: category
                 width: suggestionList.width
                 height: 54
                 highlighted: ListView.isCurrentItem
@@ -290,11 +183,7 @@ Item {
                     if (hovered)
                         suggestionList.currentIndex = index
                 }
-                onClicked: panel.applySelectedSuggestion(
-                    index,
-                    suggestionRow.tagNameValue,
-                    suggestionRow.categoryValue
-                )
+                onClicked: panel.applySelectedSuggestion(index)
 
                 contentItem: RowLayout {
                     spacing: theme.gap
@@ -323,41 +212,104 @@ Item {
     }
 
     ScrollView {
+        id: form
+        objectName: "queryEditorScroll"
         anchors.fill: parent
         clip: true
         contentWidth: availableWidth
-
         ColumnLayout {
-            width: parent.width
-            spacing: 16
-
-            Label {
+            width: form.availableWidth
+            spacing: 8
+            TagPickerPanel {
+                id: tags
                 Layout.fillWidth: true
-                text: qsTr("输入英文标签；使用 AND、OR、NOT 组合条件。")
-                color: theme.mutedText
-                wrapMode: Text.Wrap
-                font.pixelSize: 12
+                theme: panel.theme
+                picker: panel.picker
+                group: advancedToggle.checked ? groupMode.currentValue : "all"
             }
-
-            ActionButton {
-                objectName: "openQueryArtistCombinationsButton"
-                text: qsTr("收藏画师 / 常用组合")
-                onClicked: panel.artistCombinationsRequested(panel.parentPathForInsert())
-            }
-
-            ActionButton {
-                objectName: "openSavedQueriesButton"
-                text: qsTr("保存常用查询")
-                onPressed: panel.savedQueryController.captureDraft()
-                onClicked: panel.savedQueriesRequested()
-            }
-
             Label {
-                text: qsTr("标签或查询表达式")
-                color: theme.text
-                font.bold: true
+                Layout.fillWidth: true; wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText
+                visible: !picker.simpleEditable
+                text: qsTr("当前手写查询：") + controller.advancedText; color: theme.accentText
+            }
+            ActionButton {
+                objectName: "resetComplexTagDraft"
+                visible: !picker.simpleEditable
+                text: qsTr("清空表达式并重新选标签")
+                property int pressedRevision: -1
+                onPressed: pressedRevision = controller.editorRevision
+                onClicked: if (pressedRevision === controller.editorRevision) picker.resetToPicker()
+            }
+            ActionButton {
+                id: standardSearchButton
+                objectName: "searchButton"
+                Layout.fillWidth: true
+                text: qsTr("搜索作品")
+                primary: true
+                enabled: controller.canExecuteStandard
+                onClicked: {
+                    tagController.closeSuggestions()
+                    controller.executeStandard()
+                }
             }
 
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                ActionButton {
+                    objectName: "latestButton"
+                    Layout.fillWidth: true
+                    text: qsTr("最新作品")
+                    enabled: controller.canExecuteLatest
+                    onClicked: {
+                        tagController.closeSuggestions()
+                        controller.executeLatest()
+                    }
+                }
+                ActionButton {
+                    objectName: "globalRankButton"
+                    Layout.fillWidth: true
+                    text: qsTr("近期热门")
+                    enabled: controller.canExecuteGlobalRank
+                    onClicked: {
+                        tagController.closeSuggestions()
+                        controller.executeRank(false)
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: qsTr("本次最多查看"); color: theme.secondaryText }
+                SpinBox {
+                    objectName: "browseMaximum"; Layout.fillWidth: true
+                    from: 1; to: 1000; editable: true
+                    value: Number(controller.draftFormValues.candidateLimit || 1000)
+                    onValueModified: {
+                        const values = Object.assign({}, controller.draftFormValues)
+                        values.candidateLimit = String(value)
+                        controller.updateDraftForm(values)
+                    }
+                }
+                Label { text: qsTr("件"); color: theme.secondaryText }
+            }
+            ActionButton {
+                id: advancedToggle; objectName: "advancedConditionsToggle"; Layout.fillWidth: true
+                checkable: true; flat: true; text: checked ? qsTr("收起高级条件") : qsTr("高级条件")
+                onToggled: { if (!checked) tagController.closeSuggestions() }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true; spacing: 8; visible: advancedToggle.checked
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: qsTr("点击标签时"); color: theme.secondaryText }
+                    ComboBox {
+                        id: groupMode; objectName: "tagGroupMode"; Layout.fillWidth: true
+                        textRole: "label"; valueRole: "key"
+                        model: [{key:"all",label:qsTr("全部包含")},{key:"any",label:qsTr("包含任一")},{key:"exclude",label:qsTr("排除")}]
+                    }
+                }
+                Label { text: qsTr("手写查询表达式"); color: theme.text; font.bold: true }
             TextArea {
                 id: advancedInput
                 objectName: "tagsInput"
@@ -413,338 +365,13 @@ Item {
                 objectName: "discardInvalidTextButton"
                 visible: advancedInput.text.trim().length > 0
                          && !controller.visualEditingEnabled
-                text: qsTr("放弃错误文本并恢复可视编辑")
+                text: qsTr("恢复上一次有效表达式")
                 onClicked: controller.discardInvalidText()
             }
 
-            ActionButton {
-                id: standardSearchButton
-                objectName: "searchButton"
-                Layout.fillWidth: true
-                text: qsTr("搜索作品")
-                primary: true
-                enabled: controller.canExecuteStandard
-                onClicked: {
-                    tagController.closeSuggestions()
-                    controller.executeStandard()
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                ActionButton {
-                    objectName: "latestButton"
-                    Layout.fillWidth: true
-                    text: qsTr("最新作品")
-                    enabled: controller.canExecuteLatest
-                    onClicked: {
-                        tagController.closeSuggestions()
-                        controller.executeLatest()
-                    }
-                }
-                ActionButton {
-                    objectName: "globalRankButton"
-                    Layout.fillWidth: true
-                    text: qsTr("近期热门")
-                    enabled: controller.canExecuteGlobalRank
-                    onClicked: {
-                        tagController.closeSuggestions()
-                        controller.executeRank(false)
-                    }
-                }
-            }
-
-            ActionButton {
-                id: advancedToggle
-                objectName: "advancedConditionsToggle"
-                Layout.fillWidth: true
-                checkable: true
-                checked: false
-                flat: true
-                text: checked ? qsTr("收起可视条件与画师") : qsTr("展开可视条件与画师")
-                onToggled: { if (!checked) tagController.closeSuggestions() }
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                visible: advancedToggle.checked
-                spacing: 16
-                ActionButton {
-                    objectName: "conditionalRankButton"
-                    Layout.fillWidth: true
-                    text: qsTr("在当前条件中查看热门")
-                    enabled: controller.canExecuteConditionalRank
-                    onClicked: {
-                        tagController.closeSuggestions()
-                        controller.executeRank(true)
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: theme.border
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        Layout.fillWidth: true
-                        text: qsTr("可视查询树")
-                        color: theme.text
-                        font.pixelSize: 16
-                        font.bold: true
-                    }
-                    Label {
-                        text: controller.visualEditingEnabled
-                              ? qsTr("可编辑") : qsTr("已因文本错误锁定")
-                        color: controller.visualEditingEnabled ? theme.success : theme.warning
-                        font.pixelSize: 11
-                    }
-                }
-
-                ListView {
-                    id: queryTreeList
-                    objectName: "queryTreeList"
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(250, Math.max(76, contentHeight))
-                    clip: true
-                    model: controller.queryTreeRows
-                    spacing: 4
-
-                    delegate: ItemDelegate {
-                        required property int index
-                        required property var modelData
-                        readonly property var rowPath: modelData.path
-                        readonly property string rowKind: modelData.kind
-                        width: queryTreeList.width
-                        height: 38
-                        leftPadding: 10 + modelData.depth * 18
-                        highlighted: JSON.stringify(panel.selectedPath)
-                                     === JSON.stringify(rowPath)
-                        onClicked: {
-                            panel.selectedPath = rowPath
-                            panel.selectedKind = rowKind
-                        }
-                        contentItem: RowLayout {
-                            Label {
-                                text: modelData.kind === "tag" ? "#" : "◆"
-                                color: modelData.kind === "tag" ? theme.accentText : theme.purple
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                text: modelData.label
-                                color: theme.text
-                                elide: Text.ElideRight
-                            }
-                            Label {
-                                visible: modelData.childCount > 0
-                                text: modelData.childCount
-                                color: theme.subtleText
-                            }
-                        }
-                    }
-
-                    Label {
-                        anchors.centerIn: parent
-                        visible: queryTreeList.count === 0
-                        text: qsTr("查询树为空")
-                        color: theme.subtleText
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    TextField {
-                        id: visualTagInput
-                        objectName: "visualTagInput"
-                        Layout.fillWidth: true
-                        enabled: controller.visualEditingEnabled
-                        placeholderText: qsTr("输入普通标签")
-                        onTextChanged: panel.updateSimpleSuggestions("visual", visualTagInput)
-                        onCursorPositionChanged: panel.updateSimpleSuggestions("visual", visualTagInput)
-                        Keys.onPressed: function(event) {
-                            panel.handleSuggestionKeys(event, visualTagInput, false)
-                            if (!event.accepted
-                                    && (event.key === Qt.Key_Return
-                                        || event.key === Qt.Key_Enter)
-                                    && !visualTagInput.inputMethodComposing) {
-                                panel.addVisualTagFromInput()
-                                event.accepted = true
-                            }
-                        }
-                    }
-                    ActionButton {
-                        objectName: "addVisualTagButton"
-                        text: qsTr("添加")
-                        enabled: controller.visualEditingEnabled
-                                 && visualTagInput.text.trim().length > 0
-                        onClicked: panel.addVisualTagFromInput()
-                    }
-                }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: panel.width >= 380 ? 3 : 2
-                    columnSpacing: 6
-                    rowSpacing: 6
-                    ActionButton {
-                        objectName: "moveNodeUpButton"
-                        text: qsTr("上移")
-                        enabled: controller.visualEditingEnabled && panel.selectedPath !== null
-                        onClicked: controller.moveVisualNode(panel.selectedPath, -1)
-                    }
-                    ActionButton {
-                        objectName: "moveNodeDownButton"
-                        text: qsTr("下移")
-                        enabled: controller.visualEditingEnabled && panel.selectedPath !== null
-                        onClicked: controller.moveVisualNode(panel.selectedPath, 1)
-                    }
-                    ActionButton {
-                        objectName: "removeNodeButton"
-                        text: qsTr("删除")
-                        enabled: controller.visualEditingEnabled && panel.selectedPath !== null
-                        onClicked: controller.removeVisualNode(panel.selectedPath)
-                    }
-                    ActionButton {
-                        objectName: "wrapNotButton"
-                        text: qsTr("包裹 NOT")
-                        enabled: controller.visualEditingEnabled && panel.selectedPath !== null
-                        onClicked: controller.wrapVisualNot(panel.selectedPath)
-                    }
-                    ActionButton {
-                        objectName: "unwrapNotButton"
-                        text: qsTr("解除 NOT")
-                        enabled: controller.visualEditingEnabled && panel.selectedKind === "not"
-                        onClicked: controller.unwrapVisualNot(panel.selectedPath)
-                    }
-                    Item { Layout.fillWidth: true }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    ComboBox {
-                        id: groupOperator
-                        Layout.preferredWidth: 82
-                        Layout.minimumWidth: 72
-                        objectName: "groupOperatorInput"
-                        textRole: "label"
-                        valueRole: "value"
-                        model: [
-                            { "label": "AND", "value": "and" },
-                            { "label": "OR", "value": "or" }
-                        ]
-                    }
-                    TextField {
-                        id: groupSiblingInput
-                        objectName: "groupSiblingInput"
-                        Layout.fillWidth: true
-                        placeholderText: qsTr("与所选条件组合的标签")
-                        enabled: controller.visualEditingEnabled
-                    }
-                    ActionButton {
-                        objectName: "wrapGroupButton"
-                        text: qsTr("建立组")
-                        enabled: controller.visualEditingEnabled
-                                 && panel.selectedPath !== null
-                                 && groupSiblingInput.text.trim().length > 0
-                        onClicked: {
-                            if (controller.wrapVisualGroup(
-                                    panel.selectedPath,
-                                    groupOperator.currentValue,
-                                    groupSiblingInput.text.trim(),
-                                    true))
-                                groupSiblingInput.clear()
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: theme.border
-                }
-
-                Label {
-                    text: qsTr("多画师快捷条件")
-                    color: theme.text
-                    font.pixelSize: 16
-                    font.bold: true
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    TextField {
-                        id: artistInput
-                        objectName: "artistInput"
-                        Layout.fillWidth: true
-                        placeholderText: qsTr("从已确认的画师建议中选择")
-                        enabled: controller.visualEditingEnabled
-                        onTextChanged: panel.updateSimpleSuggestions("artist", artistInput)
-                        onCursorPositionChanged: panel.updateSimpleSuggestions("artist", artistInput)
-                        Keys.onPressed: function(event) {
-                            panel.handleSuggestionKeys(event, artistInput, false)
-                        }
-                    }
-                    ComboBox {
-                        id: artistMode
-                        Layout.preferredWidth: 120
-                        Layout.minimumWidth: 110
-                        objectName: "artistModeInput"
-                        textRole: "label"
-                        valueRole: "value"
-                        model: [
-                            { "label": qsTr("全部包含"), "value": "all" },
-                            { "label": qsTr("任意包含"), "value": "any" },
-                            { "label": qsTr("排除"), "value": "exclude" }
-                        ]
-                    }
-                }
-
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 6
-                    Repeater {
-                        model: panel.confirmedArtists
-                        delegate: ActionButton {
-                            required property var modelData
-                            required property int index
-                            text: modelData.name + "  ×"
-                            onClicked: {
-                                const next = panel.confirmedArtists.slice()
-                                next.splice(index, 1)
-                                panel.confirmedArtists = next
-                            }
-                        }
-                    }
-                }
-
-                Label {
-                    id: artistNotice
-                    Layout.fillWidth: true
-                    visible: text.length > 0
-                    color: theme.warning
-                    wrapMode: Text.Wrap
-                }
-
-                ActionButton {
-                    objectName: "insertArtistGroupButton"
-                    text: qsTr("插入画师条件")
-                    enabled: controller.visualEditingEnabled
-                             && panel.confirmedArtists.length > 0
-                    onClicked: panel.insertArtists()
-                }
-
-                Label {
-                    objectName: "tagSuggestionNotice"
-                    Layout.fillWidth: true
-                    visible: tagController.noticeText.length > 0
-                    text: tagController.noticeText
-                    color: theme.warning
-                    wrapMode: Text.Wrap
-                }
-
-                Item { Layout.preferredHeight: 8 }
+                ActionButton { text: qsTr("按表达式搜索"); objectName: "manualSearchButton"; enabled: controller.canExecuteStandard; onClicked: { tagController.closeSuggestions(); controller.executeStandard() } }
+                ActionButton { objectName: "conditionalRankButton"; text: qsTr("在当前条件中查看热门"); enabled: controller.canExecuteConditionalRank; onClicked: controller.executeRank(true) }
+                Label { Layout.fillWidth: true; visible: tagController.noticeText.length > 0; text: tagController.noticeText; wrapMode: Text.Wrap; color: theme.warning }
             }
         }
     }

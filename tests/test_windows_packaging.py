@@ -160,6 +160,8 @@ def test_pyinstaller_spec_is_onedir_windowed_amd64_with_project_resources() -> N
         "danbooru_multi_search.ui.post_labels",
         "danbooru_multi_search.danbooru.tag_types",
         "danbooru_multi_search.app.tag_suggestions",
+        "danbooru_multi_search.danbooru.tag_catalog",
+        "danbooru_multi_search.ui.tag_picker",
         "danbooru_multi_search.ui.autocomplete",
         "danbooru_multi_search.app.bootstrap",
         "danbooru_multi_search.app.settings",
@@ -464,6 +466,7 @@ def test_verify_onedir_requires_qml_runtime_and_plugins_in_exact_directories(
     (
         "M2Main.qml",
         "QueryEditorPanel.qml",
+        "TagPickerPanel.qml",
         "QueryFilterPanel.qml",
         "QueryStatusBar.qml",
         "HistoryPanel.qml",

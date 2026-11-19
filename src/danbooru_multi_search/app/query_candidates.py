@@ -344,6 +344,17 @@ class QueryCandidateService(QObject):
             return
         processed = self._query.last_processed
         if processed is not None:
+            if processed.source_snapshot.state is QueryExecutionState.PARTIAL_PAUSED and preparation.criteria.allow_more:
+                selected = select_candidates(processed.posts, preparation.criteria,
+                                             selected_keys=preparation.source.selected_keys)
+                if len(selected) < self._requested(preparation):
+                    preparation.supplement_started = True
+                    try:
+                        self._supplement.resume(self._query.capture_checkpoint().execution)
+                    except (ValueError, RuntimeError) as exc:
+                        if self._current(preparation):
+                            self._finish(preparation, selected, processed.source_snapshot, str(exc), "preparation_failed")
+                    return
             self._accept(preparation, processed.posts, processed.source_snapshot)
 
     def _supplement_result(self, snapshot: object) -> None:

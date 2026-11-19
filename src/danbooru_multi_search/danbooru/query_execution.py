@@ -119,6 +119,7 @@ class _ExecutionSession:
     continue_pending: bool = False
     first_page_accepted: bool = False
     acceptance_in_progress: bool = False
+    manual_paging: bool = False
 
     def __post_init__(self) -> None:
         if self.candidates is None:
@@ -174,6 +175,7 @@ class DanbooruMultiBranchExecutor(QObject):
         self._execution_counter = 0
         self._session: _ExecutionSession | None = None
         self._closed = False
+        self._manual_paging = False
         self.before_attempt: Callable[[ExecutionCheckpoint], bool] | None = None
         self.before_abandon: Callable[[ExecutionCheckpoint], bool] | None = None
         self.before_publish: Callable[[ExecutionCheckpoint], bool] | None = None
@@ -196,6 +198,37 @@ class DanbooruMultiBranchExecutor(QObject):
     @property
     def owns_queue(self) -> bool:
         return self._owns_queue
+
+    @property
+    def manual_paging(self) -> bool:
+        return self._manual_paging
+
+    def set_manual_paging(self, enabled: bool) -> None:
+        """Set the policy for future runs; standalone collectors remain automatic."""
+        if type(enabled) is not bool:
+            raise ValueError("manual paging must be a boolean")
+        self._manual_paging = enabled
+
+    @property
+    def can_load_more(self) -> bool:
+        session = self._session
+        return bool(
+            not self._closed and session is not None
+            and session.state is QueryExecutionState.PARTIAL_PAUSED
+            and session.pending_branches
+        )
+
+    def load_more(self) -> bool:
+        """Submit one next branch page, keeping identity, candidates and quotas."""
+        if not self.can_load_more:
+            return False
+        session = self._session
+        session.control_generation += 1
+        session.state = QueryExecutionState.RUNNING
+        self._resume_active_time(session)
+        if self._is_active_session(session):
+            self._submit_next_page(session)
+        return self._is_current_session(session)
 
     @property
     def current_execution_id(self) -> int | None:
@@ -235,6 +268,7 @@ class DanbooruMultiBranchExecutor(QObject):
             branches=[_BranchState() for _ in plan.remote_branches],
             pending_branches=deque(range(len(plan.remote_branches))),
             binding_token=binding_token,
+            manual_paging=self._manual_paging,
         )
         self._session = session
         if old_session is not None:
@@ -300,6 +334,7 @@ class DanbooruMultiBranchExecutor(QObject):
             deque(checkpoint.pending), binding_token=binding_token, counts=checkpoint.counts,
             candidates=by_id, matches={key: by_id[key] for key in checkpoint.matched_ids},
             uncommitted=checkpoint.uncommitted, elapsed_active_seconds=checkpoint.elapsed_active_seconds)
+        session.manual_paging = self._manual_paging
         self._session = session
         if old is not None:
             self._abandon_session(old)
@@ -842,6 +877,12 @@ class DanbooruMultiBranchExecutor(QObject):
             return
         if not session.pending_branches:
             self._finish_after_all_branches(session)
+            return
+
+        if session.manual_paging:
+            self._pause_active_time(session)
+            session.state = QueryExecutionState.PARTIAL_PAUSED
+            self._publish(session)
             return
 
         session.state = QueryExecutionState.RUNNING

@@ -7,6 +7,8 @@ Popup {
     id: panel
     objectName: "appearancePanel"
     required property var controller
+    required property var tags
+    signal importTagsRequested()
     property QtObject theme: AppTheme {}
     parent: Overlay.overlay
     width: Math.min(480, parent ? parent.width - 32 : 480)
@@ -53,13 +55,23 @@ Popup {
             RowLayout {
                 Layout.fillWidth: true
                 Label {
-                    text: qsTr("外观")
+                    text: qsTr("设置")
                     font.pixelSize: 22
                     font.bold: true
                     color: panel.theme.text
                     Layout.fillWidth: true
                 }
                 ActionButton { text: qsTr("关闭"); flat: true; onClicked: panel.close() }
+            }
+            ActionButton {
+                objectName: "importTagsButton"
+                text: tags.importBusy ? qsTr("正在导入标签") : qsTr("导入标签 CSV")
+                enabled: !tags.importBusy
+                onClicked: panel.importTagsRequested()
+            }
+            Label {
+                objectName: "tagImportStatus"; Layout.fillWidth: true; visible: text.length > 0
+                text: tags.importStatusText; wrapMode: Text.WrapAnywhere; color: theme.mutedText
             }
             Label {
                 text: qsTr("主题")

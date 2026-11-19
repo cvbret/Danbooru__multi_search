@@ -45,6 +45,7 @@ def build_tags_request(
     fragment: str,
     *,
     timeout_ms: int = DEFAULT_TIMEOUT_MS,
+    category: int | None = None,
 ) -> QNetworkRequest:
     """Build the fixed M1-002 ``tags.json`` prefix query."""
 
@@ -62,6 +63,10 @@ def build_tags_request(
 
     query = QUrlQuery()
     query.addQueryItem("search[name_matches]", f"{normalized_fragment}*")
+    if category is not None:
+        if type(category) is not int or category not in {0, 1, 3, 4, 5}:
+            raise ValueError("标签分类无效。")
+        query.addQueryItem("search[category]", str(category))
     query.addQueryItem("search[hide_empty]", "true")
     query.addQueryItem("search[is_deprecated]", "false")
     query.addQueryItem("search[order]", "count")

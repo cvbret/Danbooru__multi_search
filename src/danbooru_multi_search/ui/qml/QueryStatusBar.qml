@@ -38,17 +38,17 @@ Rectangle {
             return qsTr("查询已取消，尚未取得可显示结果")
         if (controller.queryState === "partial_limited"
                 && controller.visibleCount === 0)
-            return qsTr("有限扫描已经停止，尚未取得可显示结果")
+            return qsTr("已达到查询上限，没有符合条件的作品")
         if (controller.queryState === "complete"
                 && controller.uniqueCandidates === 0)
-            return qsTr("扫描完成，没有取得候选")
+            return qsTr("没有找到作品")
         if (controller.uniqueCandidates > 0
                 && controller.localMatches === 0)
-            return qsTr("已有候选，但没有作品命中表达式")
+            return qsTr("没有作品符合当前标签条件")
         if (controller.localMatches > 0
                 && controller.visibleCount === 0)
-            return qsTr("表达式已有命中，但全部被本地筛选移除")
-        return qsTr("尚未取得候选")
+            return qsTr("没有作品符合当前筛选条件")
+        return statusBar.active ? qsTr("正在加载作品…") : qsTr("暂无作品")
     }
 
     visible: controller.queryState !== "idle"
@@ -77,14 +77,21 @@ Rectangle {
             Label {
                 objectName: "queryStatusText"
                 Layout.fillWidth: true
-                text: controller.statusText
+                text: {
+                    const count = qsTr("已显示 %1 张").arg(controller.visibleCount)
+                    if (statusBar.active) return count + qsTr(" · 正在加载")
+                    if (controller.canRetry || controller.queryState === "failed") return count + qsTr(" · 加载失败")
+                    if (controller.queryState === "partial_limited") return count + qsTr(" · 已达到查询上限")
+                    if (controller.queryState === "partial_cancelled") return count + qsTr(" · 已取消")
+                    return count
+                }
                 color: theme.text
                 font.bold: true
                 wrapMode: Text.Wrap
             }
 
             Label {
-                visible: controller.failureBranch >= 0
+                visible: detailsButton.checked && controller.failureBranch >= 0
                 text: qsTr("分支 %1 · 第 %2 次请求")
                       .arg(controller.failureBranch + 1)
                       .arg(controller.failurePage)
@@ -92,6 +99,11 @@ Rectangle {
                 font.pixelSize: 12
             }
 
+            ActionButton {
+                id: detailsButton; objectName: "queryStatusDetails"
+                text: checked ? qsTr("收起详情") : qsTr("查询详情")
+                flat: true; checkable: true
+            }
             ActionButton {
                 id: cancelButton
                 objectName: "cancelButton"
@@ -140,6 +152,7 @@ Rectangle {
 
         GridLayout {
             id: countsGrid
+            visible: detailsButton.checked
             Layout.fillWidth: true
             columns: statusBar.width >= 660 ? 4 : 2
             columnSpacing: 8
@@ -194,6 +207,10 @@ Rectangle {
             }
         }
 
+        Label {
+            visible: detailsButton.checked && text.length > 0
+            Layout.fillWidth: true; text: controller.rangeDescription; color: theme.mutedText; wrapMode: Text.Wrap
+        }
         Label {
             objectName: "oldGalleryNotice"
             Layout.fillWidth: true

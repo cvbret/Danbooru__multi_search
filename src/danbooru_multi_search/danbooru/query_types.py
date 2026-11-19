@@ -10,8 +10,10 @@ from danbooru_multi_search.danbooru.models import DanbooruPost
 
 
 DEFAULT_EXECUTION_PAGE_SIZE = 200
+GALLERY_PAGE_SIZE = 50
 DEFAULT_CANDIDATE_LIMIT = 1_000
 DEFAULT_BRANCH_PAGE_LIMIT = 10
+MAX_BRANCH_PAGE_LIMIT = DEFAULT_CANDIDATE_LIMIT // GALLERY_PAGE_SIZE
 DEFAULT_ACTIVE_TIME_LIMIT_SECONDS = 60.0
 
 
@@ -22,6 +24,7 @@ class QueryExecutionState(StrEnum):
     RETRY_WAIT = "retry_wait"
     COMPLETE = "complete"
     PARTIAL_CANCELLED = "partial_cancelled"
+    PARTIAL_PAUSED = "partial_paused"
     PARTIAL_LIMITED = "partial_limited"
     PARTIAL_FAILED = "partial_failed"
     FAILED = "failed"
@@ -76,7 +79,7 @@ class QueryExecutionLimits:
         )
         _positive_bounded_integer(
             self.branch_page_limit,
-            DEFAULT_BRANCH_PAGE_LIMIT,
+            MAX_BRANCH_PAGE_LIMIT,
             "branch_page_limit",
         )
         value = self.active_time_limit_seconds

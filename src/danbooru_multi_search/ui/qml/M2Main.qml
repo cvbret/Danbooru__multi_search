@@ -46,6 +46,8 @@ ApplicationWindow {
     AppearancePanel {
         id: appearancePanel
         controller: appearanceController
+        tags: tagSuggestionController
+        onImportTagsRequested: tagCsvDialog.open()
         theme: root.theme
     }
     EaglePanel { id: eaglePanel; controller: eagleController; theme: root.theme }
@@ -254,27 +256,9 @@ ApplicationWindow {
             galleryGrid.originY,
             Math.min(galleryGrid.contentY, maximum)
         )
-        let index = -1
-        let firstY = Number.POSITIVE_INFINITY
-        let firstX = Number.POSITIVE_INFINITY
-        for (let candidate = 0;
-             candidate < searchController.postsModel.count;
-             ++candidate) {
-            const candidateItem = galleryGrid.itemAtIndex(candidate)
-            if (!candidateItem
-                    || candidateItem.y + candidateItem.height <= boundedContentY
-                    || candidateItem.y >= boundedContentY + galleryGrid.height)
-                continue
-            if (candidateItem.y < firstY
-                    || (candidateItem.y === firstY && candidateItem.x < firstX)) {
-                index = candidate
-                firstY = candidateItem.y
-                firstX = candidateItem.x
-            }
-        }
-        if (index < 0)
-            return
-        const item = galleryGrid.itemAtIndex(index)
+        const item = galleryGrid.topVisibleItem(boundedContentY)
+        if (!item) return
+        const index = item.index
         const postId = searchController.postsModel.postIdAt(index)
         if (!item || postId < 1)
             return
@@ -553,21 +537,16 @@ ApplicationWindow {
                         font.bold: true
                     }
                     ActionButton {
-                        objectName: "importTagsButton"
-                        text: tagSuggestionController.importBusy
-                              ? qsTr("导入中") : qsTr("标签库")
-                        enabled: !tagSuggestionController.importBusy
-                        onClicked: tagCsvDialog.open()
+                        objectName: "openQueryArtistCombinationsButton"
+                        text: qsTr("画师组合"); flat: true; visible: workspaceTabs.currentIndex === 0
+                        onClicked: root.openArtistCombinations(null)
                     }
-                }
-
-                Label {
-                    objectName: "tagImportStatus"
-                    Layout.fillWidth: true
-                    text: tagSuggestionController.importStatusText
-                    color: tagSuggestionController.importBusy ? theme.accentText : theme.subtleText
-                    elide: Text.ElideRight
-                    font.pixelSize: 11
+                    ActionButton {
+                        objectName: "openSavedQueriesButton"
+                        text: qsTr("常用查询"); flat: true; visible: workspaceTabs.currentIndex === 0
+                        onPressed: savedQueries.captureDraft()
+                        onClicked: root.openSavedQueries()
+                    }
                 }
 
                 TabBar {
@@ -595,10 +574,8 @@ ApplicationWindow {
                         theme: root.theme
                         controller: searchController
                         tagController: tagSuggestionController
-                        savedQueryController: savedQueries
+                        picker: tagPicker
                         externalSuggestionSuppressed: root.artistSuggestionsSuppressed || root.savedQuerySuggestionsSuppressed || queryCheckpoints.draftLoading
-                        onSavedQueriesRequested: root.openSavedQueries()
-                        onArtistCombinationsRequested: function(parentPath) { root.openArtistCombinations(parentPath) }
                         onCloseRequested: {
                             if (root.compactLayout)
                                 queryDrawer.close()
@@ -709,7 +686,7 @@ ApplicationWindow {
                     ActionButton {
                         objectName: "openQueryDrawerButton"
                         visible: root.compactLayout
-                        text: qsTr("查询条件")
+                        text: qsTr("选择标签")
                         onClicked: queryDrawer.open()
                     }
                     ColumnLayout {
@@ -758,7 +735,7 @@ ApplicationWindow {
                         }
                         ActionButton {
                             objectName: "appearanceButton"
-                            text: qsTr("外观")
+                            text: qsTr("设置")
                             onClicked: appearancePanel.open()
                         }
                     }
@@ -871,6 +848,8 @@ ApplicationWindow {
                         onDownloadPrepared: function(token) { downloadRequestDialog.showRequest(token) }
                         theme: root.theme
                         onPostActivated: function(row) { root.openPostDetails(row) }
+                        onReachedEnd: if (galleryPage.visible && !detailController.isOpen && searchController.canLoadMore)
+                                          searchController.loadMore()
                         onContentYChanged: root.reportGalleryPosition()
                         onCurrentIndexChanged: root.reportGalleryPosition()
                         onWidthChanged: Qt.callLater(root.reportGalleryPosition)
@@ -901,8 +880,8 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             visible: searchController.queryState === "idle"
                             text: root.compactLayout
-                                  ? qsTr("打开“查询条件”输入英文标签，或查看近期热门与最新作品。")
-                                  : qsTr("在左侧输入英文标签并点击“搜索作品”，也可以查看近期热门与最新作品。")
+                                  ? qsTr("打开标签列表，选择标签后搜索作品。")
+                                  : qsTr("在左侧选择标签后搜索，也可以查看近期热门或最新作品。")
                             color: theme.mutedText
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
@@ -912,7 +891,7 @@ ApplicationWindow {
                             Layout.alignment: Qt.AlignHCenter
                             visible: root.compactLayout
                                      && searchController.queryState === "idle"
-                            text: qsTr("打开查询条件")
+                            text: qsTr("选择标签")
                             onClicked: queryDrawer.open()
                         }
                     }
@@ -924,11 +903,17 @@ ApplicationWindow {
                     Label {
                         objectName: "rangeDescription"
                         Layout.fillWidth: true
-                        text: searchController.rangeDescription.length > 0
-                              ? searchController.rangeDescription
-                              : qsTr("搜索仅在你执行查询时开始")
+                        text: searchController.canLoadMore
+                              ? (galleryGrid.contentHeight > galleryGrid.height ? qsTr("向下滚动可加载更多作品") : "")
+                              : ""
                         color: theme.mutedText
                         wrapMode: Text.Wrap
+                    }
+                    ActionButton {
+                        objectName: "loadMoreWorksButton"
+                        text: qsTr("加载更多作品")
+                        visible: searchController.canLoadMore
+                        onClicked: searchController.loadMore()
                     }
                     ActionButton {
                         objectName: "refreshButton"
@@ -969,7 +954,7 @@ ApplicationWindow {
             onPoolsRequested: function(key, revision) { poolNavigation.requestDetailMemberships(key, revision) }
             complexQueryActionsEnabled: true
             onBackRequested: root.returnToGallery()
-            onImportTagsRequested: tagCsvDialog.open()
+            onSettingsRequested: appearancePanel.open()
             onAddTagToQueryRequested: function(tagName) {
                 root.addDetailTagToDraft(tagName)
             }

@@ -431,9 +431,10 @@ Item {
                 columnSpacing: 8
                 rowSpacing: 8
 
-                Label { text: qsTr("远程单次请求数量") ; color: theme.mutedText }
+                Label { text: qsTr("每次加载数量（最多 50）"); color: theme.mutedText }
                 TextField {
                     id: pageSizeInput
+                    validator: IntValidator { bottom: 1; top: 50 }
                     objectName: "pageSizeInput"
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
@@ -441,9 +442,10 @@ Item {
                     onTextEdited: panel.setValue("pageSize", text)
                 }
 
-                Label { text: qsTr("候选数量上限") ; color: theme.mutedText }
+                Label { text: qsTr("本次最多查看"); color: theme.mutedText }
                 TextField {
                     objectName: "candidateLimitInput"
+                    validator: IntValidator { bottom: 1; top: 1000 }
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     text: panel.textValue("candidateLimit")
@@ -453,6 +455,7 @@ Item {
                 Label { text: qsTr("每分支页数上限") ; color: theme.mutedText }
                 TextField {
                     objectName: "branchPageLimitInput"
+                    validator: IntValidator { bottom: 1; top: 20 }
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     text: panel.textValue("branchPageLimit")

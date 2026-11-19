@@ -86,6 +86,7 @@ _RESULT_STATE_TEXT = {
     "retry_wait": "等待自动重试",
     "complete": "扫描完成",
     "partial_cancelled": "已取消并保留部分结果",
+    "partial_paused": "已加载部分结果，等待继续",
     "partial_limited": "有限扫描完成",
     "partial_failed": "部分结果请求失败",
     "failed": "查询失败",

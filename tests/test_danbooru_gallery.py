@@ -130,6 +130,15 @@ def test_clear_removes_empty_m2_gallery_operation_identity():
     assert model.revision == revision + 1
 
 
+def test_sort_anchor_notification_cannot_replace_newer_gallery():
+    model = DanbooruPostListModel()
+    rows = tuple(ProcessedPost(_post_model(i, score=2, fav_count=1), None) for i in (1, 2, 3))
+    model.set_processed_posts(7, rows[:2])
+    model.viewReordering.connect(lambda: model.set_processed_posts(8, rows[2:]))
+    assert not model.set_processed_posts(7, tuple(reversed(rows[:2])))
+    assert model.display_operation_id == 8 and model.posts == (rows[2].post,)
+
+
 def test_rating_labels_share_one_ui_table_and_keep_original_lookup_rules():
     from danbooru_multi_search.core.favorites import (
         FavoriteIdentity, FavoriteItem, FavoriteObjectType,

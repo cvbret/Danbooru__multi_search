@@ -15,7 +15,7 @@ Item {
     readonly property bool wideLayout: width >= 980
     onWideLayoutChanged: { if (wideLayout) informationDrawer.close() }
     signal backRequested()
-    signal importTagsRequested()
+    signal settingsRequested()
     signal addTagToQueryRequested(string tagName)
     signal downloadPrepared(string token)
     signal eagleImportRequested(string key, int revision)
@@ -100,10 +100,10 @@ Item {
                 onClicked: informationDrawer.open()
             }
             ActionButton {
-                objectName: "detailImportTagsButton"
-                text: qsTr("标签库")
+                objectName: "detailSettingsButton"
+                text: qsTr("设置")
                 flat: true
-                onClicked: page.importTagsRequested()
+                onClicked: page.settingsRequested()
             }
         }
 

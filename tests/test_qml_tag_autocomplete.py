@@ -102,6 +102,7 @@ def _create_window():
         )
     )
     tags_input = root.findChild(QObject, "tagsInput")
+    root.findChild(QObject, "advancedConditionsToggle").setProperty("checked", True)
     suggestion_popup = root.findChild(QObject, "suggestionPopup")
     suggestion_list = root.findChild(QObject, "suggestionList")
     return (
@@ -256,7 +257,10 @@ def test_visible_csv_import_controls_exist_without_opening_native_dialog():
         file_dialog = root.findChild(QObject, "tagCsvDialog")
 
         assert import_button is not None
-        assert import_button.property("visible") is True
+        assert not root.findChild(QObject, "appearancePanel").property("opened")
+        root.findChild(QObject, "appearanceButton").clicked.emit()
+        assert _wait_until(lambda: root.findChild(QObject, "appearancePanel").property("opened"))
+        assert import_button.property("visible") is True and import_button.property("text") == "导入标签 CSV"
         assert import_button.property("enabled") is True
         assert import_status is not None
         assert "尚未导入" in import_status.property("text")

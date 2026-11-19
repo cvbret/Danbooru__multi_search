@@ -181,6 +181,7 @@ _RATING_VALUES = {
 _PARTIAL_STATES = frozenset(
     {
         QueryExecutionState.PARTIAL_CANCELLED,
+        QueryExecutionState.PARTIAL_PAUSED,
         QueryExecutionState.PARTIAL_LIMITED,
         QueryExecutionState.PARTIAL_FAILED,
     }

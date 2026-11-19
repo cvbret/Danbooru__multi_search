@@ -305,11 +305,11 @@ def test_query_input_precedes_actions_and_advanced_controls_start_collapsed(tmp_
         root.setWidth(1280)
         root.setHeight(820)
         APPLICATION.processEvents()
-        query_input = root.findChild(QObject, "tagsInput")
+        query_input = root.findChild(QObject, "tagPickerFilter")
         search = root.findChild(QObject, "searchButton")
         toggle = root.findChild(QObject, "advancedConditionsToggle")
         status = root.findChild(QObject, "queryStatusBar")
-        assert query_input.property("y") < search.property("y")
+        assert query_input.isVisible() and root.findChild(QObject, "favoriteTagsTab").isVisible()
         assert search.property("highlighted") is True
         assert toggle.property("checked") is False
         assert status.property("visible") is False
@@ -318,15 +318,14 @@ def test_query_input_precedes_actions_and_advanced_controls_start_collapsed(tmp_
         assert error.property("text") == ""
         assert search.property("enabled") is False
         assert search.property("background").property("color") != root.property("theme").property("accent")
-        assert query_input.property("background").property("radius") >= 6
-        assert query_input.property("background").property("color") != root.property("theme").property("surface")
         header = root.findChild(QObject, "browseHeader")
         tools = root.findChild(QObject, "browseTools")
         assert abs(tools.property("x") + tools.property("width") - header.property("width")) < 1.5
-        assert root.findChild(QObject, "queryTreeList").isVisible() is False
+        assert root.findChild(QObject, "queryTreeList") is None
+        assert not root.findChild(QObject, "tagsInput").isVisible()
         toggle.setProperty("checked", True)
         APPLICATION.processEvents()
-        assert root.findChild(QObject, "queryTreeList").isVisible() is True
+        assert root.findChild(QObject, "tagsInput").isVisible()
         assert bridge.applyAdvancedText("cat AND") is False
         APPLICATION.processEvents()
         assert error.property("visible") is True
@@ -362,5 +361,29 @@ def test_narrow_detail_uses_full_width_and_has_accessible_information_drawer(tmp
         panel = root.findChild(QObject, "detailInformationPanel")
         assert panel.property("width") <= 400
         assert QMetaObject.invokeMethod(drawer, "close", Qt.ConnectionType.DirectConnection)
+    finally:
+        _close(engine, root, session)
+
+
+def test_detail_settings_opens_settings_with_csv_import(tmp_path):
+    engine, root, session, bridge, _runtime = _window(tmp_path, wide=True)
+    try:
+        bridge.postsModel.set_posts((DanbooruPost(
+            id=1, preview_url=None, large_file_url=None, file_url=None,
+            score=0, fav_count=0, rating="g", width=100, height=100, file_ext="jpg",
+        ),))
+        root.requestActivate()
+        assert QTest.qWaitForWindowExposed(root)
+        assert QMetaObject.invokeMethod(
+            root, "openPostDetails", Qt.ConnectionType.DirectConnection, Q_ARG("QVariant", 0),
+        )
+        settings = root.findChild(QObject, "detailSettingsButton")
+        assert _wait_until(lambda: settings.isVisible())
+        center = settings.mapToScene(QPointF(settings.width() / 2, settings.height() / 2))
+        QTest.mouseClick(root, Qt.MouseButton.LeftButton, pos=center.toPoint())
+        panel = root.findChild(QObject, "appearancePanel")
+        assert _wait_until(lambda: panel.property("opened"))
+        assert root.findChild(QObject, "importTagsButton").isVisible()
+        assert not root.findChild(QObject, "tagCsvDialog").property("visible")
     finally:
         _close(engine, root, session)

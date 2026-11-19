@@ -103,6 +103,7 @@ QML_FILES = (
     "PoolMembershipPanel.qml",
     "ImageViewer.qml",
     "QueryEditorPanel.qml",
+    "TagPickerPanel.qml",
     "QueryFilterPanel.qml",
     "QueryStatusBar.qml",
     "HistoryPanel.qml",

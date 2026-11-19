@@ -506,7 +506,7 @@ def _search_row(identifier):
     }
 
 
-def _latest_json_query(pages, *, branch_page_limit=10):
+def _latest_json_query(pages, *, branch_page_limit=10, page_size=2, form_values=None):
     from danbooru_multi_search.ui.query_controller import DanbooruM2QueryController
     from danbooru_multi_search.ui.query_state import M2QueryBridgeController
 
@@ -529,7 +529,9 @@ def _latest_json_query(pages, *, branch_page_limit=10):
     core = DanbooruM2QueryController("https://example.invalid", executor=executor)
     bridge = M2QueryBridgeController(core)
     form = bridge.draftFormValues
-    form.update(pageSize="2", branchPageLimit=str(branch_page_limit))
+    form.update(pageSize=str(page_size), branchPageLimit=str(branch_page_limit))
+    if form_values:
+        form.update(form_values)
     assert bridge.updateDraftForm(form) and bridge.executeLatest()
     scheduler.run_ready()
     return core, bridge, executor, queue, scheduler, manager, replies
@@ -542,11 +544,10 @@ def test_latest_query_skips_unavailable_posts_but_keeps_next_page_and_checkpoint
     core, bridge, executor, queue, scheduler, manager, replies = _latest_json_query([first, [_search_row(1)]])
     try:
         replies[0].finished.emit()
-        assert executor.snapshot.state == QueryExecutionState.RUNNING
+        assert executor.snapshot.state == QueryExecutionState.PARTIAL_PAUSED
         assert executor.snapshot.counts.remote_rows == 2
         assert executor.snapshot.branch_progress[0].next_page == 2
         assert bridge.errorCode == ""
-        assert core.cancel()
         checkpoint = decode_checkpoint(encode_checkpoint(core.capture_checkpoint()))
         assert checkpoint.execution.counts.remote_rows == 2
         assert checkpoint.execution.counts.unique_candidates == sum("preview_file_url" in row for row in first)
@@ -573,6 +574,7 @@ def test_latest_query_and_checkpoint_treat_server_parentheses_as_tag_data():
     core, bridge, executor, queue, scheduler, _manager, replies = _latest_json_query([[row, _search_row(2)], []])
     try:
         replies[0].finished.emit()
+        assert bridge.loadMore()
         scheduler.run_ready()
         replies[1].finished.emit()
         assert bridge.errorCode == "" and executor.snapshot.state is QueryExecutionState.COMPLETE
@@ -597,6 +599,7 @@ def test_unavailable_page_uses_raw_count_for_end_limits_and_rejection(kind):
     try:
         replies[0].finished.emit()
         if kind == "page_limit":
+            assert bridge.loadMore()
             scheduler.run_ready()
             replies[1].finished.emit()
             assert executor.snapshot.state == QueryExecutionState.PARTIAL_LIMITED
@@ -633,6 +636,7 @@ def test_latest_entry_retries_failed_first_page_then_keeps_visible_siblings():
         assert [post.id for post in core.posts_model.posts] == [4]
         assert bridge.visibleCount == 1 and not bridge.errorText
 
+        assert bridge.loadMore()
         scheduler.run_ready()
         replies[2].finished.emit()
         assert executor.snapshot.state is QueryExecutionState.COMPLETE

@@ -28,6 +28,9 @@ from danbooru_multi_search.danbooru.query_definition import (
 )
 from danbooru_multi_search.danbooru.query_types import (
     ACTIVE_EXECUTION_STATES,
+    DEFAULT_EXECUTION_PAGE_SIZE,
+    GALLERY_PAGE_SIZE,
+    MAX_BRANCH_PAGE_LIMIT,
     QueryExecutionErrorCode,
     QueryExecutionSnapshot,
     QueryExecutionState,
@@ -75,6 +78,7 @@ _STATE_TEXT = {
     QueryExecutionState.RETRY_WAIT: "正在等待自动重试",
     QueryExecutionState.COMPLETE: "有限扫描已经完成",
     QueryExecutionState.PARTIAL_CANCELLED: "查询已取消，现有结果已经保留",
+    QueryExecutionState.PARTIAL_PAUSED: "当前批次已加载，滚动到底或手动继续加载",
     QueryExecutionState.PARTIAL_FAILED: "查询失败，现有结果已经保留",
     QueryExecutionState.FAILED: "查询失败，没有取得可用的新结果",
 }
@@ -124,6 +128,11 @@ class M2QueryBridgeController(QObject):
         if not isinstance(self._time_zone, QTimeZone) or not self._time_zone.isValid():
             raise ValueError("time_zone must be a valid QTimeZone")
         self._raw_form = default_query_form_values()
+        self._raw_form["pageSize"] = str(GALLERY_PAGE_SIZE)
+        self._raw_form["branchPageLimit"] = str(MAX_BRANCH_PAGE_LIMIT)
+        configure = getattr(controller.executor, "set_manual_paging", None)
+        if configure is not None:
+            configure(True)
         self._draft_mode = QueryMode.STANDARD
         self._rank_uses_expression = False
         self._form: QueryFormState | None = None
@@ -366,6 +375,22 @@ class M2QueryBridgeController(QObject):
             return 0
         return self._visible_count
 
+    @Property(int, notify=countsChanged)
+    def loadedCount(self) -> int:
+        return self._visible_count
+
+    @Property(bool, notify=availabilityChanged)
+    def canLoadMore(self) -> bool:
+        return not self._closing and bool(getattr(self._controller.executor, "can_load_more", False))
+
+    @Property(bool, notify=availabilityChanged)
+    def isLoadingMore(self) -> bool:
+        return bool(not self._closing and self._snapshot and self._snapshot.state in ACTIVE_EXECUTION_STATES)
+
+    @Slot(result=bool)
+    def loadMore(self) -> bool:
+        return self.canLoadMore and self._controller.load_more()
+
     @Property(str, notify=galleryChanged)
     def rangeDescription(self) -> str:
         return self._gallery_range
@@ -477,6 +502,7 @@ class M2QueryBridgeController(QObject):
             self._emit_all()
             return False
         self._raw_form = deepcopy(dict(values))
+        self._limit_gallery_page_size(self._raw_form)
         result = self._parse_current_form()
         self._command_error = None
         self._emit_all()
@@ -533,6 +559,7 @@ class M2QueryBridgeController(QObject):
                 definition,
                 time_zone=self._time_zone,
             )
+            self._limit_gallery_page_size(values)
             parsed_form = parse_query_form(
                 values,
                 mode=definition.mode,
@@ -546,6 +573,9 @@ class M2QueryBridgeController(QObject):
                     diagnostic = self._editor_diagnostic()
                     assert diagnostic is not None
                     raise QueryInputError(diagnostic)
+            else:
+                self._editor.discard_invalid_text()
+                self._editor.replace_root(None)
         except Exception as exc:
             self._set_exception_error(exc)
             return False
@@ -610,6 +640,17 @@ class M2QueryBridgeController(QObject):
         self._command_error = None
         self._emit_all()
         return accepted
+
+    @Slot(result=bool)
+    def clearDraftExpression(self) -> bool:
+        """Clear both the visible text and its last valid tree, retaining the query form."""
+        if self._closing or not self._begin_draft_edit() or self._closing:
+            return False
+        self._editor.discard_invalid_text()
+        self._editor.replace_root(None)
+        self._command_error = None
+        self._emit_all()
+        return True
 
     @Slot(result=bool)
     def discardInvalidText(self) -> bool:
@@ -1330,12 +1371,21 @@ class M2QueryBridgeController(QObject):
         return self._snapshot.failure if self._snapshot is not None else None
 
     @staticmethod
+    def _limit_gallery_page_size(values: dict[str, object]) -> None:
+        value = values.get("pageSize")
+        text = value.strip() if isinstance(value, str) else ""
+        if len(text) <= 3 and text.isascii() and text.isdigit():
+            size = int(text)
+            if GALLERY_PAGE_SIZE < size <= DEFAULT_EXECUTION_PAGE_SIZE:
+                values["pageSize"] = str(GALLERY_PAGE_SIZE)
+
+    @staticmethod
     def _execution_signature(definition: GalleryQueryDefinition) -> tuple[object, ...]:
         return (
             definition.mode,
             definition.normalized_expression,
             definition.rating,
-            definition.limits,
+            replace(definition.limits, page_size=min(definition.limits.page_size, GALLERY_PAGE_SIZE)),
         )
 
     @staticmethod

@@ -95,6 +95,8 @@ from danbooru_multi_search.storage.pool_downloads import PoolDownloadRepository
 from danbooru_multi_search.app.pool_downloads import PoolDownloadManager
 from danbooru_multi_search.ui.pool_downloads import PoolDownloadController
 from danbooru_multi_search.ui.eagle import EagleController
+from danbooru_multi_search.ui.tag_picker import TagPickerController
+from danbooru_multi_search.app.tag_suggestions import TagSuggestionService
 from danbooru_multi_search.app.eagle_runtime import EagleRuntime
 from danbooru_multi_search.ui.launcher import create_eagle_backend_factory, create_eagle_import_controllers
 from danbooru_multi_search.integrations.eagle import EagleWebApiBridge
@@ -124,6 +126,7 @@ QML_DIRECTORY = (
 
 
 class _UiExecutor(QObject):
+    manual_paging = True
     executionBound = Signal(object)
     firstPageAccepted = Signal(object)
     snapshotChanged = Signal(object)
@@ -338,6 +341,11 @@ def _create_window(tmp_path):
     write_access = SharedWriteAccess()
     favorite_writes = FavoriteWriteService(favorite_repository, write_access)
     favorites = FavoriteController(favorite_repository, favorite_writes)
+    picker = TagPickerController(favorite_repository, favorites, core.posts_model, TagSuggestionService(
+        "https://example.invalid", task_queue=task_queue, network_manager=network_manager,
+        translation_store=translations, connect_application_quit=False,
+    ))
+    picker.bindQuery(bridge)
     selection = GallerySelectionController(core.posts_model, favorites)
     detail_favorites = DetailFavoritesController(details, favorites)
     collection = FavoriteCollectionController(favorite_repository, favorites, detail_navigation)
@@ -418,6 +426,7 @@ def _create_window(tmp_path):
     context.setContextProperty("favoriteCollection", collection)
     context.setContextProperty("favoriteController", favorites)
     context.setContextProperty("gallerySelection", selection)
+    context.setContextProperty("tagPicker", picker)
     context.setContextProperty("detailFavorites", detail_favorites)
     context.setContextProperty("poolBrowser", pool_browser)
     context.setContextProperty("poolNavigation", pool_navigation)
@@ -427,7 +436,7 @@ def _create_window(tmp_path):
     context.setContextProperty("eagleImport", eagle_import)
     context.setContextProperty("eagleBatch", eagle_batch)
     engine.load(QUrl.fromLocalFile(str(QML_DIRECTORY / "M2Main.qml")))
-    assert engine.rootObjects(), [error.toString() for error in engine.warnings()]
+    assert engine.rootObjects(), [error.toString() for error in qml_warnings]
     root = engine.rootObjects()[0]
     return {
         "engine": engine,
@@ -445,6 +454,7 @@ def _create_window(tmp_path):
         "images": images,
         "factory": factory,
         "favorites": favorites,
+        "picker": picker,
         "collection": collection,
         "transfer": transfer,
         "download_ui": download_ui,
@@ -475,6 +485,7 @@ def _create_window(tmp_path):
 
 
 def _close_window(values) -> None:
+    values["picker"].shutdown()
     values["eagle"].shutdown()
     values["eagle_import_job"].begin_shutdown()
     values["eagle_batch"].job.begin_shutdown()
@@ -559,10 +570,10 @@ def test_m2_root_loads_split_panels_and_has_no_pagination(tmp_path):
             "candidateLimitInput",
             "branchPageLimitInput",
             "activeTimeLimitInput",
-            "queryTreeList",
-            "addVisualTagButton",
-            "wrapGroupButton",
-            "insertArtistGroupButton",
+            "tagPickerRows",
+            "favoriteTagsTab",
+            "tagGroupMode",
+            "browseMaximum",
             "historyList",
             "queryStatusBar",
             "galleryGrid",
@@ -578,6 +589,7 @@ def test_m2_root_loads_split_panels_and_has_no_pagination(tmp_path):
             _find(root, name)
         assert root.findChild(QObject, "previousPageButton") is None
         assert root.findChild(QObject, "nextPageButton") is None
+        assert root.findChild(QObject, "queryTreeList") is None
         assert root.property("compactLayout") is False
         assert not [
             warning.toString()
@@ -618,6 +630,7 @@ def test_status_count_cards_use_two_rows_when_content_is_narrow(
         assert values["bridge"].executeStandard()
         APPLICATION.processEvents()
         assert status_bar.property("visible") is True
+        _find(root, "queryStatusDetails").setProperty("checked", True)
         card_names = (
             "remoteRowsCountCard",
             "uniqueCandidatesCountCard",
@@ -696,6 +709,7 @@ def test_ime_return_does_not_execute_and_completion_selection_only_edits(tmp_pat
     values = _create_window(tmp_path)
     try:
         root = values["root"]
+        _find(root, "advancedConditionsToggle").setProperty("checked", True)
         tags_input = _find(root, "tagsInput")
         tags_input.setProperty("text", "ca OR dog")
         tags_input.setProperty("cursorPosition", 2)
@@ -750,6 +764,7 @@ def test_escape_cancels_pending_completion_before_closing_compact_panel(tmp_path
             Qt.ConnectionType.DirectConnection,
         )
         assert _wait_until(lambda: drawer.property("opened"))
+        _find(root, "advancedConditionsToggle").setProperty("checked", True)
         tags_input = _find(root, "tagsInput")
         tags_input.setProperty("text", "unlisted_tag")
         tags_input.setProperty("cursorPosition", len("unlisted_tag"))
@@ -790,67 +805,83 @@ def test_widening_window_closes_compact_query_drawer(tmp_path):
         _close_window(values)
 
 
-def test_tree_revision_clears_stale_selection_before_second_delete(tmp_path):
+def test_clickable_tags_starred_list_groups_and_removal(tmp_path):
+    from tests.test_qml_favorites import click, item
+
     values = _create_window(tmp_path)
     try:
-        root = values["root"]
+        root, picker, bridge = values["root"], values["picker"], values["bridge"]
+        bridge.applyAdvancedText("")
+        root.requestActivate()
+        assert QTest.qWaitForWindowExposed(root)
+        assert not _find(root, "tagsInput").isVisible()
+        first = picker.rows[0]["key"]
+        click(root, item(root, "starTag_" + first))
+        click(root, item(root, "favoriteTagsTab"))
+        assert [row["name"] for row in picker.rows] == [first]
+        click(root, item(root, "chooseTag_" + first))
+        assert bridge.canonicalExpression == first, (picker.expression, picker.selectedRows, values["qml_warnings"])
+        click(root, item(root, "selectedTag_" + first))
+        assert not picker.selectedRows
+        click(root, item(root, "pickTagsTab"))
         _find(root, "advancedConditionsToggle").setProperty("checked", True)
-        bridge = values["bridge"]
-        assert bridge.applyAdvancedText("cat AND dog AND bird") is True
-        editor = _find(root, "queryEditorPanel")
-        editor.setProperty("selectedPath", [0])
-        editor.setProperty("selectedKind", "tag")
-        remove_button = _find(root, "removeNodeButton")
-
-        _click(root, remove_button)
-
-        assert bridge.canonicalExpression == "dog AND bird"
-        assert editor.property("selectedPath") is None
-        assert editor.property("selectedKind") == ""
-        _click(root, remove_button)
-        assert bridge.canonicalExpression == "dog AND bird"
+        APPLICATION.processEvents()
+        group = _find(root, "tagGroupMode")
+        results = [row["key"] for row in picker.rows[:4]]
+        QTest.qWait(60)
+        for index, name in zip((0, 1, 1, 2), results, strict=True):
+            group.setProperty("currentIndex", index)
+            choice = item(root, "chooseTag_" + name)
+            click(root, choice)
+            assert any(row["key"] == name for row in picker.selectedRows), (name, picker.expression)
+        assert [row["group"] for row in picker.selectedRows] == ["all", "any", "any", "exclude"]
+        assert all(operator in bridge.canonicalExpression for operator in ("AND", "OR", "NOT"))
+        assert not values["executor"].start_calls
+        _click(root, _find(root, "searchButton"))
+        assert len(values["executor"].start_calls) == 1
     finally:
         _close_window(values)
 
 
-def test_clicked_suggestion_row_supplies_its_own_tag_and_artist_category(tmp_path):
+@pytest.mark.parametrize("width", [1280, 820])
+def test_manual_and_loaded_drafts_replace_old_choices_and_protect_complex_text(tmp_path, width):
+    from tests.test_m2_session_state import _definition
+    from tests.test_qml_favorites import click, item
+
     values = _create_window(tmp_path)
     try:
-        root = values["root"]
-        _find(root, "advancedConditionsToggle").setProperty("checked", True)
-        visual_input = _find(root, "visualTagInput")
-        visual_input.forceActiveFocus()
+        root, picker, bridge = values["root"], values["picker"], values["bridge"]
+        root.setWidth(width)
         root.requestActivate()
-        visual_input.setProperty("text", "ca")
-        visual_input.setProperty("cursorPosition", 2)
-        assert _wait_until(
-            lambda: _find(root, "suggestionPopup").property("opened")
-        )
-        suggestion_list = _find(root, "suggestionList")
-        assert suggestion_list.property("currentIndex") == 0
-        second_row = _find_visual_item(root, "suggestionRow_1")
-        assert second_row is not None
-        _click(root, second_row)
-        assert visual_input.property("text") == "cat_ears"
-        _click(root, _find(root, "addVisualTagButton"))
-        assert "cat_ears" in values["bridge"].canonicalExpression
-
-        artist_input = _find(root, "artistInput")
-        artist_input.forceActiveFocus()
-        artist_input.setProperty("text", "sample")
-        artist_input.setProperty("cursorPosition", len("sample"))
-        assert _wait_until(
-            lambda: _find(root, "suggestionPopup").property("opened")
-        )
-        assert suggestion_list.property("currentIndex") == 0
-        second_artist = _find_visual_item(root, "suggestionRow_1")
-        assert second_artist is not None
-        _click(root, second_artist)
-        editor = _find(root, "queryEditorPanel")
-        artists = editor.property("confirmedArtists")
-        if hasattr(artists, "toVariant"):
-            artists = artists.toVariant()
-        assert artists == [{"name": "sample_painter", "category": 1}]
+        assert QTest.qWaitForWindowExposed(root)
+        if width == 820:
+            click(root, item(root, "openQueryDrawerButton"))
+            assert _wait_until(lambda: _find(root, "queryDrawer").property("opened"))
+        toggle = _find(root, "advancedConditionsToggle")
+        toggle.setProperty("checked", True)
+        _find(root, "tagsInput").setProperty("text", "dog")
+        assert [row["name"] for row in picker.selectedRows] == ["dog"]
+        toggle.setProperty("checked", False)
+        assert bridge.loadDraftDefinition(_definition("bird"))
+        assert [row["name"] for row in picker.selectedRows] == ["bird"]
+        assert bridge.applyAdvancedText("(cat AND dog) OR bird")
+        text = bridge.advancedText
+        assert text == bridge.canonicalExpression
+        assert not picker.simpleEditable and not picker.selectedRows
+        assert not item(root, "chooseTag_" + picker.rows[0]["key"]).isEnabled()
+        toggle.setProperty("checked", True)
+        assert _find(root, "tagsInput").property("text") == text
+        toggle.setProperty("checked", False)
+        assert bridge.advancedText == text
+        reset = item(root, "resetComplexTagDraft")
+        scroll = item(root, "queryEditorScroll").property("contentItem")
+        center = reset.mapToItem(scroll, QPointF(0, reset.height() / 2))
+        max_y = max(0, scroll.property("contentHeight") - scroll.height())
+        desired_y = scroll.property("contentY") + center.y() - scroll.height() / 2
+        scroll.setProperty("contentY", max(0, min(max_y, desired_y)))
+        APPLICATION.processEvents()
+        click(root, reset)
+        assert picker.simpleEditable and not bridge.advancedText and not values["executor"].start_calls
     finally:
         _close_window(values)
 
@@ -1127,15 +1158,15 @@ def test_status_bar_distinguishes_five_empty_result_states():
     )
     assert item is not None, [error.toString() for error in component.errors()]
     cases = (
-        ({}, "尚未取得候选"),
-        ({"queryState": "complete"}, "扫描完成，没有取得候选"),
+        ({}, "暂无作品"),
+        ({"queryState": "complete"}, "没有找到作品"),
         (
             {"queryState": "complete", "remoteRows": 4},
-            "扫描完成，没有取得候选",
+            "没有找到作品",
         ),
         (
             {"queryState": "complete", "remoteRows": 4, "uniqueCandidates": 3},
-            "已有候选，但没有作品命中表达式",
+            "没有作品符合当前标签条件",
         ),
         (
             {
@@ -1144,7 +1175,7 @@ def test_status_bar_distinguishes_five_empty_result_states():
                 "uniqueCandidates": 3,
                 "localMatches": 2,
             },
-            "表达式已有命中，但全部被本地筛选移除",
+            "没有作品符合当前筛选条件",
         ),
         (
             {"queryState": "failed", "oldGalleryVisible": True},
@@ -1168,7 +1199,7 @@ def test_status_bar_distinguishes_five_empty_result_states():
             assert item.property("emptyStateText") == expected
         controller.update(queryState="running", oldGalleryVisible=True)
         APPLICATION.processEvents()
-        assert item.property("emptyStateText") == "尚未取得候选"
+        assert item.property("emptyStateText") == "正在加载作品…"
     finally:
         item.deleteLater()
         engine.deleteLater()
