@@ -340,6 +340,7 @@ def _candidate_from_item(item: FavoriteItem) -> FavoriteCandidate:
 
 
 def _post_tag_pairs(post: DanbooruPost) -> tuple[tuple[str, str], ...]:
+    """Extract the index from post values already checked by shared validation."""
     groups = (
         ("artist", post.artist_tags),
         ("character", post.character_tags),
@@ -347,18 +348,7 @@ def _post_tag_pairs(post: DanbooruPost) -> tuple[tuple[str, str], ...]:
         ("general", post.general_tags),
         ("meta", post.meta_tags),
     )
-    pairs: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for category, tags in groups:
-        if not isinstance(tags, tuple):
-            raise FavoriteError("invalid_summary", "作品标签组必须是不可变序列。")
-        for tag in tags:
-            normalized = _normalize_tag(tag)
-            if normalized != tag or normalized in seen:
-                raise FavoriteError("invalid_summary", "作品标签未规范化或存在重复。")
-            seen.add(normalized)
-            pairs.append((category, normalized))
-    return tuple(pairs)
+    return tuple((category, tag) for category, tags in groups for tag in tags)
 
 
 def _validate_post(post: DanbooruPost) -> None:
@@ -383,7 +373,6 @@ def _validate_post(post: DanbooruPost) -> None:
         validate_post_values(post)
     except PostValidationError as exc:
         raise FavoriteError("invalid_summary", f"作品概要无效：{exc}") from exc
-    _post_tag_pairs(post)
 
 
 def _normalize_folder_name(name: str) -> tuple[str, str]:

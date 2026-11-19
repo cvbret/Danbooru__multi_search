@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 
 from danbooru_multi_search.danbooru.models import DanbooruPost
-from danbooru_multi_search.danbooru.tag_syntax import normalize_tag_name
+from danbooru_multi_search.danbooru.tag_syntax import normalize_post_tag
 
 
 _TAG_FIELDS = (
@@ -86,7 +86,7 @@ def validate_post_values(post: DanbooruPost) -> None:
             if not isinstance(tag, str):
                 raise PostValidationError(f"{field_name} must contain text")
             try:
-                normalized = normalize_tag_name(tag)
+                normalized = normalize_post_tag(tag)
             except (TypeError, ValueError) as exc:
                 raise PostValidationError(
                     f"{field_name} contains an invalid tag"

@@ -165,8 +165,8 @@ def has_valid_internal_parentheses(value: str) -> bool:
     return depth == 0
 
 
-def normalize_tag_name(value: str) -> str:
-    """Validate and normalize one non-metatag Danbooru tag name."""
+def normalize_post_tag(value: str) -> str:
+    """Normalize a returned tag value without interpreting query punctuation."""
 
     if not isinstance(value, str):
         raise TagSyntaxError("tag_not_text", "Tag name must be text.")
@@ -188,23 +188,29 @@ def normalize_tag_name(value: str) -> str:
             "unsupported_tag_character",
             "标签包含不支持的控制字符。",
         )
-    if stripped.startswith(("-", "~")):
+    return stripped.casefold()
+
+
+def normalize_tag_name(value: str) -> str:
+    """Validate and normalize one non-metatag query tag name."""
+
+    normalized = normalize_post_tag(value)
+    if normalized.startswith(("-", "~")):
         raise TagSyntaxError(
             "search_prefix_not_allowed",
             "当前阶段不支持排除标签或 OR 前缀。",
         )
-    if "*" in stripped:
+    if "*" in normalized:
         raise TagSyntaxError(
             "wildcard_not_allowed",
             "当前阶段不支持通配符查询。",
         )
-    normalized = stripped.casefold()
     if normalized in QUERY_OPERATOR_NAMES:
         raise TagSyntaxError(
             "reserved_query_operator",
             "AND、OR 和 NOT 是保留的查询运算符。",
         )
-    if not has_valid_internal_parentheses(stripped):
+    if not has_valid_internal_parentheses(normalized):
         raise TagSyntaxError(
             "invalid_tag_parentheses",
             "当前阶段不支持括号查询表达式。",

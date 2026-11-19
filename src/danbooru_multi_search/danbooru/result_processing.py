@@ -22,6 +22,7 @@ from danbooru_multi_search.danbooru.query_planning import (
 )
 from danbooru_multi_search.danbooru.tag_syntax import (
     TagSyntaxError,
+    normalize_post_tag,
     normalize_tag_name,
 )
 
@@ -528,7 +529,7 @@ def _validated_post_tags(post: DanbooruPost, index: int) -> frozenset[str]:
             if not isinstance(tag, str):
                 _invalid_post(index, f"{group_name} 包含非文本标签")
             try:
-                normalized = normalize_tag_name(tag)
+                normalized = normalize_post_tag(tag)
             except TagSyntaxError as exc:
                 _invalid_post(index, f"{group_name} 包含非法标签：{exc}")
             if normalized != tag:

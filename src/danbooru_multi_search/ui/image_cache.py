@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -16,6 +17,8 @@ from PySide6.QtNetwork import (
     QNetworkRequest,
 )
 from PySide6.QtQml import QQmlNetworkAccessManagerFactory
+from danbooru_multi_search.danbooru.download import configure_media_request
+from danbooru_multi_search.danbooru.http_diagnostics import read_reply_diagnostics
 from danbooru_multi_search.ui.protected_image_cache import ProtectedImageDiskCache, ProtectionProvider
 
 
@@ -165,6 +168,7 @@ class ImageCacheController(QObject):
         self._automatic_reload_attempted: set[bytes] = set()
         self._automatic_reload_suppressed: set[bytes] = set()
         self._known_final_urls: dict[bytes, QUrl] = {}
+        self._image_failures: OrderedDict[bytes, str] = OrderedDict()
         self._usage_refresh_pending = False
         self._usage_timer = QTimer(self)
         self._usage_timer.setSingleShot(True)
@@ -266,6 +270,34 @@ class ImageCacheController(QObject):
         final = self.known_final_url(value)
         return final.toString() if final is not None else ""
 
+    @Slot(str, int, result=str)
+    def imageFailureText(self, url: str, generation: int) -> str:
+        if not self.response_generation_is_current(generation):
+            return ""
+        return self._image_failures.get(cache_key(url), "")
+
+    def remember_image_response(self, original: QUrl, reply: QNetworkReply) -> None:
+        """Keep recent transport diagnostics for QML, which exposes only Image.Error."""
+        key = cache_key(original)
+        self._image_failures.pop(key, None)
+        facts = read_reply_diagnostics(reply)
+        if facts.failure_kind == "http":
+            reason = f"图片服务器返回 HTTP {facts.http_status}"
+        elif facts.failure_kind == "timeout":
+            reason = "图片请求超时"
+        elif facts.failure_kind == "network":
+            reason = {
+                QNetworkReply.NetworkError.RemoteHostClosedError: "图片连接已关闭",
+                QNetworkReply.NetworkError.HostNotFoundError: "找不到图片服务器",
+                QNetworkReply.NetworkError.SslHandshakeFailedError: "图片服务器的 TLS 连接失败",
+                QNetworkReply.NetworkError.ConnectionRefusedError: "图片服务器拒绝连接",
+            }.get(facts.network_error, f"图片网络请求失败（{facts.network_error.name}）")
+        else:
+            return
+        self._image_failures[key] = reason
+        if len(self._image_failures) > 256:
+            self._image_failures.popitem(last=False)
+
     def remember_final_url(self, original: QUrl, final: QUrl) -> None:
         self._known_final_urls[cache_key(original)] = normalized_cache_url(final)
         if self._redirect_observer is not None:
@@ -306,6 +338,7 @@ class ImageCacheController(QObject):
 
         result = self.remove_entries(original, final)
         if not self._closed and _is_remote_cache_url(original):
+            self._image_failures.pop(cache_key(original), None)
             self._automatic_reload_suppressed.discard(cache_key(original))
             self._always_network.add(cache_key(original))
         return result
@@ -375,6 +408,7 @@ class ImageCacheController(QObject):
 
     def report_decode_success(self, original: QUrl | str) -> None:
         key = cache_key(original)
+        self._image_failures.pop(key, None)
         self._automatic_reload_attempted.discard(key)
         self._automatic_reload_suppressed.discard(key)
 
@@ -498,6 +532,7 @@ class ImageCacheController(QObject):
         self._always_network.clear()
         self._automatic_reload_attempted.clear()
         self._known_final_urls.clear()
+        self._image_failures.clear()
         self._clearing = False
         if self._closed:
             return False
@@ -521,6 +556,7 @@ class ImageCacheController(QObject):
         self._automatic_reload_attempted.clear()
         self._automatic_reload_suppressed.clear()
         self._known_final_urls.clear()
+        self._image_failures.clear()
         for manager in tuple(self._managers):
             manager.abort_active()
 
@@ -547,6 +583,8 @@ class ImageNetworkAccessManager(QNetworkAccessManager):
     ) -> QNetworkReply:
         prepared = QNetworkRequest(request)
         original_url = normalized_cache_url(prepared.url())
+        if operation == QNetworkAccessManager.Operation.GetOperation and _is_remote_cache_url(original_url):
+            configure_media_request(prepared)
         if self._controller.closed:
             prepared.setAttribute(
                 QNetworkRequest.Attribute.CacheLoadControlAttribute,
@@ -617,6 +655,8 @@ class ImageNetworkAccessManager(QNetworkAccessManager):
         if not self._controller.response_generation_is_current(state.generation):
             return
         final_url = normalized_cache_url(reply.url())
+        if state.operation == QNetworkAccessManager.Operation.GetOperation and _is_remote_cache_url(state.original_url):
+            self._controller.remember_image_response(state.original_url, reply)
         self._controller.remember_final_url(state.original_url, final_url)
         content_length = reply.header(QNetworkRequest.KnownHeaders.ContentLengthHeader)
         try:

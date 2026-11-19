@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from danbooru_multi_search.danbooru.models import DanbooruPost
-from danbooru_multi_search.danbooru.tag_syntax import normalize_tag_name
+from danbooru_multi_search.danbooru.tag_syntax import normalize_post_tag
 
 
 class DanbooruParseError(ValueError):
@@ -231,7 +231,7 @@ def _tag_groups(
         normalized_tags: list[str] = []
         for raw_tag in (part for part in value.split(" ") if part):
             try:
-                tag = normalize_tag_name(raw_tag)
+                tag = normalize_post_tag(raw_tag)
             except ValueError as exc:
                 raise DanbooruParseError(
                     f"Post at index {index} field '{field_name}' contains an "

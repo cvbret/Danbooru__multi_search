@@ -36,6 +36,7 @@ Rectangle {
     required property string mediaLabel
     property int thumbnailRebuildToken: 0
     property bool thumbnailFailed: false
+    property string thumbnailFailureReason: ""
     property bool thumbnailLoading: false
 
     width: GridView.view.cellWidth - 12
@@ -47,6 +48,7 @@ Rectangle {
     function rebuildThumbnail() {
         const token = ++thumbnailRebuildToken
         thumbnailFailed = false
+        thumbnailFailureReason = ""
         thumbnailLoading = card.previewUrl.length > 0
         thumbnailLoader.active = false
         Qt.callLater(function() {
@@ -75,8 +77,13 @@ Rectangle {
                     url, finalUrl, cacheGeneration)
             if (action === "retry")
                 rebuildThumbnail()
-            else
+            else {
+                if (action === "failed") {
+                    thumbnailFailureReason = cacheController.imageFailureText(url, cacheGeneration)
+                                          || qsTr("无法读取或解码缩略图")
+                }
                 thumbnailFailed = true
+            }
         }
     }
 
@@ -253,7 +260,8 @@ Rectangle {
             spacing: theme.smallGap
             Label {
                 width: parent.width
-                text: qsTr("此缩略图加载失败")
+                text: card.thumbnailFailureReason || qsTr("此缩略图加载失败")
+                textFormat: Text.PlainText
                 color: theme.error
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap

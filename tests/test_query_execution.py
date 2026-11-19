@@ -564,6 +564,30 @@ def test_latest_query_skips_unavailable_posts_but_keeps_next_page_and_checkpoint
         queue.shutdown()
 
 
+def test_latest_query_and_checkpoint_treat_server_parentheses_as_tag_data():
+    from danbooru_multi_search.danbooru.query_evaluator import evaluate_post_query
+    from danbooru_multi_search.storage.checkpoint_serialization import decode_checkpoint, encode_checkpoint
+
+    row = _search_row(1)
+    row["tag_string_general"] = "CaT )_( (face)_(face) series_(nested_(name))"
+    core, bridge, executor, queue, scheduler, _manager, replies = _latest_json_query([[row, _search_row(2)], []])
+    try:
+        replies[0].finished.emit()
+        scheduler.run_ready()
+        replies[1].finished.emit()
+        assert bridge.errorCode == "" and executor.snapshot.state is QueryExecutionState.COMPLETE
+        assert [post.id for post in core.posts_model.posts] == [1, 2]
+        tags = ("cat", ")_(", "(face)_(face)", "series_(nested_(name))")
+        assert core.posts_model.posts[0].general_tags == tags
+        assert evaluate_post_query(parse_query_expression("cat"), core.posts_model.posts[0])
+        restored = decode_checkpoint(encode_checkpoint(core.capture_checkpoint()))
+        assert restored.execution.candidates[0].general_tags == tags
+    finally:
+        core.shutdown()
+        bridge.detach()
+        queue.shutdown()
+
+
 @pytest.mark.parametrize("kind", ["short", "page_limit", "too_many"])
 def test_unavailable_page_uses_raw_count_for_end_limits_and_rejection(kind):
     pages = [[{"id": 9}]] if kind == "short" else [[{"id": 9}, {"id": 8}], [{"id": 7}, {"id": 6}]]

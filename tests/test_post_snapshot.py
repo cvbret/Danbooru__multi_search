@@ -56,6 +56,28 @@ def test_full_post_snapshot_round_trip_is_canonical_and_complete():
     assert post.artist_tags == ("sample_artist",)
 
 
+def test_parentheses_post_tags_round_trip_and_save_favorites_without_changing_query_rules(tmp_path):
+    from danbooru_multi_search.core.favorites import FavoriteCandidate
+    from danbooru_multi_search.danbooru.query_language import QueryParseError, parse_query_expression
+    from danbooru_multi_search.danbooru.tag_syntax import TagSyntaxError, normalize_tag_name
+    from danbooru_multi_search.storage.database import Database
+    from danbooru_multi_search.storage.favorites import FavoriteRepository
+
+    post = replace(_post(), general_tags=(")_(", "(face)_(face)", "series_(nested_(name))"))
+    assert decode_post_snapshot(encode_post_snapshot(post)) == post
+    database = Database(tmp_path / "parentheses.sqlite3")
+    database.initialize()
+    repository = FavoriteRepository(database)
+    saved = repository.add_favorite(FavoriteCandidate.for_post(post))
+    assert repository.get_favorite(saved.id).post == post
+    with pytest.raises(PostSnapshotError):
+        encode_post_snapshot(replace(post, general_tags=("bad tag",)))
+    with pytest.raises(TagSyntaxError, match="括号"):
+        normalize_tag_name(")_(")
+    with pytest.raises(QueryParseError):
+        parse_query_expression("cat AND (dog")
+
+
 def test_optional_values_and_empty_tag_groups_remain_distinct():
     post = replace(
         _post(),

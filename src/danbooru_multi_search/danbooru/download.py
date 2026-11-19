@@ -48,14 +48,17 @@ def build_media_request(
         raise ValueError("Danbooru media URL must be a valid HTTP or HTTPS URL.")
 
     request = QNetworkRequest(url)
+    configure_media_request(request, timeout_ms=timeout_ms)
+    return request
+
+
+def configure_media_request(request: QNetworkRequest, *, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> None:
+    """Apply the shared media transport settings without replacing Qt request attributes."""
     request.setRawHeader(b"User-Agent", USER_AGENT.encode("ascii"))
-    request.setRawHeader(
-        b"Accept",
-        b"image/*, video/*, application/octet-stream;q=0.8",
-    )
+    if not request.hasRawHeader("Accept"):
+        request.setRawHeader(b"Accept", b"image/*, video/*, application/octet-stream;q=0.8")
     request.setAttribute(QNetworkRequest.Attribute.Http2AllowedAttribute, False)
     request.setTransferTimeout(timeout_ms)
-    return request
 
 
 def download_destination(post: DanbooruPost, download_directory: Path) -> Path:

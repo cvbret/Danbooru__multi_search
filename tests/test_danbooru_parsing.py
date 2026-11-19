@@ -239,7 +239,7 @@ def test_parse_rejects_invalid_or_oversized_source():
         ("tag_string_artist", "cat\tdog"),
         ("tag_string_artist", "cat\ndog"),
         ("tag_string_artist", "cat\x00dog"),
-        ("tag_string_artist", "cat*"),
+        pytest.param("tag_string_artist", "cat\x7fdog", id="control-del"),
     ],
 )
 def test_parse_rejects_invalid_tag_group_fields(field_name, value):

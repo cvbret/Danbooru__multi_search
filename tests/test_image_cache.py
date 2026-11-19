@@ -32,6 +32,7 @@ from danbooru_multi_search.ui.image_cache import (
     normalized_cache_url,
 )
 from danbooru_multi_search.danbooru import DanbooruPost
+from danbooru_multi_search.danbooru.client import DEFAULT_TIMEOUT_MS, USER_AGENT
 from danbooru_multi_search.ui.launcher import create_qml_engine
 
 
@@ -643,6 +644,10 @@ def test_real_disk_cache_is_reused_by_a_new_manager(tmp_path, image_server):
 
     first_reply, first_body = _fetch(first_manager, server.url + "?size=large#one")
     assert first_reply.error() == QNetworkReply.NetworkError.NoError
+    request = first_reply.request()
+    assert bytes(request.rawHeader("User-Agent")) == USER_AGENT.encode("ascii")
+    assert request.attribute(QNetworkRequest.Attribute.Http2AllowedAttribute) is False
+    assert request.transferTimeout() == DEFAULT_TIMEOUT_MS
     assert first_body == PNG_BYTES
     assert server.paths == ["/image.png?size=large"]
     first_controller.refreshUsage()
@@ -663,6 +668,28 @@ def test_real_disk_cache_is_reused_by_a_new_manager(tmp_path, image_server):
     ) is True
     assert server.paths == ["/image.png?size=large"]
     _dispose(second_reply, second_parent, second_controller)
+
+
+def test_image_diagnostic_follows_source_generation_and_retry(tmp_path, image_server):
+    server = image_server(status=404, redirect=True)
+    controller = ImageCacheController(tmp_path / "images")
+    parent = QObject()
+    manager = controller.create_manager(parent)
+    first_reply, _ = _fetch(manager, server.url)
+    try:
+        generation = controller.cacheGeneration
+        assert controller.imageFailureText(server.url, generation) == "图片服务器返回 HTTP 404"
+        assert controller.imageFailureText("https://example.invalid/other.jpg", generation) == ""
+        assert controller.prepareManualRetry(server.url, server.final_url)
+        assert controller.imageFailureText(server.url, generation) == ""
+        second_reply, _ = _fetch(manager, server.url)
+        assert controller.imageFailureText(server.url, generation) == "图片服务器返回 HTTP 404"
+        assert controller.clearCache()
+        assert controller.imageFailureText(server.url, generation) == ""
+        assert controller.imageFailureText(server.url, controller.cacheGeneration) == ""
+        second_reply.deleteLater()
+    finally:
+        _dispose(first_reply, parent, controller)
 
 
 @pytest.mark.parametrize(
@@ -818,7 +845,7 @@ def test_qml_thumbnail_decode_failure_retries_once_and_manual_retry_is_local(
     image_server,
 ):
     first_server = image_server(body=b"broken first image")
-    second_server = image_server(body=b"broken second image")
+    second_server = image_server(status=403, body=b"Forbidden")
     engine, gallery = create_qml_engine(
         APPLICATION,
         danbooru_base_url="https://example.invalid",
@@ -875,6 +902,8 @@ def test_qml_thumbnail_decode_failure_retries_once_and_manual_retry_is_local(
             and second_error.property("visible") is True
         )
         assert first_retry is not None
+        assert first_card.property("thumbnailFailureReason") == "无法读取或解码缩略图"
+        assert second_card.property("thumbnailFailureReason") == "图片服务器返回 HTTP 403"
         assert first_image is not None and first_image.property("cache") is False
 
         first_retry.clicked.emit()
